@@ -45,6 +45,8 @@ func appChecks() {
     check("updateIsNewerOnlyWhenGreater") {
         try expect(UpdatePolicy.isNewer(AppVersion("2.2")!, than: "2.1"), "2.2 > 2.1")
         try expect(!UpdatePolicy.isNewer(AppVersion("2.1")!, than: "2.1"), "same")
+        try expect(UpdatePolicy.isNewer(AppVersion("2.2.1")!, than: "2.2"), "2.2.1 > 2.2")
+        try expect(!UpdatePolicy.isNewer(AppVersion("2.2")!, than: "2.2.1"), "2.2 < 2.2.1")
         try expect(!UpdatePolicy.isNewer(AppVersion("2.1")!, than: "dev"), "dev builds never nag")
     }
 }

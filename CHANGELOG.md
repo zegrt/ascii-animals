@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.2.1
+- **The original app icon is back.** 2.2 shipped with a re-rendered icon in which the shark came out vertical. This restores the diagonal shark.
+
 ## 2.2
 - **A proper welcome.** The first launch is a short, immersive tour you can play with: move the pointer, click for a splash, and pick a look. You can reopen it anytime from the menu.
 - **Update notices.** ASCII Sharks checks GitHub once a day for a newer version (just the version number; nothing about you is sent) and tells you in the menu and with a notification. You can turn this off in Settings.
