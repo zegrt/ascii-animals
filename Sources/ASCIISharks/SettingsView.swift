@@ -93,6 +93,7 @@ struct SettingsView: View {
                 OceanSection(model: model)
                 LookSection(model: model)
                 BehaviourSection(model: model)
+                AppSection(model: model)
             }
             .formStyle(.grouped)
         }
@@ -427,12 +428,6 @@ private struct BehaviourSection: View {
                 Text("Match the lock screen")
                 Text("Sets a matching still as the system wallpaper. Yours comes back when you quit.")
             }
-            Toggle("Open at login", isOn: Binding(get: { model.loginEnabled }, set: { model.setLogin($0) }))
-            if let e = model.loginError {
-                Label(e, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
-                    .font(.caption)
-            }
         } header: {
             Text("Behaviour")
         } footer: {
@@ -441,6 +436,49 @@ private struct BehaviourSection: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+// MARK: - App
+
+private struct AppSection: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        Section {
+            Toggle("Open at login", isOn: Binding(get: { model.loginEnabled }, set: { model.setLogin($0) }))
+            if let e = model.loginError {
+                Label(e, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            }
+            Toggle(isOn: model.binding(\.pauseShortcut)) {
+                Text("Pause with \u{2303}\u{2325}\u{2318}P from anywhere")
+                Text("Works in any app, without extra permissions.")
+            }
+            Toggle(isOn: model.binding(\.showMenuBarIcon)) {
+                Text("Show in the menu bar")
+                Text("When it's hidden, open ASCII Sharks again to get back to Settings.")
+            }
+            Toggle(isOn: model.binding(\.checkForUpdates)) {
+                Text("Check for updates daily")
+                Text("Only asks GitHub for the latest version number. Nothing about you is sent.")
+            }
+        } header: {
+            Text("App")
+        } footer: {
+            HStack(spacing: 6) {
+                Text("ASCII Sharks \(AppInfo.version)").foregroundStyle(.secondary)
+                Text("·").foregroundStyle(.tertiary)
+                Button("About") { (NSApp.delegate as? AppDelegate)?.showAbout() }
+                Text("·").foregroundStyle(.tertiary)
+                Button("Welcome Tour") { (NSApp.delegate as? AppDelegate)?.showWelcome() }
+            }
+            .buttonStyle(.link)
+            .font(.footnote)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.top, 4)
         }
     }
 }
