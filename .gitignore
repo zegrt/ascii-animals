@@ -1,6 +1,5 @@
 .build/
-.build-arm64/
-.build-x86_64/
+.build-*/
 build/
 .DS_Store
 .superpowers/

@@ -24,10 +24,10 @@ func worldChecks() {
     check("seedDensityHalf") {
         try expect(makeWorld(density: 0.5).fish.count == 46, "fish \(makeWorld(density: 0.5).fish.count)")
     }
-    check("seedDensityCapsAtMax") {
+    check("seedDensityDoublesClampedBase") {
         let w = World(sharks: [], rng: Rng(seed: 1))
         w.resize(width: 4000, height: 3000, cell: CGSize(width: 13, height: 19), density: 2)
-        try expect(w.fish.count == World.maxFish, "fish \(w.fish.count)")
+        try expect(w.fish.count == 680, "fish \(w.fish.count)")
     }
     check("sharkOrderSmallFirst") {
         let w = makeWorld([.greathammer, .classic, .mako, .tiger])
