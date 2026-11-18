@@ -120,3 +120,38 @@ public final class FrameRecorder {
         return image
     }
 }
+
+/// Several viewports of one world, captured together (shared-ocean previews).
+/// The caller steps the world; each capture runs the wake for the steps since
+/// the last one.
+public final class SceneRecorder {
+    private let renderer: OceanRenderer
+    private let world: World
+    private let views: [(rect: CGRect, vp: ViewportRenderer)]
+    private let theme: ThemeParams
+    private let scale: CGFloat
+
+    public init(world: World, viewports: [CGRect], cell: CGSize, scale: CGFloat, theme: ThemeParams) throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { throw RenderError(description: "no Metal device") }
+        let r = try OceanRenderer(device: device)
+        renderer = r
+        self.world = world
+        self.theme = theme
+        self.scale = scale
+        views = try viewports.map { ($0, try r.makeViewport(pointSize: $0.size, scale: scale, cell: cell)) }
+    }
+
+    /// Advance the wake only (cheap; for warm-up).
+    public func advanceWake() {
+        for v in views {
+            guard let cb = renderer.queue.makeCommandBuffer() else { continue }
+            v.vp.encode(world: world, viewport: v.rect, theme: theme, target: nil, commandBuffer: cb)
+            cb.commit()
+        }
+    }
+
+    /// One image per viewport, in the order given.
+    public func capture() throws -> [CGImage] {
+        try views.map { try FrameRecorder.compose($0.vp, world: world, viewport: $0.rect, theme: theme, size: $0.rect.size, scale: scale, renderer: renderer) }
+    }
+}

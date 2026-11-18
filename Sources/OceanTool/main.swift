@@ -66,6 +66,14 @@ case "frames":
     }
     print("wrote \(count) frames to \(dir.path)")
 
+case "crossing":
+    // The user's desk: 2560x1440 monitor above an 1800x1169 laptop, offset 375 pt.
+    guard args.count == 1 else { fail("usage: OceanTool crossing <dir> [--seed N]") }
+    let seed = UInt64(option("--seed") ?? "5") ?? 5
+    try Crossing.run(out: URL(fileURLWithPath: args[0], isDirectory: true),
+                     screens: [CGRect(x: 0, y: 0, width: 2560, height: 1440), CGRect(x: 375, y: 1440, width: 1800, height: 1169)],
+                     seed: seed, seconds: 9, fps: 15)
+
 case "iconset":
     guard args.count == 1 else { fail("usage: OceanTool iconset <dir.iconset>") }
     try IconMaker.write(to: URL(fileURLWithPath: args[0]))

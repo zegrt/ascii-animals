@@ -38,6 +38,33 @@
   </tr>
 </table>
 
+## One ocean across your displays
+
+<p align="center">
+  <img src="docs/media/crossing.gif" width="600" alt="A shark swims from the monitor down into the laptop screen, through the bezel">
+</p>
+<p align="center"><sub>A monitor above a laptop, as one ocean. Sharks patrol a screen each and now and then cross over.<br>
+Where no screen is (grey), nothing swims. Turn it off in Settings for a separate ocean per display.</sub></p>
+
+## Settings
+
+<table>
+  <tr>
+    <td width="46%" valign="top"><img src="docs/media/settings.png" alt="The Settings window: a live preview, the shark line-up, ocean, look and behaviour"></td>
+    <td valign="top">
+
+- **Live preview.** It redraws as you change things.
+- **Shark line-up.** Choose 1–8 sharks from eight species, biggest first, or pick a preset.
+- **Ocean.** Set the number of fish and the speed, and choose one ocean across all displays or one per display.
+- **Look.** Dark, Light or Match System. You can also change the wake colour, and turn on calm mode or the grid.
+- **Behaviour.** Pointer play, frame rate (15, 30 or 60 fps), Low Power Mode, matching the lock screen, and Open at Login.
+
+The fish in the menu bar shows what it's doing, for example *Swimming · 30 fps* or *Paused, Low Power Mode*. It also gives quick access to presets, appearance and pause.
+
+</td>
+  </tr>
+</table>
+
 ## Why it's nice to live with
 
 <table>
