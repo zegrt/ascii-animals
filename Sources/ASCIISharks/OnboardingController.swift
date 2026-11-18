@@ -13,4 +13,7 @@ enum OnboardingController {
     static func show(app: AppDelegate) {
         UserDefaults.standard.set(true, forKey: seenKey)
     }
+
+    /// Debug: render to a PNG (no Screen Recording needed). `--snapshot-onboarding <png>`
+    static func snapshot(to url: URL) {}
 }

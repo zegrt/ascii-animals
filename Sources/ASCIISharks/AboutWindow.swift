@@ -6,4 +6,7 @@ enum AboutWindow {
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(nil)
     }
+
+    /// Debug: render to a PNG (no Screen Recording needed). `--snapshot-about <png>`
+    static func snapshot(to url: URL) {}
 }

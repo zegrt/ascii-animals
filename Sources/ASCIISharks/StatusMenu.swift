@@ -175,4 +175,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             NSAlert(error: error).runModal()
         }
     }
+
+    /// Settings changed (and once at launch): e.g. show or hide the menu-bar icon.
+    func apply(_ s: OceanKit.Settings) {}
 }

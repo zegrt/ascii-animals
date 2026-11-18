@@ -53,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("ASCII Sharks could not start: %@", "\(error)")
         }
         menu = StatusMenu(app: self)
+        menu?.apply(store.settings)
         updates.start { [weak self] in self?.store.settings.checkForUpdates ?? false }
         OnboardingController.showIfNeeded(app: self)
     }
@@ -76,6 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func settingsChanged(_ old: OceanKit.Settings, _ new: OceanKit.Settings) {
         director?.settingsChanged(old: old, new: new)
         settingsModel.refresh()
+        menu?.apply(new)
         if !new.matchSystemWallpaper {
             if old.matchSystemWallpaper { wallpaper?.restoreAll() }
             return
@@ -130,6 +132,15 @@ if let i = CommandLine.arguments.firstIndex(of: "--snapshot-settings"), i + 1 < 
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: CommandLine.arguments[i + 1]))
     }
     exit(0)
+}
+
+// Debug: render the welcome or About screen to a PNG and exit.
+for (flag, render) in [("--snapshot-onboarding", OnboardingController.snapshot(to:)), ("--snapshot-about", AboutWindow.snapshot(to:))] {
+    if let i = CommandLine.arguments.firstIndex(of: flag), i + 1 < CommandLine.arguments.count {
+        app.setActivationPolicy(.prohibited)
+        render(URL(fileURLWithPath: CommandLine.arguments[i + 1]))
+        exit(0)
+    }
 }
 
 let delegate = AppDelegate()
