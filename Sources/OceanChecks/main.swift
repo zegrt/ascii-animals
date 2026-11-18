@@ -9,6 +9,7 @@ settingsChecks()
 worldChecks()
 policyChecks()
 packerChecks()
+wallpaperChecks()
 renderChecks()
 
 print("\(Runner.passed) passed, \(Runner.failed) failed")
