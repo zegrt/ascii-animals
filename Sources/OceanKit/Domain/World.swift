@@ -1,5 +1,5 @@
-// The ocean simulation. Port of ascii-sharks world.ts + math.ts (MIT, drewdi
-// and Stephen Zhang), following the verified Luau port in ascii-sharks-rive.
+// The ocean simulation. Port of ascii-sharks world.ts + math.ts (MIT, drewdi / @stackedlol),
+// following the verified Luau port in ascii-sharks-rive.
 //
 // Fish: Reynolds boids (separation / alignment / cohesion) in Couzin-style
 // zones, with a blind spot behind each fish. Alarm spreads through a school,

@@ -1,6 +1,7 @@
 // OceanTool: offline renders.
 //   OceanTool still <out.png> <W>x<H> [--scale N] [--light] [--calm] [--seed N] [--warmup S] [--sharks a,b,c]
 //   OceanTool iconset <dir.iconset>
+//   OceanTool frames <dir> <W>x<H> [--seconds S] [--fps F] [--scale N] [--light] [--calm] [--seed N] [--sharks a,b]
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -42,6 +43,28 @@ case "still":
                                        warmup: warmup, systemIsDark: true, accent: SIMD3(0.2, 0.5, 1), seed: seed)
     try StillRenderer.writePNG(img, to: URL(fileURLWithPath: args[0]))
     print("wrote \(args[0]) \(img.width)x\(img.height)")
+
+case "frames":
+    var s = Settings.defaults
+    if flag("--light") { s.appearance = .light }
+    if flag("--calm") { s.calm = true }
+    let seed = UInt64(option("--seed") ?? "1") ?? 1
+    let seconds = Double(option("--seconds") ?? "6") ?? 6
+    let fps = Int(option("--fps") ?? "20") ?? 20
+    let scale = CGFloat(Double(option("--scale") ?? "1") ?? 1)
+    if let list = option("--sharks") { s.sharks = list.split(separator: ",").compactMap { SharkKind(rawValue: String($0)) } }
+    guard args.count == 2, 60 % fps == 0 else { fail("usage: OceanTool frames <dir> <W>x<H> [--fps 10|12|15|20|30|60]") }
+    let dims = args[1].split(separator: "x").compactMap { Double($0) }
+    guard dims.count == 2 else { fail("bad size \(args[1])") }
+    let dir = URL(fileURLWithPath: args[0], isDirectory: true)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let rec = try FrameRecorder(settings: s.sanitized(), size: CGSize(width: dims[0], height: dims[1]), scale: scale, seed: seed, warmup: 8)
+    let count = Int(seconds * Double(fps))
+    for i in 0..<count {
+        let img = try rec.next(steps: 60 / fps)
+        try StillRenderer.writePNG(img, to: dir.appendingPathComponent(String(format: "f%04d.png", i)))
+    }
+    print("wrote \(count) frames to \(dir.path)")
 
 case "iconset":
     guard args.count == 1 else { fail("usage: OceanTool iconset <dir.iconset>") }
