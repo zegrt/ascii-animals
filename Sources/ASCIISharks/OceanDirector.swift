@@ -8,6 +8,7 @@ final class OceanDirector {
     private let store: SettingsStore
     private let signals: SystemSignals
     private(set) var screens: [OceanScreen] = []
+    private(set) var scenes: [OceanScene] = []
     private(set) var mode: RunMode = .paused
     private var theme: ThemeParams
     private lazy var pointer = PointerMonitor(
@@ -73,18 +74,15 @@ final class OceanDirector {
     // MARK: Frames
 
     private func tick(_ s: OceanScreen, _ link: CADisplayLink) {
-        var steps = 0
+        let world = s.scene.world
         if s.stillPending {
             // Reduce Motion / Low Power: let the ecosystem settle, then hold one frame.
-            if s.world.time < 4 { for _ in 0..<240 { s.world.step(OceanClock.step) } }
-            s.world.events.removeAll()
+            if world.time < 4 { for _ in 0..<240 { world.step(OceanClock.step) } }
         } else {
-            steps = s.clock.advance(to: link.targetTimestamp, speed: store.settings.speed)
-            for _ in 0..<steps { s.world.step(OceanClock.step) }
+            s.scene.advance(to: link.targetTimestamp, speed: store.settings.speed)
         }
         guard let drawable = s.view.metalLayer.nextDrawable(), let cb = renderer.queue.makeCommandBuffer() else { return }
-        s.viewport.encode(world: s.world, theme: theme, steps: steps, target: drawable.texture, commandBuffer: cb)
-        s.world.events.removeAll()
+        s.viewport.encode(world: world, viewport: s.oceanRect, theme: theme, target: drawable.texture, commandBuffer: cb)
         cb.present(drawable)
         let first = !s.presented
         cb.addScheduledHandler { _ in
@@ -105,22 +103,49 @@ final class OceanDirector {
 
     // MARK: Screens
 
-    func screensChanged() {
+    /// Lay the scenes out for the current screens. A scene whose screens are
+    /// unchanged keeps its world (resized to any new geometry); `fresh` forces
+    /// new worlds, e.g. when switching between shared and separate oceans.
+    func screensChanged(fresh: Bool = false) {
         let current = NSScreen.screens
+        guard let primary = current.first else { return }
+        let infos = current.map {
+            ScreenInfo(id: Int($0.displayID), frame: ScreenGeometry.flip($0.frame, primaryHeight: primary.frame.height),
+                       scale: $0.backingScaleFactor)
+        }
+        let plans = SceneLayout.plan(infos, shared: store.settings.sharedOcean)
+
+        var next: [OceanScene] = []
+        for plan in plans {
+            let ids = Set(plan.views.map(\.screenID))
+            if !fresh, let keep = scenes.first(where: { $0.screenIDs == ids }) {
+                keep.update(plan, settings: store.settings)
+                next.append(keep)
+            } else {
+                next.append(OceanScene(plan: plan, settings: store.settings))
+            }
+        }
+        scenes = next
+
         let ids = Set(current.map(\.displayID))
         for s in screens where !ids.contains(s.displayID) { s.close() }
         screens.removeAll { !ids.contains($0.displayID) }
         for screen in current {
-            if let existing = screens.first(where: { $0.displayID == screen.displayID }) {
-                do { try existing.fit(to: screen, settings: store.settings) } catch { report(error) }
-            } else {
-                do {
-                    let s = try OceanScreen(screen: screen, renderer: renderer, settings: store.settings,
+            let id = Int(screen.displayID)
+            guard let scene = scenes.first(where: { $0.screenIDs.contains(id) }), let rect = scene.rect(for: id) else { continue }
+            do {
+                if let existing = screens.first(where: { $0.displayID == screen.displayID }) {
+                    try existing.fit(to: screen, scene: scene, rect: rect)
+                } else {
+                    let s = try OceanScreen(screen: screen, renderer: renderer, scene: scene, rect: rect,
                                             onTick: { [weak self] s, l in self?.tick(s, l) },
                                             onVisibility: { [weak self] in self?.visibilityChanged() })
                     screens.append(s)
-                } catch { report(error) }
-            }
+                }
+            } catch { report(error) }
+        }
+        if OceanDirector.debug {
+            NSLog("scenes: %@", scenes.map { "\($0.screenIDs.sorted()) rects=\($0.plan.habitat.rects.count) sharks=\($0.world.sharks.count) fish=\($0.world.fish.count)" }.joined(separator: " | "))
         }
         apply(mode == .paused ? PowerPolicy.mode(signals.inputs) : mode)
     }
@@ -133,10 +158,12 @@ final class OceanDirector {
     // MARK: Settings and theme
 
     func settingsChanged(old: Settings, new: Settings) {
-        if old.sharks != new.sharks {
-            for s in screens { s.rebuildWorld(new) }
+        if old.sharedOcean != new.sharedOcean {
+            screensChanged(fresh: true)
+        } else if old.sharks != new.sharks {
+            for s in scenes { s.rebuildWorld(new) }
         } else if old.fishDensity != new.fishDensity {
-            for s in screens { s.setDensity(new) }
+            for s in scenes { s.setDensity(new) }
         }
         if old.paused != new.paused { signals.setUserPaused(new.paused) }
         if old.fps != new.fps { signals.setFPS(new.fps) }
@@ -166,18 +193,25 @@ final class OceanDirector {
 
     // MARK: Pointer
 
+    /// The pointer in its scene's ocean space.
+    private func locate(_ t: PointerTarget) -> (OceanScene, Double, Double)? {
+        guard let s = screens.first(where: { Int($0.displayID) == t.viewportID }) else { return nil }
+        return (s.scene, Double(s.oceanRect.minX + t.local.x), Double(s.oceanRect.minY + t.local.y))
+    }
+
     private func pointerMoved(_ t: PointerTarget?) {
-        for s in screens {
-            if let t, t.viewportID == Int(s.displayID) {
-                s.world.pointer = (Double(t.local.x), Double(t.local.y), true)
+        let hit = t.flatMap(locate)
+        for scene in scenes {
+            if let hit, hit.0 === scene {
+                scene.world.pointer = (hit.1, hit.2, true)
             } else {
-                s.world.pointer.active = false
+                scene.world.pointer.active = false
             }
         }
     }
 
     private func pointerDown(_ t: PointerTarget) {
-        guard let s = screens.first(where: { Int($0.displayID) == t.viewportID }) else { return }
-        s.world.splash(Double(t.local.x), Double(t.local.y))
+        guard let (scene, x, y) = locate(t) else { return }
+        scene.world.splash(x, y)
     }
 }

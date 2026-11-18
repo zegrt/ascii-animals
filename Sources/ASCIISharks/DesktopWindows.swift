@@ -23,14 +23,16 @@ final class OceanView: NSView {
     override func makeBackingLayer() -> CALayer { metalLayer }
 }
 
-/// One display's ocean: its window, Metal layer, display link, world and GPU state.
+/// One display: its window, Metal layer, display link and GPU state, looking
+/// into a scene's world through `oceanRect`.
 final class OceanScreen: NSObject {
     let displayID: CGDirectDisplayID
     let window: OceanWindow
     let view: OceanView
     private(set) var viewport: ViewportRenderer
-    private(set) var world: World
-    var clock = OceanClock()
+    private(set) var scene: OceanScene
+    /// This screen's area in the scene's ocean space.
+    private(set) var oceanRect: CGRect
     private(set) var link: CADisplayLink?
     /// From the window's occlusion state; ignored until the first frame shows.
     private(set) var visible = true
@@ -40,9 +42,11 @@ final class OceanScreen: NSObject {
     let onTick: (OceanScreen, CADisplayLink) -> Void
     let onVisibility: () -> Void
 
-    init(screen: NSScreen, renderer: OceanRenderer, settings: Settings,
+    init(screen: NSScreen, renderer: OceanRenderer, scene: OceanScene, rect: CGRect,
          onTick: @escaping (OceanScreen, CADisplayLink) -> Void, onVisibility: @escaping () -> Void) throws {
         displayID = screen.displayID
+        self.scene = scene
+        oceanRect = rect
         self.onTick = onTick
         self.onVisibility = onVisibility
         let frame = screen.frame
@@ -72,8 +76,7 @@ final class OceanScreen: NSObject {
         layer.opacity = 0 // fades in after the first frame
         window.contentView = view
 
-        viewport = try renderer.makeViewport(pointSize: frame.size, scale: screen.backingScaleFactor)
-        world = OceanScreen.makeWorld(settings, size: frame.size, cell: viewport.grid.cell)
+        viewport = try renderer.makeViewport(pointSize: frame.size, scale: screen.backingScaleFactor, cell: scene.plan.cell)
         super.init()
 
         NotificationCenter.default.addObserver(self, selector: #selector(occlusionChanged),
@@ -85,29 +88,15 @@ final class OceanScreen: NSObject {
         link = l
     }
 
-    static func makeWorld(_ s: Settings, size: CGSize, cell: CGSize) -> World {
-        let w = World(sharks: s.sharks, rng: Rng(seed: UInt64.random(in: 1...UInt64.max)))
-        w.resize(width: size.width, height: size.height, cell: cell, density: s.fishDensity)
-        return w
-    }
-
-    func rebuildWorld(_ s: Settings) {
-        world = OceanScreen.makeWorld(s, size: viewport.pointSize, cell: viewport.grid.cell)
-        clock.reset()
-    }
-
-    func setDensity(_ s: Settings) {
-        world.resize(width: viewport.pointSize.width, height: viewport.pointSize.height, cell: viewport.grid.cell, density: s.fishDensity)
-    }
-
-    /// Same display, new frame or scale: resize in place so the ocean keeps swimming.
-    func fit(to screen: NSScreen, settings: Settings) throws {
+    /// Same display, maybe a new frame, scale or scene.
+    func fit(to screen: NSScreen, scene: OceanScene, rect: CGRect) throws {
+        self.scene = scene
+        oceanRect = rect
         let frame = screen.frame
         window.setFrame(frame, display: true)
         view.metalLayer.contentsScale = screen.backingScaleFactor
         view.metalLayer.drawableSize = CGSize(width: frame.width * screen.backingScaleFactor, height: frame.height * screen.backingScaleFactor)
-        try viewport.resize(pointSize: frame.size, scale: screen.backingScaleFactor)
-        world.resize(width: frame.width, height: frame.height, cell: viewport.grid.cell, density: settings.fishDensity)
+        try viewport.resize(pointSize: frame.size, scale: screen.backingScaleFactor, cell: scene.plan.cell)
     }
 
     func setFrameRate(_ fps: Int) {
@@ -118,10 +107,7 @@ final class OceanScreen: NSObject {
     /// Runs the link only when there is something to draw.
     func setRunning(_ running: Bool) {
         let run = running && (visible || !presented)
-        if link?.isPaused == run {
-            if run { clock.reset() }
-            link?.isPaused = !run
-        }
+        if link?.isPaused == run { link?.isPaused = !run }
     }
 
     func markPresented() {
