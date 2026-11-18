@@ -80,6 +80,36 @@ func renderChecks() {
         let d = mean(pixels(try still())), c = mean(pixels(try still(s)))
         try expect(c < d * 0.75, "calm \(c) vs default \(d)")
     }
+    check("glyphsCentredAtFractionalScale") {
+        // 13 pt cells at scale 1.25 are 16.25 px: the atlas slots are 16 px.
+        let img = try StillRenderer.render(settings: .defaults, size: CGSize(width: 1800, height: 900), scale: 1.25, warmup: 6,
+                                           systemIsDark: true, accent: SIMD3(0.2, 0.5, 1), seed: 5)
+        let p = pixels(img), w = img.width, h = img.height
+        let slotW = 13 * 1.25, slotH = 19 * 1.25
+        let cols = Int(Double(w) / slotW), rows = Int(Double(h) / slotH)
+        var lit = [Int](repeating: 0, count: cols * rows)
+        var sumX = [Double](repeating: 0, count: cols * rows)
+        for y in 0..<h {
+            let r = Int(Double(y) / slotH); if r >= rows { continue }
+            for x in 0..<w {
+                let c = Int(Double(x) / slotW); if c >= cols { continue }
+                let off = Double(x) - Double(c) * slotW
+                if off < 1.5 { continue } // skip the grid line
+                if luma(p, (y * w + x) * 4) > 0.2 {
+                    lit[r * cols + c] += 1
+                    sumX[r * cols + c] += off
+                }
+            }
+        }
+        // Sparse cells hold single glyphs (fish, edges); blocks fill their cells.
+        var total = 0.0, n = 0.0
+        for i in lit.indices where lit[i] > 2 && Double(lit[i]) < slotW * slotH * 0.15 {
+            total += sumX[i]; n += Double(lit[i])
+        }
+        try expect(n > 200, "too few sparse-cell pixels: \(n)")
+        let mean = total / n
+        try expect(abs(mean - slotW / 2) < 1.5, "glyph ink centred at \(mean) px, cell centre \(slotW / 2)")
+    }
     check("stillPNGSize") {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("ocean-check-\(getpid()).png")
         try StillRenderer.writePNG(try still(warmup: 1), to: url)

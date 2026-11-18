@@ -475,9 +475,13 @@ static float3 tint(int kind) {
     }
 }
 
-// Glyph coverage at a device-pixel offset inside the cell.
+// Glyph coverage at a device-pixel offset inside the cell. The atlas was
+// built with whole-pixel slots (GlyphAtlas rounds cell * scale), so index it
+// by the rounded slot: at fractional scales the cell is a fraction wider.
 static float glyph(texture2d<float, access::read> atlas, int g, float2 lp, float2 slot) {
-    uint2 p = uint2(uint(float(g) * slot.x + floor(lp.x)), uint(floor(lp.y)));
+    float2 a = round(slot);
+    float2 q = min(floor(lp), a - 1.0);
+    uint2 p = uint2(uint(float(g) * a.x + q.x), uint(q.y));
     return atlas.read(p).r;
 }
 

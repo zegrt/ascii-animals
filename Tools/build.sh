@@ -34,6 +34,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 lipo -create "${bins[@]}" -output "$APP/Contents/MacOS/ASCIISharks"
 cp Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp Resources/GeistMono.ttf "$APP/Contents/Resources/GeistMono.ttf"   # UI text (welcome, About)
 cp Resources/OFL.txt "$APP/Contents/Resources/GeistMono-OFL.txt"
 cp LICENSE "$APP/Contents/Resources/LICENSE.txt"
 
