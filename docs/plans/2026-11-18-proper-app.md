@@ -20,7 +20,7 @@
 
 The AppKit host wires them to the OS. The UI surfaces are owned by a design agent that works against stub interfaces committed first (Task 0). Two owners in one checkout commit by explicit path only.
 
-**Company:** Xero Works Pvt Ltd.
+**Company:** brand name XERO WORKS (two words, capitals, always); legal name XERO WORKS PRIVATE LIMITED (copyright lines only); https://xeroworks.org.
 - Used in: the copyright line, the About window and the LICENSE.
 - Bundle id unchanged (`local.ascii-sharks.wallpaper`): changing it would orphan existing users' settings and wallpaper memory. It changes when a Developer ID exists.
 

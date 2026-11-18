@@ -21,7 +21,7 @@
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>NSHumanReadableCopyright</key>
-    <string>Ocean simulation from ascii-sharks (MIT). Geist Mono (SIL OFL 1.1).</string>
+    <string>© 2026 XERO WORKS PRIVATE LIMITED. Ocean from ascii-sharks by @stackedlol (MIT). Geist Mono (SIL OFL 1.1).</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSHighResolutionCapable</key>
