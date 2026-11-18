@@ -152,7 +152,7 @@ final class OceanDirector {
 
     private func report(_ error: Error) {
         lastError = "\(error)"
-        NSLog("ASCII Sharks: %@", "\(error)")
+        Log.write("error: \(error)")
     }
 
     // MARK: Settings and theme

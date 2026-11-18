@@ -55,7 +55,7 @@ final class SystemWallpaper {
                     try StillRenderer.writePNG(img, to: url)
                     DispatchQueue.main.async { self?.set(url, on: screen, key: key, generation: gen) }
                 } catch {
-                    NSLog("ASCII Sharks: still failed: %@", "\(error)")
+                    Log.write("still failed: \(error)")
                 }
             }
         }
@@ -75,7 +75,7 @@ final class SystemWallpaper {
                 .fillColor: NSColor.black,
             ])
         } catch {
-            NSLog("ASCII Sharks: could not set wallpaper: %@", "\(error)")
+            Log.write("could not set wallpaper: \(error)")
         }
         prune(key: key, keep: url)
     }
@@ -109,7 +109,7 @@ final class SystemWallpaper {
                 try NSWorkspace.shared.setDesktopImageURL(target.url, for: screen, options: options)
                 memory.forget(screen: key)
             } catch {
-                NSLog("ASCII Sharks: could not restore wallpaper: %@", "\(error)")
+                Log.write("could not restore wallpaper: \(error)")
             }
         }
         save()

@@ -14,8 +14,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     lazy var settingsWindow = SettingsWindowController(model: settingsModel)
     var startupError: String?
     let updates = UpdateService()
-    /// The last session ended without a clean quit (Task 2 sets it).
+    /// The last session ended without a clean quit.
     var crashedLastTime = false
+    /// Set while uninstalling, so quitting writes nothing back.
+    var isUninstalling = false
+    private lazy var hotKey = HotKey { [weak self] in self?.store.update { $0.paused.toggle() } }
     private var observers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -24,6 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
+        crashedLastTime = CrashMarker.launch()
+        Log.write("launch \(AppInfo.version) (\(AppInfo.build))\(crashedLastTime ? " after an unclean exit" : "")")
         do {
             guard let device = MTLCreateSystemDefaultDevice() else { throw RenderError(description: "This Mac has no Metal device.") }
             let renderer = try OceanRenderer(device: device)
@@ -50,10 +55,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             d.start()
         } catch {
             startupError = "\(error)"
-            NSLog("ASCII Sharks could not start: %@", "\(error)")
+            Log.write("could not start: \(error)")
         }
         menu = StatusMenu(app: self)
         menu?.apply(store.settings)
+        hotKey.setEnabled(store.settings.pauseShortcut)
         updates.start { [weak self] in self?.store.settings.checkForUpdates ?? false }
         OnboardingController.showIfNeeded(app: self)
     }
@@ -67,17 +73,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func showAbout() { AboutWindow.show(app: self) }
     func showWelcome() { OnboardingController.show(app: self) }
-    /// Opens a prefilled GitHub issue in the browser. (Task 2)
-    func reportProblem() { NSWorkspace.shared.open(AppInfo.issuesURL) }
-    /// Copies a diagnostics summary to the clipboard. (Task 2)
-    func copyDiagnostics() {}
-    /// Confirms, restores the wallpaper, removes everything, trashes the app and quits. (Task 3)
-    func uninstall() {}
+    /// Opens a prefilled GitHub issue in the browser (nothing is sent until the user submits it).
+    func reportProblem() {
+        NSWorkspace.shared.open(IssueReport.url(base: AppInfo.issuesURL, title: "Problem: ", body: Diagnostics.body(app: self)))
+    }
+
+    /// Copies the diagnostics summary to the clipboard.
+    func copyDiagnostics() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(Diagnostics.body(app: self), forType: .string)
+    }
+
+    /// Confirms, restores the wallpaper, removes everything, trashes the app and quits.
+    func uninstall() {
+        guard Uninstaller.confirm() else { return }
+        Uninstaller.run(app: self)
+        exit(0)
+    }
 
     func settingsChanged(_ old: OceanKit.Settings, _ new: OceanKit.Settings) {
         director?.settingsChanged(old: old, new: new)
         settingsModel.refresh()
         menu?.apply(new)
+        if old.pauseShortcut != new.pauseShortcut { hotKey.setEnabled(new.pauseShortcut) }
         if !new.matchSystemWallpaper {
             if old.matchSystemWallpaper { wallpaper?.restoreAll() }
             return
@@ -103,7 +121,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func showSettings() { settingsWindow.show() }
 
     func applicationWillTerminate(_ notification: Notification) {
+        guard !isUninstalling else { return }
         if store.settings.matchSystemWallpaper { wallpaper?.restoreAll() }
+        Log.write("quit")
+        CrashMarker.cleanQuit()
     }
 }
 
@@ -130,6 +151,26 @@ if let i = CommandLine.arguments.firstIndex(of: "--snapshot-settings"), i + 1 < 
     if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
         view.cacheDisplay(in: view.bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: CommandLine.arguments[i + 1]))
+    }
+    exit(0)
+}
+
+// `ASCIISharks --uninstall [--yes]`: scripted removal (Tools/uninstall.sh).
+// A running copy is asked to quit first so it puts the wallpaper back.
+if CommandLine.arguments.contains("--uninstall") {
+    app.setActivationPolicy(.accessory)
+    if let id = Bundle.main.bundleIdentifier {
+        for other in NSRunningApplication.runningApplications(withBundleIdentifier: id) where other != .current {
+            other.terminate()
+            for _ in 0..<50 where !other.isTerminated { Thread.sleep(forTimeInterval: 0.1) }
+        }
+    }
+    if CommandLine.arguments.contains("--yes") || Uninstaller.confirm() {
+        let renderer = MTLCreateSystemDefaultDevice().flatMap { try? OceanRenderer(device: $0) }
+        let wp = renderer.map { SystemWallpaper(renderer: $0) }
+        wp?.restoreAll()
+        let problems = Uninstaller.run(app: nil)
+        print(problems.isEmpty ? "ASCII Sharks uninstalled." : "Uninstalled, except: \(problems.joined(separator: "; "))")
     }
     exit(0)
 }
