@@ -6,6 +6,7 @@ if let i = args.firstIndex(of: "--only"), args.index(after: i) < args.endIndex {
 }
 
 settingsChecks()
+habitatChecks()
 worldChecks()
 policyChecks()
 packerChecks()
