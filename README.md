@@ -115,6 +115,25 @@ Tools/install.sh    # copies it to ~/Applications and launches it
 
 Then find the 🐟 in the menu bar for **Pause**, **Sharks**, **Appearance**, **Settings…** (`⌘,`), **Restore Original Wallpaper** and **Open at Login**.
 
+- **⌃⌥⌘P** pauses and resumes from anywhere.
+- **Opening the app again shows Settings.** That's how you get back to it if you've hidden the menu-bar icon, or if the icon is behind the notch.
+- **Updates.** ASCII Sharks checks once a day for a newer version and tells you when one is ready. To update, quit the old version and drag in the new one.
+
+## Uninstall
+
+Choose **🐟 menu → Uninstall ASCII Sharks…** (or run `Tools/uninstall.sh`). It removes everything, in this order:
+1. Puts your own wallpaper back.
+2. Removes the login item.
+3. Deletes its settings, saved stills and logs.
+4. Moves itself to the Trash.
+
+## Privacy
+
+- **No accounts and no analytics.** No tracking of any kind.
+- **The only network request:** about once a day, ASCII Sharks asks GitHub for the latest version number of this repo (`api.github.com/repos/zegrt/ascii-sharks-wallpaper/releases/latest`). That request carries the app version and nothing else. You can turn it off in Settings.
+- **Watching the pointer and windows.** ASCII Sharks watches the mouse pointer and reads where windows are on screen. It does this only to know when bare desktop is under the pointer, for the wakes and splashes, and when the desktop is covered, so it can pause. It can't see your keystrokes or what's inside your windows, and it needs no special permission for any of it.
+- **Logs stay on your Mac.** Logs are at `~/Library/Logs/ASCII Sharks`. **Report a Problem** and **Copy Diagnostics** only run when you choose them. They share your app and macOS versions, displays, power state and settings, with your name and home-folder paths removed. Report a Problem opens a draft issue in your browser, and nothing is sent until you submit it.
+
 ## How it works
 
 ```mermaid
@@ -171,10 +190,12 @@ The design and its review are in [`docs/plans/`](docs/plans).
 - **Spaces:** macOS changes wallpapers one Space at a time and gives apps no way to identify Spaces. So the matching still goes on the Space where the app starts. Wallpapers it doesn't recognise are never touched, and only what it set is restored.
 - **Aerial and dynamic wallpapers:** these come back as whatever image macOS reports for them.
 - **Signing:** the app is signed ad hoc, not by a registered Apple developer. That's why macOS asks you to click Open Anyway the first time you open it.
+- **Updates aren't automatic.** The app tells you when a new version is out, but you install it yourself. Installing updates automatically needs a Developer ID.
 - **On the list:** a screensaver edition.
 
 ## Credits
 
+- **Made by** [XERO WORKS](https://xeroworks.org).
 - **The ocean:** [ascii-sharks](https://github.com/stackedlol/ascii-sharks) by [@stackedlol](https://github.com/stackedlol) (drewdi), MIT. The simulation, species, shark shapes and rendering style are ported from it.
 - **Font:** [Geist Mono](https://github.com/vercel/geist-font), SIL Open Font License 1.1 ([`Resources/OFL.txt`](Resources/OFL.txt)).
 - **License:** MIT ([`LICENSE`](LICENSE)). It keeps the original copyright notice alongside this port's.
