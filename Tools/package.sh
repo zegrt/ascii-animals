@@ -1,32 +1,27 @@
 #!/bin/zsh
-# Packages build/ASCII Sharks.app into build/ASCII-Sharks.dmg (drag-to-Applications).
+# Packages build/ASCII Sharks.app into build/ASCII-Sharks.dmg: a styled
+# drag-to-Applications window (background art, icon slots, volume icon).
 set -euo pipefail
 cd "${0:A:h}/.."
 APP="build/ASCII Sharks.app"
 [[ -d "$APP" ]] || Tools/build.sh
-STAGE=build/dmg
-rm -rf "$STAGE" build/ASCII-Sharks.dmg
-mkdir -p "$STAGE"
-cp -R "$APP" "$STAGE/"
-ln -s /Applications "$STAGE/Applications"
-cat > "$STAGE/First time? Read me.txt" <<'TXT'
-ASCII Sharks — live wallpaper
 
-1. Drag "ASCII Sharks" onto the Applications folder.
-2. Open it from Applications. macOS will say it can't verify the app
-   (it isn't from the App Store or a registered developer).
-3. Open System Settings > Privacy & Security, scroll down, and click
-   "Open Anyway" next to ASCII Sharks. Confirm once. That's it.
+# dmgbuild writes the Finder layout directly (no Finder scripting needed).
+VENV=.build-tools/venv
+if [[ ! -x $VENV/bin/dmgbuild ]]; then
+  python3 -m venv $VENV
+  $VENV/bin/pip install --quiet "dmgbuild==1.6.5"
+fi
 
-   Or, in Terminal:
-   xattr -dr com.apple.quarantine "/Applications/ASCII Sharks.app"
+# Retina background: combine the 1x and 2x art into one multi-resolution TIFF.
+BG=""
+if [[ -f Resources/dmg/background.png && -f Resources/dmg/background@2x.png ]]; then
+  BG=build/dmg-background.tiff
+  tiffutil -cathidpicheck Resources/dmg/background.png Resources/dmg/background@2x.png -out $BG 2>/dev/null
+fi
 
-The ocean appears behind your desktop icons. Find the fish icon in the
-menu bar for settings, pause and quit. Quitting puts your own wallpaper back.
-
-Needs macOS 14 or later. Source and credits:
-https://github.com/zegrt/ascii-sharks-wallpaper
-TXT
-hdiutil create -quiet -volname "ASCII Sharks" -srcfolder "$STAGE" -ov -format UDZO build/ASCII-Sharks.dmg
-rm -rf "$STAGE"
+rm -f build/ASCII-Sharks.dmg
+$VENV/bin/dmgbuild -s Tools/dmg-settings.py \
+  -D app="$APP" -D background="$BG" -D volume_icon=Resources/AppIcon.icns \
+  "ASCII Sharks" build/ASCII-Sharks.dmg > build/dmgbuild.log 2>&1 || { tail -20 build/dmgbuild.log; exit 1; }
 echo "built build/ASCII-Sharks.dmg ($(du -h build/ASCII-Sharks.dmg | cut -f1))"

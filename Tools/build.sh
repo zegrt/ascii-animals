@@ -1,6 +1,7 @@
 #!/bin/zsh
 # Builds build/ASCII Sharks.app: runs the checks, builds a universal binary,
-# renders the icon, assembles and ad-hoc signs the bundle.
+# assembles and ad-hoc signs the bundle. REGEN_ICON=1 re-renders the icon
+# (needs a GPU); otherwise the committed Resources/AppIcon.icns is used.
 set -euo pipefail
 cd "${0:A:h}/.."
 
@@ -12,25 +13,27 @@ swift run -c release OceanChecks > build/checks.log 2>&1 || { tail -20 build/che
 tail -1 build/checks.log
 
 echo "== build (arm64, x86_64)"
+bins=()
 for arch in arm64 x86_64; do
   swift build -c release --arch $arch --scratch-path .build-$arch --product ASCIISharks > build/build-$arch.log 2>&1 \
     || { tail -20 build/build-$arch.log; exit 1; }
+  # The output layout differs between toolchains; ask SwiftPM where it is.
+  bins+=("$(swift build -c release --arch $arch --scratch-path .build-$arch --show-bin-path)/ASCIISharks")
 done
 
-echo "== icon"
-rm -rf build/AppIcon.iconset build/AppIcon.icns
-swift run -c release OceanTool iconset build/AppIcon.iconset > /dev/null
-iconutil -c icns build/AppIcon.iconset -o build/AppIcon.icns
+if [[ "${REGEN_ICON:-0}" == 1 ]]; then
+  echo "== icon"
+  rm -rf build/AppIcon.iconset
+  swift run -c release OceanTool iconset build/AppIcon.iconset > /dev/null
+  iconutil -c icns build/AppIcon.iconset -o Resources/AppIcon.icns
+fi
 
 echo "== bundle"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-lipo -create \
-  .build-arm64/out/Products/Release/ASCIISharks \
-  .build-x86_64/out/Products/Release/ASCIISharks \
-  -output "$APP/Contents/MacOS/ASCIISharks"
+lipo -create "${bins[@]}" -output "$APP/Contents/MacOS/ASCIISharks"
 cp Info.plist "$APP/Contents/Info.plist"
-cp build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Resources/OFL.txt "$APP/Contents/Resources/GeistMono-OFL.txt"
 cp LICENSE "$APP/Contents/Resources/LICENSE.txt"
 

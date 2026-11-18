@@ -1,0 +1,37 @@
+name: Release
+
+# Push a tag like v2.2 (matching Info.plist and a CHANGELOG section) to
+# build, package and publish the DMG.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    env:
+      OCEAN_SKIP_GPU: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches the app version
+        run: |
+          plist=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist)
+          [ "v$plist" = "$GITHUB_REF_NAME" ] || { echo "Tag $GITHUB_REF_NAME but Info.plist says $plist"; exit 1; }
+      - name: Build
+        run: Tools/build.sh
+      - name: Package
+        run: Tools/package.sh
+      - name: Release notes from the CHANGELOG
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" '/^## /{ p = ($2 == v) ; next } p' CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "No CHANGELOG section for $v"; exit 1; }
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" build/ASCII-Sharks.dmg \
+            --title "ASCII Sharks ${GITHUB_REF_NAME#v}" --notes-file notes.md

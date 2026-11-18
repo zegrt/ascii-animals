@@ -1,0 +1,22 @@
+name: Something's wrong
+description: The wallpaper, the app or an install isn't behaving.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The quickest way to file this is **🐟 menu → Report a Problem…**, which fills in the details below for you.
+        Nothing is sent until you press Submit here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: "🐟 menu → Copy Diagnostics, then paste here. It contains your app and macOS versions, displays, power state and settings: no names or file paths."
+      render: markdown
