@@ -71,7 +71,10 @@ The simulation is in Swift and the renderer is a three-pass Metal renderer. Ther
 
 ## Install
 
-The only requirement is Apple's Command Line Tools (`xcode-select --install`). You don't need Xcode.
+**Download:** grab **[ASCII-Sharks.dmg](https://github.com/zegrt/ascii-sharks-wallpaper/releases/latest/download/ASCII-Sharks.dmg)** (1.4 MB, universal, macOS 14+) and drag the app to Applications.
+The app isn't signed by a registered Apple developer, so the first time you open it, go to **System Settings → Privacy & Security** and click **Open Anyway**.
+
+**Or build it yourself.** The only requirement is Apple's Command Line Tools (`xcode-select --install`). You don't need Xcode.
 
 ```sh
 git clone https://github.com/zegrt/ascii-sharks-wallpaper
@@ -137,7 +140,7 @@ The design and its review are in [`docs/plans/`](docs/plans).
 
 - **Spaces:** macOS changes wallpapers one Space at a time and gives apps no way to identify Spaces. So the matching still goes on the Space where the app starts. Wallpapers it doesn't recognise are never touched, and only what it set is restored.
 - **Aerial and dynamic wallpapers:** these come back as whatever image macOS reports for them.
-- **Signing:** builds are signed ad hoc on your machine. Sharing a prebuilt app needs a Developer ID and notarization.
+- **Signing:** the app is signed ad hoc, not by a registered Apple developer. That's why macOS asks you to click Open Anyway the first time you open it.
 - **On the list:** a screensaver edition, and one ocean that swims across several displays.
 
 ## Credits
