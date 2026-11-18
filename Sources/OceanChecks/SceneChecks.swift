@@ -24,7 +24,9 @@ func sceneChecks() {
     }
     check("clockTwoLinks") {
         var c = OceanClock(); _ = c.advance(to: 0, speed: 1)
-        var stamps = (1...120).map { Double($0) / 120 } + (1...100).map { Double($0) / 100 + 0.0003 }
+        let fast: [Double] = (1...120).map { (i: Int) -> Double in Double(i) / 120 }
+        let slow: [Double] = (1...100).map { (i: Int) -> Double in Double(i) / 100 + 0.0003 }
+        var stamps: [Double] = fast + slow
         stamps.sort()
         // Interleave as two links would fire, slightly out of order sometimes.
         var steps = 0
