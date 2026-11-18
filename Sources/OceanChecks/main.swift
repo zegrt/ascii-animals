@@ -14,6 +14,7 @@ policyChecks()
 packerChecks()
 wallpaperChecks()
 renderChecks()
+sharedRenderChecks()
 
 print("\(Runner.passed) passed, \(Runner.failed) failed")
 exit(Runner.failed == 0 ? 0 : 1)

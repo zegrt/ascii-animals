@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import OceanKit
+import Metal
 import simd
 
 private func packShared(_ w: World, viewport: CGRect, after: Int = 0) -> (u: UnsafeMutableRawPointer, fish: UnsafeMutablePointer<UInt8>, grid: GridSpec, last: Int) {
@@ -93,4 +94,51 @@ func sceneChecks() {
     check("singleScreenLayoutSameInBothModes") {
         try expect(SceneLayout.plan([laptopGlobal], shared: true) == SceneLayout.plan([laptopGlobal], shared: false), "modes differ for one screen")
     }
+}
+
+func sharedRenderChecks() {
+    check("sharedRenderSharkAcrossSeam") {
+        guard let device = MTLCreateSystemDefaultDevice() else { throw CheckFailure(detail: "no Metal") }
+        let renderer = try OceanRenderer(device: device)
+        let cell = GridSpec.cell(forWidth: 2560)
+        let w = World(sharks: [.greathammer, .classic, .mako, .tiger], rng: Rng(seed: 5))
+        w.resize(habitat: Habitat(rects: [userMonitor, userLaptop]), cell: cell, density: 1)
+        // Swim until some shark's body straddles the seam (y = 1440) over the laptop's span.
+        var straddler: Shark?
+        for _ in 0..<(240 * 60) {
+            w.step(1.0 / 60)
+            straddler = w.sharks.first { sh in
+                let ys = stride(from: 0, to: World.sharkNodes, by: 1).map { sh.nodes[$0 * 2 + 1] }
+                let xs = stride(from: 0, to: World.sharkNodes, by: 1).map { sh.nodes[$0 * 2] }
+                return ys.min()! < 1400 && ys.max()! > 1480 && xs.allSatisfy { $0 > 450 && $0 < 2100 }
+            }
+            if straddler != nil { break }
+        }
+        guard let sh = straddler else { throw CheckFailure(detail: "no shark crossed the seam in 240 s") }
+        let theme = ThemeParams.make(.defaults, systemIsDark: true, accent: .zero)
+        let top = pixelsOf(try StillRenderer.snapshot(w, viewport: userMonitor, cell: cell, theme: theme, scale: 1, renderer: renderer))
+        let bottom = pixelsOf(try StillRenderer.snapshot(w, viewport: userLaptop, cell: cell, theme: theme, scale: 1, renderer: renderer))
+        let xs = stride(from: 0, to: World.sharkNodes, by: 1).map { sh.nodes[$0 * 2] }
+        let x0 = Int(xs.min()!) - 40, x1 = Int(xs.max()!) + 40
+        func ink(_ p: [UInt8], width: Int, rows: Range<Int>, xOffset: Int) -> Int {
+            var n = 0
+            for y in rows { for x in max(0, x0 - xOffset)..<min(width, x1 - xOffset) {
+                let i = (y * width + x) * 4
+                if Int(p[i]) + Int(p[i + 1]) + Int(p[i + 2]) > 150 { n += 1 }
+            } }
+            return n
+        }
+        let above = ink(top, width: 2560, rows: (1440 - 60)..<1440, xOffset: 0)
+        let below = ink(bottom, width: 1800, rows: 0..<60, xOffset: 375)
+        try expect(above > 50 && below > 50, "ink above seam \(above), below \(below)")
+    }
+}
+
+private func pixelsOf(_ img: CGImage) -> [UInt8] {
+    let w = img.width, h = img.height
+    var buf = [UInt8](repeating: 0, count: w * h * 4)
+    let ctx = CGContext(data: &buf, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                        space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+    return buf
 }

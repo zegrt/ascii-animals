@@ -39,8 +39,9 @@ public final class OceanRenderer {
         composePipe = try pipe("compose_main", OceanRenderer.outputFormat)
     }
 
-    public func makeViewport(pointSize: CGSize, scale: CGFloat) throws -> ViewportRenderer {
-        try ViewportRenderer(renderer: self, pointSize: pointSize, scale: scale)
+    public func makeViewport(pointSize: CGSize, scale: CGFloat, cell: CGSize? = nil) throws -> ViewportRenderer {
+        try ViewportRenderer(renderer: self, pointSize: pointSize, scale: scale,
+                             cell: cell ?? GridSpec.cell(forWidth: pointSize.width))
     }
 }
 
@@ -64,12 +65,18 @@ public final class ViewportRenderer {
     private var cells: MTLTexture!
     private var atlas: MTLTexture!
     private var needsClear = true
+    /// What this viewport has already drawn of its world: steps run through
+    /// the wake, and events stamped. A world shared by several screens is
+    /// drawn by each at its own pace.
+    private var lastWorld: ObjectIdentifier?
+    private var lastStepCount = 0
+    private var lastEventSeq = 0
 
-    init(renderer: OceanRenderer, pointSize: CGSize, scale: CGFloat) throws {
+    init(renderer: OceanRenderer, pointSize: CGSize, scale: CGFloat, cell: CGSize) throws {
         r = renderer
         self.pointSize = pointSize
         self.scale = scale
-        grid = GridSpec.make(viewportSize: pointSize, cell: GridSpec.cell(forWidth: pointSize.width))
+        grid = GridSpec.make(viewportSize: pointSize, cell: cell)
         for _ in 0..<ViewportRenderer.inFlight {
             guard let b = r.device.makeBuffer(length: FrameLayout.bytes, options: .storageModeShared) else {
                 throw RenderError(description: "no uniform buffer")
@@ -81,14 +88,15 @@ public final class ViewportRenderer {
 
     deinit { fishBytes?.deallocate() }
 
-    public func resize(pointSize: CGSize, scale: CGFloat) throws {
-        guard pointSize != self.pointSize || scale != self.scale else { return }
+    public func resize(pointSize: CGSize, scale: CGFloat, cell: CGSize? = nil) throws {
+        let cell = cell ?? GridSpec.cell(forWidth: pointSize.width)
+        guard pointSize != self.pointSize || scale != self.scale || cell != grid.cell else { return }
         // Let in-flight frames finish before their textures go away.
         for _ in 0..<ViewportRenderer.inFlight { semaphore.wait() }
         defer { for _ in 0..<ViewportRenderer.inFlight { semaphore.signal() } }
         self.pointSize = pointSize
         self.scale = scale
-        grid = GridSpec.make(viewportSize: pointSize, cell: GridSpec.cell(forWidth: pointSize.width))
+        grid = GridSpec.make(viewportSize: pointSize, cell: cell)
         try allocate()
     }
 
@@ -125,10 +133,22 @@ public final class ViewportRenderer {
         enc.endEncoding()
     }
 
-    /// Packs `world` and encodes `steps` wake passes, the cell pass, and (when
-    /// `target` is given) the compose pass into `target`. The caller commits
-    /// `commandBuffer`, and clears `world.events` afterwards.
-    public func encode(world: World, theme: ThemeParams, steps: Int, target: MTLTexture?, commandBuffer cb: MTLCommandBuffer) {
+    /// Packs the part of `world` inside `viewport` (ocean space; nil = all of
+    /// it) and encodes one wake pass per simulation step since this viewport
+    /// last drew (at most 4), the cell pass, and (when `target` is given) the
+    /// compose pass into `target`. The caller commits `commandBuffer`.
+    public func encode(world: World, viewport: CGRect? = nil, theme: ThemeParams, target: MTLTexture?, commandBuffer cb: MTLCommandBuffer) {
+        let id = ObjectIdentifier(world)
+        if lastWorld != id {
+            lastWorld = id
+            lastStepCount = world.stepCount
+            lastEventSeq = world.eventSeq
+            needsClear = true
+        }
+        let steps = min(OceanClock.maxSteps, max(0, world.stepCount - lastStepCount))
+        lastStepCount = world.stepCount
+        let area = viewport ?? CGRect(x: 0, y: 0, width: world.width, height: world.height)
+
         semaphore.wait()
         let sem = semaphore
         cb.addCompletedHandler { _ in sem.signal() }
@@ -138,9 +158,9 @@ public final class ViewportRenderer {
         let clear = needsClear
         needsClear = false
 
-        FramePacker.pack(world: world, grid: grid,
-                         pixelSize: CGSize(width: pointSize.width * scale, height: pointSize.height * scale),
-                         scale: Float(scale), theme: theme, clearWake: clear, uniforms: ubo.contents(), fishGrid: fishBytes!)
+        lastEventSeq = FramePacker.pack(world: world, viewport: area, afterEventSeq: lastEventSeq, grid: grid,
+                                        pixelSize: CGSize(width: pointSize.width * scale, height: pointSize.height * scale),
+                                        scale: Float(scale), theme: theme, clearWake: clear, uniforms: ubo.contents(), fishGrid: fishBytes!)
         fishTex.replace(region: MTLRegionMake2D(0, 0, grid.cols, grid.rows), mipmapLevel: 0,
                         withBytes: fishBytes!, bytesPerRow: grid.cols * 4)
 

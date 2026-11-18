@@ -26,7 +26,7 @@ public enum StillRenderer {
         for i in 0..<total {
             world.step(OceanClock.step)
             if i >= wakeFrom, let cb = r.queue.makeCommandBuffer() {
-                vp.encode(world: world, theme: theme, steps: 1, target: nil, commandBuffer: cb)
+                vp.encode(world: world, theme: theme, target: nil, commandBuffer: cb)
                 cb.commit()
                 last = cb
             }
@@ -34,7 +34,14 @@ public enum StillRenderer {
         }
         last?.waitUntilCompleted()
 
-        return try FrameRecorder.compose(vp, world: world, theme: theme, steps: 0, size: size, scale: scale, renderer: r)
+        return try FrameRecorder.compose(vp, world: world, theme: theme, size: size, scale: scale, renderer: r)
+    }
+
+    /// One viewport of an existing world, as it looks right now (no wake history).
+    public static func snapshot(_ world: World, viewport: CGRect, cell: CGSize, theme: ThemeParams, scale: CGFloat,
+                                renderer r: OceanRenderer) throws -> CGImage {
+        let vp = try r.makeViewport(pointSize: viewport.size, scale: scale, cell: cell)
+        return try FrameRecorder.compose(vp, world: world, viewport: viewport, theme: theme, size: viewport.size, scale: scale, renderer: r)
     }
 
     public static func writePNG(_ image: CGImage, to url: URL) throws {
@@ -70,7 +77,7 @@ public final class FrameRecorder {
         for i in 0..<total {
             world.step(OceanClock.step)
             if i >= wakeFrom, let cb = renderer.queue.makeCommandBuffer() {
-                viewport.encode(world: world, theme: theme, steps: 1, target: nil, commandBuffer: cb)
+                viewport.encode(world: world, theme: theme, target: nil, commandBuffer: cb)
                 cb.commit()
             }
             world.events.removeAll()
@@ -80,12 +87,12 @@ public final class FrameRecorder {
     /// Advance `steps` simulation steps (1/60 s each) and render a frame.
     public func next(steps: Int) throws -> CGImage {
         for _ in 0..<steps { world.step(OceanClock.step) }
-        let img = try FrameRecorder.compose(viewport, world: world, theme: theme, steps: steps, size: size, scale: scale, renderer: renderer)
+        let img = try FrameRecorder.compose(viewport, world: world, theme: theme, size: size, scale: scale, renderer: renderer)
         world.events.removeAll()
         return img
     }
 
-    static func compose(_ vp: ViewportRenderer, world: World, theme: ThemeParams, steps: Int, size: CGSize, scale: CGFloat,
+    static func compose(_ vp: ViewportRenderer, world: World, viewport: CGRect? = nil, theme: ThemeParams, size: CGSize, scale: CGFloat,
                         renderer r: OceanRenderer) throws -> CGImage {
         let w = Int((size.width * scale).rounded()), h = Int((size.height * scale).rounded())
         let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: OceanRenderer.outputFormat, width: w, height: h, mipmapped: false)
@@ -94,7 +101,7 @@ public final class FrameRecorder {
         guard let target = r.device.makeTexture(descriptor: d), let cb = r.queue.makeCommandBuffer() else {
             throw RenderError(description: "no frame target")
         }
-        vp.encode(world: world, theme: theme, steps: steps, target: target, commandBuffer: cb)
+        vp.encode(world: world, viewport: viewport, theme: theme, target: target, commandBuffer: cb)
         if let blit = cb.makeBlitCommandEncoder() {
             blit.synchronize(resource: target)
             blit.endEncoding()
