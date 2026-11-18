@@ -40,6 +40,12 @@ func settingsChecks() {
         try expect(Settings.defaults.sharedOcean, "shared ocean default off")
         try expect(!SettingsCodec.decode(Data(#"{"sharedOcean":false}"#.utf8)).sharedOcean, "not decoded")
     }
+    check("settingsAppFieldsDefaultOn") {
+        let d = Settings.defaults
+        try expect(d.pauseShortcut && d.showMenuBarIcon && d.checkForUpdates, "defaults \(d)")
+        let s = SettingsCodec.decode(Data(#"{"pauseShortcut":false,"showMenuBarIcon":false,"checkForUpdates":false}"#.utf8))
+        try expect(!s.pauseShortcut && !s.showMenuBarIcon && !s.checkForUpdates, "not decoded")
+    }
     check("settingsDefaultFps30") { try expect(Settings.defaults.fps == 30, "default fps \(Settings.defaults.fps)") }
     check("settingsCorruptJSONFallsBack") {
         try expect(SettingsCodec.decode(Data("nope".utf8)) == Settings.defaults, "garbage not defaults")

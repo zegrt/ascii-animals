@@ -25,6 +25,10 @@ public struct Settings: Codable, Equatable, Sendable {
     public var fps = 30
     public var lowPowerAnimates = false
     public var matchSystemWallpaper = true
+    /// ⌃⌥⌘P toggles pause from anywhere.
+    public var pauseShortcut = true
+    public var showMenuBarIcon = true
+    public var checkForUpdates = true
     public var paused = false
 
     public static let defaults = Settings()
@@ -45,7 +49,7 @@ public struct Settings: Codable, Equatable, Sendable {
     }
 
     private enum K: String, CodingKey {
-        case sharks, fishDensity, speed, appearance, calm, grid, wakeColor, interaction, sharedOcean, fps, lowPowerAnimates, matchSystemWallpaper, paused
+        case sharks, fishDensity, speed, appearance, calm, grid, wakeColor, interaction, sharedOcean, fps, lowPowerAnimates, matchSystemWallpaper, pauseShortcut, showMenuBarIcon, checkForUpdates, paused
     }
 
     public init(from decoder: Decoder) throws {
@@ -68,6 +72,9 @@ public struct Settings: Codable, Equatable, Sendable {
         fps = get(.fps, d.fps)
         lowPowerAnimates = get(.lowPowerAnimates, d.lowPowerAnimates)
         matchSystemWallpaper = get(.matchSystemWallpaper, d.matchSystemWallpaper)
+        pauseShortcut = get(.pauseShortcut, d.pauseShortcut)
+        showMenuBarIcon = get(.showMenuBarIcon, d.showMenuBarIcon)
+        checkForUpdates = get(.checkForUpdates, d.checkForUpdates)
         paused = get(.paused, d.paused)
     }
 }

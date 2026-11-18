@@ -13,6 +13,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     lazy var settingsModel = SettingsModel(store: store)
     lazy var settingsWindow = SettingsWindowController(model: settingsModel)
     var startupError: String?
+    let updates = UpdateService()
+    /// The last session ended without a clean quit (Task 2 sets it).
+    var crashedLastTime = false
     private var observers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -50,7 +53,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("ASCII Sharks could not start: %@", "\(error)")
         }
         menu = StatusMenu(app: self)
+        updates.start { [weak self] in self?.store.settings.checkForUpdates ?? false }
+        OnboardingController.showIfNeeded(app: self)
     }
+
+    /// Opening the app again (Finder, Spotlight, Launchpad) shows Settings —
+    /// the way back when the menu-bar icon is hidden or behind the notch.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showSettings()
+        return false
+    }
+
+    func showAbout() { AboutWindow.show(app: self) }
+    func showWelcome() { OnboardingController.show(app: self) }
+    /// Opens a prefilled GitHub issue in the browser. (Task 2)
+    func reportProblem() { NSWorkspace.shared.open(AppInfo.issuesURL) }
+    /// Copies a diagnostics summary to the clipboard. (Task 2)
+    func copyDiagnostics() {}
+    /// Confirms, restores the wallpaper, removes everything, trashes the app and quits. (Task 3)
+    func uninstall() {}
 
     func settingsChanged(_ old: OceanKit.Settings, _ new: OceanKit.Settings) {
         director?.settingsChanged(old: old, new: new)
