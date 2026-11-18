@@ -3,18 +3,24 @@ import Foundation
 import OceanKit
 
 func policyChecks() {
-    check("policyDefaultLive60") { try expect(PowerPolicy.mode(PowerInputs()) == .live(fps: 60), "\(PowerPolicy.mode(PowerInputs()))") }
-    check("policyBattery30") {
+    check("policyDefaultLive30") { try expect(PowerPolicy.mode(PowerInputs()) == .live(fps: 30), "\(PowerPolicy.mode(PowerInputs()))") }
+    check("policyBattery15") {
         var i = PowerInputs(); i.onBattery = true
-        try expect(PowerPolicy.mode(i) == .live(fps: 30), "\(PowerPolicy.mode(i))")
+        try expect(PowerPolicy.mode(i) == .live(fps: 15), "\(PowerPolicy.mode(i))")
     }
-    check("policyBatteryRespects30Setting") {
-        var i = PowerInputs(); i.fpsSetting = 30
-        try expect(PowerPolicy.mode(i) == .live(fps: 30), "\(PowerPolicy.mode(i))")
+    check("policyRespects60Setting") {
+        var i = PowerInputs(); i.fpsSetting = 60
+        try expect(PowerPolicy.mode(i) == .live(fps: 60), "\(PowerPolicy.mode(i))")
+        i.onBattery = true
+        try expect(PowerPolicy.mode(i) == .live(fps: 15), "\(PowerPolicy.mode(i))")
     }
     check("policyLowPowerStill") {
         var i = PowerInputs(); i.lowPowerMode = true
         try expect(PowerPolicy.mode(i) == .still, "\(PowerPolicy.mode(i))")
+    }
+    check("policyLowPowerAnimatesWhenAllowed") {
+        var i = PowerInputs(); i.lowPowerMode = true; i.lowPowerAnimates = true
+        try expect(PowerPolicy.mode(i) == .live(fps: 15), "\(PowerPolicy.mode(i))")
     }
     check("policyHiddenBeatsEverything") {
         var i = PowerInputs(); i.screenLocked = true; i.userPaused = true; i.reduceMotion = true
@@ -32,16 +38,16 @@ func policyChecks() {
         var i = PowerInputs(); i.screenLocked = true
         try expect(PowerPolicy.mode(i) == .paused, "locked not paused")
         i.screenLocked = false
-        try expect(PowerPolicy.mode(i) == .live(fps: 60), "unlock did not resume")
+        try expect(PowerPolicy.mode(i) == .live(fps: 30), "unlock did not resume")
     }
     check("userPauseSurvivesUnlock") {
         var i = PowerInputs(); i.userPaused = true; i.screenLocked = true
         i.screenLocked = false
         try expect(PowerPolicy.mode(i) == .paused, "user pause lost")
     }
-    check("policyThermalSerious30") {
+    check("policyThermalSerious15") {
         var i = PowerInputs(); i.thermal = .serious
-        try expect(PowerPolicy.mode(i) == .live(fps: 30), "\(PowerPolicy.mode(i))")
+        try expect(PowerPolicy.mode(i) == .live(fps: 15), "\(PowerPolicy.mode(i))")
     }
     check("policyThermalCriticalStill") {
         var i = PowerInputs(); i.thermal = .critical
@@ -55,7 +61,7 @@ func policyChecks() {
         var i = PowerInputs(); i.screensaverRunning = true; i.screenLocked = true
         let r = PowerPolicy.reconcile(i, session: SessionTruth(screenLocked: false, onConsole: true, screensaverEngineRunning: false))
         try expect(!r.screensaverRunning && !r.screenLocked && r.sessionActive, "\(r)")
-        try expect(PowerPolicy.mode(r) == .live(fps: 60), "not live after reconcile")
+        try expect(PowerPolicy.mode(r) == .live(fps: 30), "not live after reconcile")
     }
     check("reconcileUnlocks") {
         var i = PowerInputs(); i.screenLocked = true; i.sessionActive = false

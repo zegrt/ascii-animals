@@ -31,14 +31,19 @@ func settingsChecks() {
     }
     check("settingsFpsOptions") {
         var s = Settings.defaults
-        for (input, want) in [(30, 30), (59, 60), (120, 60), (1, 30)] {
+        for (input, want) in [(30, 30), (59, 60), (120, 60), (1, 15), (20, 15), (23, 30)] {
             s.fps = input
             try expect(s.sanitized().fps == want, "fps \(input) -> \(s.sanitized().fps), want \(want)")
         }
     }
+    check("settingsDefaultFps30") { try expect(Settings.defaults.fps == 30, "default fps \(Settings.defaults.fps)") }
     check("settingsCorruptJSONFallsBack") {
         try expect(SettingsCodec.decode(Data("nope".utf8)) == Settings.defaults, "garbage not defaults")
         try expect(SettingsCodec.decode(nil) == Settings.defaults, "nil not defaults")
+    }
+    check("settingsLowPowerAnimatesDefaultsOff") {
+        try expect(!Settings.defaults.lowPowerAnimates, "default on")
+        try expect(SettingsCodec.decode(Data(#"{"lowPowerAnimates":true}"#.utf8)).lowPowerAnimates, "not decoded")
     }
     check("settingsRoundTrip") {
         var s = Settings.defaults

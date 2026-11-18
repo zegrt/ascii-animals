@@ -47,6 +47,24 @@ case "iconset":
     guard args.count == 1 else { fail("usage: OceanTool iconset <dir.iconset>") }
     try IconMaker.write(to: URL(fileURLWithPath: args[0]))
 
+case "bench":
+    // Simulation + packing cost per simulated second at the built-in display's size.
+    let w = World(sharks: Settings.defaults.sharks, rng: Rng(seed: 1))
+    let cell = GridSpec.cell(forWidth: 1800)
+    w.resize(width: 1800, height: 1169, cell: cell, density: 1)
+    let grid = GridSpec.make(viewportSize: CGSize(width: 1800, height: 1169), cell: cell)
+    let u = UnsafeMutableRawPointer.allocate(byteCount: FrameLayout.bytes, alignment: 16)
+    let g = UnsafeMutablePointer<UInt8>.allocate(capacity: grid.cols * grid.rows * 4)
+    let theme = ThemeParams.make(.defaults, systemIsDark: true, accent: .zero)
+    for _ in 0..<600 { w.step(OceanClock.step) }
+    var t0 = Date()
+    for _ in 0..<1800 { w.step(OceanClock.step) }
+    let sim = Date().timeIntervalSince(t0) / 30
+    t0 = Date()
+    for _ in 0..<450 { FramePacker.pack(world: w, grid: grid, pixelSize: CGSize(width: 3600, height: 2338), scale: 2, theme: theme, clearWake: false, uniforms: u, fishGrid: g) }
+    let packPerFrame = Date().timeIntervalSince(t0) / 450
+    print(String(format: "fish %d  sim %.2f ms per simulated second (%.2f%% of a core)  pack %.3f ms/frame", w.fish.count, sim * 1000, sim * 100, packPerFrame * 1000))
+
 default:
     fail("unknown command \(command)")
 }

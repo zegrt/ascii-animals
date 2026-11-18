@@ -4,6 +4,7 @@ import Metal
 
 public struct RenderError: Error, CustomStringConvertible {
     public let description: String
+    public init(description: String) { self.description = description }
 }
 
 /// Device-wide state: the compiled shaders and the three pipelines.

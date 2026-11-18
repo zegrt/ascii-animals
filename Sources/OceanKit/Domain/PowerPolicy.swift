@@ -9,10 +9,12 @@ public struct PowerInputs: Equatable, Sendable {
     public var sessionActive = true
     public var onBattery = false
     public var lowPowerMode = false
+    /// User setting: keep animating (at 30 fps) in Low Power Mode instead of holding a still.
+    public var lowPowerAnimates = false
     public var thermal: Thermal = .nominal
     public var reduceMotion = false
     public var userPaused = false
-    public var fpsSetting = 60
+    public var fpsSetting = 30
 
     public init() {}
 }
@@ -41,12 +43,17 @@ public enum RunMode: Equatable, Sendable {
 }
 
 public enum PowerPolicy {
+    /// Frame cap on battery, in Low Power Mode and under thermal pressure. Measured:
+    /// most of a live wallpaper's cost is WindowServer recompositing the desktop
+    /// every frame, so the frame rate is the lever that matters.
+    public static let economyFPS = 15
+
     public static func mode(_ i: PowerInputs) -> RunMode {
         let hidden = !i.anyWindowVisible || i.displaysAsleep || i.screenLocked || i.screensaverRunning || !i.sessionActive
         if hidden || i.userPaused { return .paused }
-        if i.reduceMotion || i.lowPowerMode || i.thermal == .critical { return .still }
+        if i.reduceMotion || (i.lowPowerMode && !i.lowPowerAnimates) || i.thermal == .critical { return .still }
         var fps = i.fpsSetting
-        if i.onBattery || i.thermal == .serious { fps = min(fps, 30) }
+        if i.onBattery || i.lowPowerMode || i.thermal == .serious { fps = min(fps, PowerPolicy.economyFPS) }
         return .live(fps: fps)
     }
 
