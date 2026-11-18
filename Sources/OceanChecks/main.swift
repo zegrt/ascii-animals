@@ -6,6 +6,7 @@ if let i = args.firstIndex(of: "--only"), args.index(after: i) < args.endIndex {
 }
 
 settingsChecks()
+worldChecks()
 
 print("\(Runner.passed) passed, \(Runner.failed) failed")
 exit(Runner.failed == 0 ? 0 : 1)
