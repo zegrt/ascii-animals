@@ -10,10 +10,13 @@ public struct OceanClock: Sendable {
 
     public init() {}
 
+    /// Several display links (screens at different refresh rates) may drive
+    /// one clock; a timestamp no newer than the newest seen adds nothing.
     public mutating func advance(to timestamp: Double, speed: Double) -> Int {
-        defer { last = timestamp }
-        guard let last else { return 0 }
-        acc += min(0.1, max(0, timestamp - last)) * speed
+        guard let prev = last else { last = timestamp; return 0 }
+        guard timestamp > prev else { return 0 }
+        last = timestamp
+        acc += min(0.1, timestamp - prev) * speed
         var steps = 0
         // A little slack so 1/60 s frames don't lose a step to rounding.
         while acc >= OceanClock.step - 1e-9 && steps < OceanClock.maxSteps {

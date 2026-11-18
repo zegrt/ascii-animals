@@ -86,40 +86,84 @@ public enum FramePacker {
     /// Seconds after which shader time wraps, so float precision never decays.
     public static let timeWrap = 3600.0
 
-    /// Writes the uniforms (`FrameLayout.bytes`) and the fish grid
-    /// (`cols * rows` RGBA8 texels: present, brightness, wake deposit, near).
-    /// Does not clear `world.events`; the caller does after the frame.
-    public static func pack(world w: World, grid: GridSpec, pixelSize: CGSize, scale: Float, theme: ThemeParams,
-                            clearWake: Bool, uniforms: UnsafeMutableRawPointer, fishGrid: UnsafeMutablePointer<UInt8>) {
+    /// One viewport's frame. `viewport` is in ocean space; everything packed is
+    /// made local to it. Sharks whose bounds miss it are skipped (at most 8 are
+    /// packed, the most visible); only events newer than `afterEventSeq` are
+    /// packed. Returns the world's newest event seq, to pass next time.
+    @discardableResult
+    public static func pack(world w: World, viewport: CGRect, afterEventSeq: Int, grid: GridSpec, pixelSize: CGSize, scale: Float,
+                            theme: ThemeParams, clearWake: Bool, uniforms: UnsafeMutableRawPointer,
+                            fishGrid: UnsafeMutablePointer<UInt8>) -> Int {
         let u = uniforms.bindMemory(to: SIMD4<Float>.self, capacity: FrameLayout.slots)
-        let sharkCount = min(w.sharks.count, FrameLayout.maxSharks)
-        let eventCount = min(w.events.count, FrameLayout.maxEvents)
         let cw = Double(grid.cell.width), ch = Double(grid.cell.height)
+        let ox = Double(viewport.minX), oy = Double(viewport.minY)
+        let vw = Double(viewport.width), vh = Double(viewport.height)
 
-        u[0] = SIMD4(Float(w.width), Float(w.height), Float(grid.cols), Float(grid.rows))
+        // Sharks: by visible overlap, keeping the small-to-large draw order.
+        var visible: [(index: Int, overlap: Double)] = []
+        for (i, sh) in w.sharks.enumerated() {
+            let b = bounds(sh)
+            let ix = min(b.maxX, viewport.maxX) - max(b.minX, viewport.minX)
+            let iy = min(b.maxY, viewport.maxY) - max(b.minY, viewport.minY)
+            if ix > 0 && iy > 0 { visible.append((i, Double(ix * iy))) }
+        }
+        if visible.count > FrameLayout.maxSharks {
+            visible = Array(visible.sorted { $0.overlap > $1.overlap }.prefix(FrameLayout.maxSharks)).sorted { $0.index < $1.index }
+        }
+        for (slot, v) in visible.enumerated() {
+            packShark(w.sharks[v.index], origin: (ox, oy), into: u + FrameLayout.sharkBase + slot * FrameLayout.sharkStride)
+        }
+
+        // Events: new ones near this viewport (splash stamps reach 6 cells).
+        let reach = 6 * max(cw, ch)
+        var eventCount = 0
+        for ev in w.events where ev.seq > afterEventSeq && eventCount < FrameLayout.maxEvents {
+            let x = ev.x - ox, y = ev.y - oy
+            guard x > -reach, y > -reach, x < vw + reach, y < vh + reach else { continue }
+            u[FrameLayout.eventBase + eventCount] = SIMD4(Float(x), Float(y), ev.kind == .eat ? 0 : 1, 0)
+            eventCount += 1
+        }
+
+        u[0] = SIMD4(Float(vw), Float(vh), Float(grid.cols), Float(grid.rows))
         u[1] = SIMD4(Float(cw), Float(ch), Float(w.time.truncatingRemainder(dividingBy: timeWrap)), Float(OceanClock.step))
         u[2] = SIMD4(Float(pixelSize.width), Float(pixelSize.height), scale, 0)
-        u[3] = SIMD4(Float(sharkCount), Float(eventCount), w.pointer.active ? 1 : 0, clearWake ? 1 : 0)
-        u[4] = SIMD4(Float(w.pointer.x), Float(w.pointer.y), 0, 0)
+        u[3] = SIMD4(Float(visible.count), Float(eventCount), w.pointer.active ? 1 : 0, clearWake ? 1 : 0)
+        u[4] = SIMD4(Float(w.pointer.x - ox), Float(w.pointer.y - oy), 0, 0)
         u[5] = SIMD4(theme.light ? 1 : 0, theme.brightness, theme.accentRate, theme.grid ? 1 : 0)
         u[6] = SIMD4(theme.wake, 0)
 
-        for i in 0..<sharkCount {
-            packShark(w.sharks[i], into: u + FrameLayout.sharkBase + i * FrameLayout.sharkStride)
-        }
-        for e in 0..<eventCount {
-            let ev = w.events[e]
-            u[FrameLayout.eventBase + e] = SIMD4(Float(ev.x), Float(ev.y), ev.kind == .eat ? 0 : 1, 0)
-        }
-        packFish(w, grid: grid, cw: cw, ch: ch, into: fishGrid)
+        packFish(w, grid: grid, cw: cw, ch: ch, origin: (ox, oy), into: fishGrid)
+        return w.eventSeq
     }
 
-    private static func packFish(_ w: World, grid: GridSpec, cw: Double, ch: Double, into g: UnsafeMutablePointer<UInt8>) {
+    /// A single-viewport world: the viewport is the whole ocean.
+    public static func pack(world w: World, grid: GridSpec, pixelSize: CGSize, scale: Float, theme: ThemeParams,
+                            clearWake: Bool, uniforms: UnsafeMutableRawPointer, fishGrid: UnsafeMutablePointer<UInt8>) {
+        pack(world: w, viewport: CGRect(x: 0, y: 0, width: w.width, height: w.height), afterEventSeq: 0, grid: grid,
+             pixelSize: pixelSize, scale: scale, theme: theme, clearWake: clearWake, uniforms: uniforms, fishGrid: fishGrid)
+    }
+
+    /// The shark's extent in ocean space, padded for fins and the cephalofoil.
+    static func bounds(_ sh: Shark) -> CGRect {
+        var lo = SIMD2<Double>(.infinity, .infinity), hi = SIMD2<Double>(-.infinity, -.infinity)
+        for k in 0..<World.sharkNodes {
+            let p = SIMD2(sh.nodes[k * 2], sh.nodes[k * 2 + 1])
+            lo = pointwiseMin(lo, p); hi = pointwiseMax(hi, p)
+        }
+        // Spine plus body wave (0.05 L) plus fins (0.36 L).
+        let pad = sh.length * 0.42
+        return CGRect(x: lo.x - pad, y: lo.y - pad, width: hi.x - lo.x + 2 * pad, height: hi.y - lo.y + 2 * pad)
+    }
+
+    private static func packFish(_ w: World, grid: GridSpec, cw: Double, ch: Double, origin: (Double, Double),
+                                 into g: UnsafeMutablePointer<UInt8>) {
         let cells = grid.cols * grid.rows
         g.update(repeating: 0, count: cells * 4)
         var deposit = [Double](repeating: 0, count: cells)
-        for f in w.fish where f.alive && f.x >= 0 && f.y >= 0 {
-            let c = Int(f.x / cw), r = Int(f.y / ch)
+        for f in w.fish where f.alive {
+            let x = f.x - origin.0, y = f.y - origin.1
+            guard x >= 0, y >= 0 else { continue }
+            let c = Int(x / cw), r = Int(y / ch)
             guard c < grid.cols, r < grid.rows else { continue }
             let i = r * grid.cols + c
             deposit[i] += 0.012 + f.alarm * 0.03
@@ -141,10 +185,11 @@ public enum FramePacker {
     }
 
     /// The render spine: the sim spine plus a travelling body wave, as in rasterizeSharks.
-    private static func packShark(_ sh: Shark, into s: UnsafeMutablePointer<SIMD4<Float>>) {
+    private static func packShark(_ sh: Shark, origin: (Double, Double), into s: UnsafeMutablePointer<SIMD4<Float>>) {
         let nodes = World.sharkNodes
         let L = sh.length
-        let n = sh.nodes
+        var n = sh.nodes
+        for k in 0..<nodes { n[k * 2] -= origin.0; n[k * 2 + 1] -= origin.1 }
         let swim = min(1.4, max(0.4, sh.speed / 60))
         var spine = [Double](repeating: 0, count: nodes * 2)
         for k in 0..<nodes {
