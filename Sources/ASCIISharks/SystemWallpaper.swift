@@ -12,6 +12,8 @@ final class SystemWallpaper {
     private let renderer: OceanRenderer
     private var memory: WallpaperMemory
     private var pending: DispatchWorkItem?
+    /// Bumped by restoreAll(); a still that finishes rendering after a restore is dropped.
+    private var generation = 0
     private let work = DispatchQueue(label: "ascii-sharks.stills", qos: .utility)
 
     init(renderer: OceanRenderer) {
@@ -44,13 +46,14 @@ final class SystemWallpaper {
             save() // the original is on disk before anything changes
             let size = screen.frame.size, scale = screen.backingScaleFactor
             let url = stillsFolder.appendingPathComponent("still-\(key)-\(Int(Date().timeIntervalSince1970 * 1000)).png")
+            let gen = generation
             work.async { [weak self, renderer] in
                 do {
                     let img = try StillRenderer.render(settings: settings, size: size, scale: scale, warmup: 6,
                                                        systemIsDark: systemIsDark, accent: accent,
                                                        seed: UInt64.random(in: 1...UInt64.max), renderer: renderer)
                     try StillRenderer.writePNG(img, to: url)
-                    DispatchQueue.main.async { self?.set(url, on: screen, key: key) }
+                    DispatchQueue.main.async { self?.set(url, on: screen, key: key, generation: gen) }
                 } catch {
                     NSLog("ASCII Sharks: still failed: %@", "\(error)")
                 }
@@ -58,9 +61,9 @@ final class SystemWallpaper {
         }
     }
 
-    private func set(_ url: URL, on screen: NSScreen, key: String) {
-        // Re-check: the wallpaper may have changed while the still rendered.
-        guard NSScreen.screens.contains(screen), let current = SystemWallpaper.entry(for: screen),
+    private func set(_ url: URL, on screen: NSScreen, key: String, generation gen: Int) {
+        // Re-check: a restore may have happened, or the wallpaper changed, while the still rendered.
+        guard gen == generation, NSScreen.screens.contains(screen), let current = SystemWallpaper.entry(for: screen),
               memory.decide(screen: key, current: current, stillsFolder: stillsFolder) == .apply else {
             try? FileManager.default.removeItem(at: url)
             return
@@ -91,6 +94,7 @@ final class SystemWallpaper {
     /// Put each screen's own wallpaper back wherever our still is showing.
     func restoreAll() {
         pending?.cancel()
+        generation += 1
         for screen in NSScreen.screens {
             let key = SystemWallpaper.key(for: screen)
             guard let current = SystemWallpaper.entry(for: screen),
