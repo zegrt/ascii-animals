@@ -20,6 +20,8 @@ public struct Settings: Codable, Equatable, Sendable {
     public var grid = true
     public var wakeColor: WakeColor = .cyan
     public var interaction = true
+    /// One ocean spanning every display (otherwise one per display).
+    public var sharedOcean = true
     public var fps = 30
     public var lowPowerAnimates = false
     public var matchSystemWallpaper = true
@@ -43,7 +45,7 @@ public struct Settings: Codable, Equatable, Sendable {
     }
 
     private enum K: String, CodingKey {
-        case sharks, fishDensity, speed, appearance, calm, grid, wakeColor, interaction, fps, lowPowerAnimates, matchSystemWallpaper, paused
+        case sharks, fishDensity, speed, appearance, calm, grid, wakeColor, interaction, sharedOcean, fps, lowPowerAnimates, matchSystemWallpaper, paused
     }
 
     public init(from decoder: Decoder) throws {
@@ -62,6 +64,7 @@ public struct Settings: Codable, Equatable, Sendable {
         grid = get(.grid, d.grid)
         wakeColor = get(.wakeColor, d.wakeColor)
         interaction = get(.interaction, d.interaction)
+        sharedOcean = get(.sharedOcean, d.sharedOcean)
         fps = get(.fps, d.fps)
         lowPowerAnimates = get(.lowPowerAnimates, d.lowPowerAnimates)
         matchSystemWallpaper = get(.matchSystemWallpaper, d.matchSystemWallpaper)
