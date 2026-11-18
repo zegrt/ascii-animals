@@ -30,10 +30,11 @@ enum Uninstaller {
             UserDefaults.standard.synchronize()
             CFPreferencesAppSynchronize(id as CFString)
         }
+        // Synchronous, so it's done before the process exits.
         let bundle = Bundle.main.bundleURL
         if bundle.pathExtension == "app" {
-            NSWorkspace.shared.recycle([bundle]) { _, error in
-                if let error { NSLog("ASCII Sharks: could not move the app to the Trash: %@", "\(error)") }
+            do { try fm.trashItem(at: bundle, resultingItemURL: nil) } catch {
+                problems.append("moving the app to the Trash: \(error.localizedDescription)")
             }
         }
         return problems
