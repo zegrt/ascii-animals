@@ -45,7 +45,10 @@
     <td width="50%" valign="top">
 
 **🖥 A real wallpaper**<br>
-It sits above the system wallpaper and below your icons, on every Space and every display. It fades in, and keeps swimming when displays change.
+It sits above the system wallpaper and below your icons, on every Space. It fades in, and keeps swimming when displays change.
+
+**🌊 One ocean across your displays**<br>
+With a second monitor, the screens join into one ocean: sharks patrol a screen each and now and then swim across to the next one. Gaps between screens, and the space beside offset ones, count as walls.
 
 **🔋 Gentle on the battery**<br>
 It pauses when covered, locked, asleep or behind the screensaver. On battery or when the Mac is hot, it runs at 15 fps. In Low Power Mode it holds a still frame unless you turn animation on.
@@ -141,7 +144,7 @@ The design and its review are in [`docs/plans/`](docs/plans).
 - **Spaces:** macOS changes wallpapers one Space at a time and gives apps no way to identify Spaces. So the matching still goes on the Space where the app starts. Wallpapers it doesn't recognise are never touched, and only what it set is restored.
 - **Aerial and dynamic wallpapers:** these come back as whatever image macOS reports for them.
 - **Signing:** the app is signed ad hoc, not by a registered Apple developer. That's why macOS asks you to click Open Anyway the first time you open it.
-- **On the list:** a screensaver edition, and one ocean that swims across several displays.
+- **On the list:** a screensaver edition.
 
 ## Credits
 
