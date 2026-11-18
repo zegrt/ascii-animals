@@ -25,6 +25,57 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         let menu = NSMenu()
         menu.delegate = self
         item.menu = menu
+        app.updates.onChange = { [weak self] in self?.refreshIcon() }
+        refreshIcon()
+    }
+
+    /// The icon's frame on screen, for the welcome's "Settings live up here"; nil when hidden.
+    var iconScreenFrame: NSRect? {
+        guard item.isVisible, let w = item.button?.window, w.isVisible else { return nil }
+        return w.frame
+    }
+
+    /// The crash notice goes once it's been acted on.
+    private var crashNoticeDismissed = false
+
+    /// The fish, with a small accent dot while an update waits.
+    private func refreshIcon() {
+        guard let fish = NSImage(systemSymbolName: "fish", accessibilityDescription: "ASCII Sharks") else { return }
+        guard app.updates.available != nil else {
+            fish.isTemplate = true
+            item.button?.image = fish
+            item.button?.toolTip = "ASCII Sharks"
+            return
+        }
+        let size = fish.size
+        let badged = NSImage(size: size, flipped: false) { rect in
+            // Template-style drawing in the menu bar's own colour, plus a coloured dot.
+            // Drawn per draw, so it follows the menu bar's own (wallpaper-dependent) appearance.
+            let tint = NSAppearance.currentDrawing().bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor.white : NSColor.black
+            let glyph = NSImage(size: size, flipped: false) { r in
+                fish.draw(in: r)
+                tint.set()
+                r.fill(using: .sourceIn)
+                return true
+            }
+            glyph.draw(in: rect)
+            let d: CGFloat = 6
+            let dot = NSRect(x: rect.maxX - d + 1, y: rect.maxY - d, width: d, height: d)
+            NSGraphicsContext.current?.compositingOperation = .clear
+            NSBezierPath(ovalIn: dot.insetBy(dx: -1.5, dy: -1.5)).fill()
+            NSGraphicsContext.current?.compositingOperation = .sourceOver
+            NSColor.controlAccentColor.setFill()
+            NSBezierPath(ovalIn: dot).fill()
+            return true
+        }
+        badged.isTemplate = false
+        badged.accessibilityDescription = "ASCII Sharks, update available"
+        item.button?.image = badged
+        item.button?.toolTip = "ASCII Sharks — an update is available"
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        if menu === item.menu { OnboardingController.statusMenuOpened() }
     }
 
     // MARK: Building
@@ -32,6 +83,18 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let s = app.store.settings
+
+        // Things that want attention come first.
+        var notices = false
+        if let update = app.updates.available {
+            menu.addItem(updateItem(update))
+            notices = true
+        }
+        if app.crashedLastTime && !crashNoticeDismissed {
+            menu.addItem(crashItem())
+            notices = true
+        }
+        if notices { menu.addItem(.separator()) }
 
         let status = OceanStatus.make(settings: s, mode: app.director?.mode, inputs: app.signals.inputs,
                                       error: app.startupError ?? app.director?.lastError)
@@ -85,9 +148,61 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             .toolTip = "Put your own wallpaper back and stop matching the lock screen."
         add(menu, "Open at Login", #selector(toggleLogin), state: LoginItem.isEnabled)
         menu.addItem(.separator())
+
+        add(menu, "About ASCII Sharks", #selector(openAbout), symbol: "info.circle")
+        add(menu, app.updates.state == .checking ? "Checking for Updates…" : "Check for Updates…",
+            app.updates.state == .checking ? nil : #selector(checkUpdates), symbol: "arrow.triangle.2.circlepath")
+        let help = NSMenu()
+        add(help, "Welcome Tour", #selector(welcomeTour), symbol: "sparkles")
+            .toolTip = "The first-launch welcome, again."
+        help.addItem(.separator())
+        add(help, "Report a Problem…", #selector(reportProblem), symbol: "exclamationmark.bubble")
+            .toolTip = "Opens a GitHub issue with diagnostics filled in. You see it before anything is sent."
+        add(help, "Copy Diagnostics", #selector(copyDiagnostics), symbol: "doc.on.clipboard")
+            .toolTip = "Version, macOS, displays and settings, for pasting into a message."
+        help.addItem(.separator())
+        add(help, "Uninstall ASCII Sharks…", #selector(uninstall), symbol: "trash")
+            .toolTip = "Puts your wallpaper back and removes the app and everything it saved."
+        submenu(menu, "Help", symbol: "questionmark.circle", help)
+        menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit ASCII Sharks", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quit.image = symbol("power")
         menu.addItem(quit)
+    }
+
+    /// "Update to 2.3 available…": accented, so it's seen without shouting.
+    private func updateItem(_ r: LatestRelease) -> NSMenuItem {
+        let it = NSMenuItem(title: "Update to \(r.tag.hasPrefix("v") ? String(r.tag.dropFirst()) : r.tag) available…",
+                            action: #selector(downloadUpdate), keyEquivalent: "")
+        it.target = self
+        let font = NSFont.menuFont(ofSize: 0)
+        it.attributedTitle = NSAttributedString(string: it.title, attributes: [
+            .font: NSFont.systemFont(ofSize: font.pointSize, weight: .semibold),
+            .foregroundColor: NSColor.controlAccentColor,
+        ])
+        let config = NSImage.SymbolConfiguration(paletteColors: [.white, .controlAccentColor])
+        it.image = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: nil)?.withSymbolConfiguration(config)
+        subtitle(it, "Download the new version from GitHub")
+        it.toolTip = r.notes.isEmpty ? nil : String(r.notes.prefix(400))
+        return it
+    }
+
+    /// "Quit unexpectedly last time — Report…"
+    private func crashItem() -> NSMenuItem {
+        let it = NSMenuItem(title: "Quit unexpectedly last time — Report…", action: #selector(reportCrash), keyEquivalent: "")
+        it.target = self
+        let font = NSFont.menuFont(ofSize: 0)
+        let title = NSMutableAttributedString(string: "Quit unexpectedly last time", attributes: [
+            .font: font, .foregroundColor: NSColor.labelColor,
+        ])
+        title.append(NSAttributedString(string: " — Report…", attributes: [
+            .font: font, .foregroundColor: NSColor.secondaryLabelColor,
+        ]))
+        it.attributedTitle = title
+        let config = NSImage.SymbolConfiguration(paletteColors: [.systemOrange])
+        it.image = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Warning")?.withSymbolConfiguration(config)
+        it.toolTip = "Opens a GitHub issue with diagnostics filled in, so it can be fixed."
+        return it
     }
 
     /// "● Swimming · 30 fps": the first line, which can't be chosen.
@@ -169,6 +284,17 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         app.store.update { $0.matchSystemWallpaper = false }
         app.wallpaper?.restoreAll()
     }
+    @objc private func openAbout() { app.showAbout() }
+    @objc private func checkUpdates() { app.updates.checkNow(userInitiated: true) }
+    @objc private func downloadUpdate() { app.updates.download() }
+    @objc private func welcomeTour() { app.showWelcome() }
+    @objc private func reportProblem() { app.reportProblem() }
+    @objc private func reportCrash() {
+        crashNoticeDismissed = true
+        app.reportProblem()
+    }
+    @objc private func copyDiagnostics() { app.copyDiagnostics() }
+    @objc private func uninstall() { app.uninstall() }
     @objc private func toggleLogin() {
         do { try LoginItem.set(!LoginItem.isEnabled) } catch {
             NSApp.activate(ignoringOtherApps: true)
@@ -177,5 +303,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
 
     /// Settings changed (and once at launch): e.g. show or hide the menu-bar icon.
-    func apply(_ s: OceanKit.Settings) {}
+    func apply(_ s: OceanKit.Settings) {
+        if item.isVisible != s.showMenuBarIcon { item.isVisible = s.showMenuBarIcon }
+    }
 }
