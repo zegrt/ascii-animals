@@ -22,13 +22,19 @@ original `web.ts` to the 12 digits node prints (check `orbWebMatchesOriginal`). 
 
 ## web.ts → Web/OrbWeb.swift
 
-- **Typed arrays are `UnsafeMutableBufferPointer`s owned by the web**: fixed-size and shared by reference,
-  as `const { x } = this` aliases a typed array. `generate` frees the old buffers, so nothing may hold
-  one across a rebuild. Element types follow the original where they change behaviour: positions, `rest`,
-  `dew` and `speed` are `Float` (Float32Array; maths in `Double`, rounded on store, as JS does), `deg` is
-  wrapping `UInt16`, `pin`/`on` are `UInt8`. Node and link indices (`la`, `lb`) and the small enums
-  (`kind`, `state`) are `Int`, because Swift indexes with `Int`; their values never exceed the
-  original's ranges, so nothing changes.
+- **Typed arrays are `WebBuffer`s**: a small class owning a fixed-size buffer, shared by reference as
+  `const { x } = this` aliases a typed array. `generate` replaces them; a buffer held from before keeps
+  its memory, as an old typed array would. Hot loops index its raw buffer (`web.x.p`). Element types
+  follow the original where they change behaviour: positions, `rest`, `dew` and `speed` are `Float`
+  (Float32Array; maths in `Double`, rounded on store, as JS does), `deg` is wrapping `UInt16`,
+  `pin`/`on` are `UInt8`. Node and link indices (`la`, `lb`) and the small enums (`kind`, `state`) are
+  `Int`, because Swift indexes with `Int`; their values never exceed the original's ranges.
+- **Stale link indices read as "not laid".** A leg can hold a link index from before a rebuild; in JS
+  `state[l]` past the end is `undefined`, so `cut`, `jolt` and `load` do nothing and `state[l] === 1`
+  is false. Swift buffers have no `undefined`, so those methods also check `l < m` (as does `lay`, where
+  JS would only miscount `laid`; nothing lays a stale link), and
+  `isLaid(l)` stands for `web.state[l] === 1`: **ports of spider.ts, weaver.ts and flies.ts write every
+  `web.state[x] === 1` as `web.isLaid(x)`.** `pos` on a stale link returns NaN, as JS does.
 - **`WebOptions` is the initialiser's labelled arguments**, plus `random: WebRandom`.
 - **`prey` is `[AnyObject]`** until flies.ts is ported (Task 9 types it `[Fly]`).
 - **Sorts are stable.** `Array.prototype.sort` is stable; Swift's `sort` doesn't promise to be, so the

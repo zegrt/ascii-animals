@@ -99,6 +99,30 @@ func webChecks() {
         }
         try expect(w.broken == 0, "plucking at the hub snapped \(w.broken) threads")
     }
+    // A leg can still hold a link index from before a rebuild (spider.ts, weaver.ts): past the new web's
+    // links it must read as "not laid" and lay/cut/jolt/load must do nothing, as in JS.
+    check("orbWebStaleLinks") {
+        let w = OrbWeb(cx: 900, cy: 600, radius: 480, depth: 1, cw: 12, ch: 17, stab: true, random: WebRandom(seed: 3))
+        w.buildInstant()
+        let stale = w.m - 1
+        let oldX = w.x                       // a buffer held across the rebuild, as `const { x } = web` would be
+        let before = oldX[0]
+        w.cx = 400; w.cy = 300; w.radius = 200
+        w.generate(Vec(x: 400, y: 300))
+        try expect(w.m <= stale, "rebuild didn't shrink the web (m \(w.m))")
+        try expect(oldX[0] == before && oldX.count > w.n, "old buffer changed or freed")
+        let xs = (0..<w.n).map { w.x[$0] }, ys = (0..<w.n).map { w.y[$0] }
+        let laid = w.laid, broken = w.broken, radials = w.radialsLaid
+        for l in [stale, w.m, w.m + 1000, -1] {
+            try expect(!w.isLaid(l), "isLaid(\(l))")
+            w.jolt(l, 0.5, 3); w.load(l, 0.5, 2); w.cut(l, true); w.cut(l); w.lay(l)
+            let p = w.pos(l, 0.5)
+            try expect(l >= 0 && l < w.m || (p.x.isNaN && p.y.isNaN), "pos(\(l)) \(p)")
+        }
+        try expect(w.laid == laid && w.broken == broken && w.radialsLaid == radials, "counts changed")
+        for i in 0..<w.n { try expect(w.x[i] == xs[i] && w.y[i] == ys[i], "node \(i) moved") }
+        try expect(w.isLaid(w.route.first { $0.lay }!.link) == false, "a fresh web's route link reads laid")
+    }
     check("orbWebDeterministic") {
         let a = makeWeb(seed: 5, stab: true), b = makeWeb(seed: 5, stab: true)
         a.buildInstant(); b.buildInstant()
@@ -147,6 +171,16 @@ func webChecks() {
                            rin: 52.86, spacing: 57.4372368493, outer: 235.461353535, sumX: 27133.3263855, sumY: 21818.3656006, sumRest: 5299.04349375, hubX: 500.928405762, hubY: 400.406799316),
                 WebSummary(seed: 389830, N: 9, T: 2, n: 54, m: 97, route: 141, spiralStart: 121, laid: 97, broken: 0, radialsLaid: 9, on: 54, dew: 0,
                            rin: 52.86, spacing: 57.4372368493, outer: 235.461353535, sumX: 27130.3445129, sumY: 21813.9998474, sumRest: 5299.04349375, hubX: 500.903656006, hubY: 400.396514893),
+            ]),
+            ("D", { OrbWeb(cx: 900, cy: 600, radius: 480, depth: 1, cw: 12, ch: 17, stab: true, random: WebRandom(seed: 3)) }, [
+                WebSummary(seed: 113451, N: 20, T: 6, n: 191, m: 383, route: 583, spiralStart: 425, laid: 5, broken: 0, radialsLaid: 0, on: 10, dew: 7,
+                           rin: 129.6, spacing: 54.6407144041, outer: 651.115797167, sumX: 170124.342117, sumY: 118371.309422, sumRest: 28084.6339831, hubX: 900, hubY: 600),
+                WebSummary(seed: 113451, N: 20, T: 6, n: 191, m: 383, route: 583, spiralStart: 425, laid: 383, broken: 0, radialsLaid: 20, on: 191, dew: 7,
+                           rin: 129.6, spacing: 54.6407144041, outer: 651.115797167, sumX: 169803.063583, sumY: 119436.547947, sumRest: 28084.6339831, hubX: 898.626770020, hubY: 607.451721191),
+                WebSummary(seed: 113451, N: 20, T: 6, n: 191, m: 383, route: 583, spiralStart: 425, laid: 383, broken: 0, radialsLaid: 20, on: 191, dew: 7,
+                           rin: 129.6, spacing: 54.6407144041, outer: 651.115797167, sumX: 169820.008774, sumY: 119443.701649, sumRest: 28084.6339831, hubX: 898.717712402, hubY: 607.489196777),
+                WebSummary(seed: 113451, N: 20, T: 6, n: 191, m: 383, route: 583, spiralStart: 425, laid: 383, broken: 0, radialsLaid: 20, on: 191, dew: 7,
+                           rin: 129.6, spacing: 54.6407144041, outer: 651.115797167, sumX: 169814.842606, sumY: 119442.046299, sumRest: 28084.6339831, hubX: 898.713867188, hubY: 607.494140625),
             ]),
         ]
         for (label, make, want) in cases {

@@ -75,13 +75,26 @@ public struct Radial {
     public var L: Double
 }
 
-/// The original's typed arrays (Float32Array, Uint8Array, …): fixed-size buffers shared by reference, so
-/// `let x = web.x` aliases the web's storage as `const { x } = this` does. Owned by the web; replaced (and
-/// the old ones freed) by `generate`, so don't hold one across a rebuild.
-@inline(__always) private func typed<T>(_ count: Int, _ v: T) -> UnsafeMutableBufferPointer<T> {
-    let b = UnsafeMutableBufferPointer<T>.allocate(capacity: count)
-    b.initialize(repeating: v)
-    return b
+/// One of the original's typed arrays (Float32Array, Uint8Array, …): a fixed-size buffer shared by
+/// reference, so `let x = web.x` aliases the web's storage as `const { x } = this` does. `generate`
+/// replaces a web's buffers; one still held from before keeps its memory, as an old typed array would.
+/// Hot loops index `p` (the raw buffer) directly.
+public final class WebBuffer<T> {
+    public let p: UnsafeMutableBufferPointer<T>
+
+    init(_ count: Int, _ v: T) {
+        p = UnsafeMutableBufferPointer<T>.allocate(capacity: count)
+        p.initialize(repeating: v)
+    }
+
+    deinit { p.deallocate() }
+
+    @inline(__always) public var count: Int { p.count }
+
+    @inline(__always) public subscript(i: Int) -> T {
+        get { p[i] }
+        set { p[i] = newValue }
+    }
 }
 
 public final class OrbWeb {
@@ -107,23 +120,23 @@ public final class OrbWeb {
     public private(set) var seed = 0.0
     /// Nodes.
     public private(set) var n = 0
-    public private(set) var x = UnsafeMutableBufferPointer<Float>(start: nil, count: 0)
-    public private(set) var y = UnsafeMutableBufferPointer<Float>(start: nil, count: 0)
-    public private(set) var ox = UnsafeMutableBufferPointer<Float>(start: nil, count: 0)
-    public private(set) var oy = UnsafeMutableBufferPointer<Float>(start: nil, count: 0)
-    public private(set) var pin = UnsafeMutableBufferPointer<UInt8>(start: nil, count: 0)
-    public private(set) var on = UnsafeMutableBufferPointer<UInt8>(start: nil, count: 0)
-    public private(set) var deg = UnsafeMutableBufferPointer<UInt16>(start: nil, count: 0)
-    public private(set) var speed = UnsafeMutableBufferPointer<Float>(start: nil, count: 0)
+    public private(set) var x = WebBuffer<Float>(0, 0)
+    public private(set) var y = WebBuffer<Float>(0, 0)
+    public private(set) var ox = WebBuffer<Float>(0, 0)
+    public private(set) var oy = WebBuffer<Float>(0, 0)
+    public private(set) var pin = WebBuffer<UInt8>(0, 0)
+    public private(set) var on = WebBuffer<UInt8>(0, 0)
+    public private(set) var deg = WebBuffer<UInt16>(0, 0)
+    public private(set) var speed = WebBuffer<Float>(0, 0)
     /// Links (threads). state: 0 unlaid · 1 laid · 2 broken.
     public private(set) var m = 0
-    public private(set) var la = UnsafeMutableBufferPointer<Int>(start: nil, count: 0)
-    public private(set) var lb = UnsafeMutableBufferPointer<Int>(start: nil, count: 0)
-    public private(set) var kind = UnsafeMutableBufferPointer<Int>(start: nil, count: 0)
-    public private(set) var state = UnsafeMutableBufferPointer<Int>(start: nil, count: 0)
-    public private(set) var rest = UnsafeMutableBufferPointer<Float>(start: nil, count: 0)
+    public private(set) var la = WebBuffer<Int>(0, 0)
+    public private(set) var lb = WebBuffer<Int>(0, 0)
+    public private(set) var kind = WebBuffer<Int>(0, 0)
+    public private(set) var state = WebBuffer<Int>(0, 0)
+    public private(set) var rest = WebBuffer<Float>(0, 0)
     /// Where on a capture thread a dew bead sits, or -1.
-    public private(set) var dew = UnsafeMutableBufferPointer<Float>(start: nil, count: 0)
+    public private(set) var dew = WebBuffer<Float>(0, 0)
     public private(set) var hub = 0
     public private(set) var chain: [[Int]] = []
     public private(set) var rad: [Radial] = []
@@ -154,14 +167,6 @@ public final class OrbWeb {
         self.home = Vec(x: cx, y: cy)
         self.random = random
         generate()
-    }
-
-    deinit { releaseBuffers() }
-
-    private func releaseBuffers() {
-        for b in [x, y, ox, oy, speed, rest, dew] { b.deallocate() }
-        pin.deallocate(); on.deallocate(); deg.deallocate()
-        la.deallocate(); lb.deallocate(); kind.deallocate(); state.deallocate()
     }
 
     /// Build a fresh web around (cx, cy). `startNear` picks the frame corner the route starts from.
@@ -397,28 +402,27 @@ public final class OrbWeb {
         // ── typed state ──
         let n = X.count
         let m = LA.count
-        releaseBuffers()
         self.n = n
         self.m = m
-        self.x = typed(n, 0)
-        self.y = typed(n, 0)
-        self.ox = typed(n, 0)
-        self.oy = typed(n, 0)
+        self.x = WebBuffer(n, 0)
+        self.y = WebBuffer(n, 0)
+        self.ox = WebBuffer(n, 0)
+        self.oy = WebBuffer(n, 0)
         for i in 0..<n {
             x[i] = Float(X[i]); y[i] = Float(Y[i]); ox[i] = Float(X[i]); oy[i] = Float(Y[i])
         }
-        self.pin = typed(n, 0)
+        self.pin = WebBuffer(n, 0)
         for i in 0..<n { pin[i] = PIN[i] }
-        self.on = typed(n, 0)
-        self.deg = typed(n, 0)
-        self.speed = typed(n, 0)
-        self.la = typed(m, 0)
-        self.lb = typed(m, 0)
-        self.kind = typed(m, 0)
+        self.on = WebBuffer(n, 0)
+        self.deg = WebBuffer(n, 0)
+        self.speed = WebBuffer(n, 0)
+        self.la = WebBuffer(m, 0)
+        self.lb = WebBuffer(m, 0)
+        self.kind = WebBuffer(m, 0)
         for l in 0..<m { la[l] = LA[l]; lb[l] = LB[l]; kind[l] = LK[l] }
-        self.state = typed(m, 0)
-        self.rest = typed(m, 0)
-        self.dew = typed(m, -1)
+        self.state = WebBuffer(m, 0)
+        self.rest = WebBuffer(m, 0)
+        self.dew = WebBuffer(m, -1)
         for l in 0..<m {
             let k = LK[l]
             rest[l] = Float(hypot(X[LB[l]] - X[LA[l]], Y[LB[l]] - Y[LA[l]]) * TENSION[k])
@@ -452,8 +456,12 @@ public final class OrbWeb {
         pin[i] == 0 && i != held && !(i == hub && hubPinned)
     }
 
+    /// `web.state[l] === 1`. A link index can outlive a rebuild (a leg still holding it): past the end,
+    /// JS reads undefined, "not laid", and so does this.
+    @inline(__always) public func isLaid(_ l: Int) -> Bool { l >= 0 && l < m && state.p[l] == 1 }
+
     public func lay(_ l: Int) {
-        if l < 0 || state[l] == 1 { return }
+        if l < 0 || l >= m || state[l] == 1 { return }
         let a = la[l]
         let b = lb[l]
         state[l] = 1
@@ -467,7 +475,7 @@ public final class OrbWeb {
 
     /// Take a thread down: `broken` marks it snapped rather than eaten.
     public func cut(_ l: Int, _ broken: Bool = false) {
-        if l < 0 || state[l] != 1 { return }
+        if !isLaid(l) { return }
         let a = la[l]
         let b = lb[l]
         state[l] = broken ? 2 : 0
@@ -491,12 +499,12 @@ public final class OrbWeb {
     public var damage: Double { Double(broken) / Double(max(1, laid + broken)) }
 
     public func step(_ t: Double) {
-        let n = self.n, x = self.x, y = self.y, ox = self.ox, oy = self.oy, on = self.on, speed = self.speed
-        let la = self.la, lb = self.lb, state = self.state, rest = self.rest, kind = self.kind, m = self.m
+        let n = self.n, x = self.x.p, y = self.y.p, ox = self.ox.p, oy = self.oy.p, on = self.on.p, speed = self.speed.p
+        let la = self.la.p, lb = self.lb.p, state = self.state.p, rest = self.rest.p, kind = self.kind.p, m = self.m
         let g = 0.012 * (radius / 300)
         let wind = noise1(t * 0.12, seed) * 0.0026 * (radius / 300)
         // isFree(i) with its inputs read once: nothing below changes them before the break pass.
-        let pin = self.pin, held = self.held, hub = self.hub, hubPinned = self.hubPinned
+        let pin = self.pin.p, held = self.held, hub = self.hub, hubPinned = self.hubPinned
         @inline(__always) func isFree(_ i: Int) -> Bool { pin[i] == 0 && i != held && !(i == hub && hubPinned) }
         for i in 0..<n {
             if on[i] == 0 || !isFree(i) { continue }
@@ -545,7 +553,7 @@ public final class OrbWeb {
      */
     public func pluck(_ px: Double, _ py: Double, _ vx: Double, _ vy: Double, _ R: Double) -> Double {
         if hypot(px - cx, py - cy) > outer + R { return 0 }
-        let x = self.x, y = self.y, la = self.la, lb = self.lb, state = self.state, kind = self.kind, m = self.m
+        let x = self.x.p, y = self.y.p, la = self.la.p, lb = self.lb.p, state = self.state.p, kind = self.kind.p, m = self.m
         var total = 0.0
         let force = min(R * 0.12, 2.2)
         for l in 0..<m {
@@ -576,7 +584,7 @@ public final class OrbWeb {
 
     /// A struggling fly or a landing foot: shake a thread at t.
     public func jolt(_ l: Int, _ t: Double, _ s: Double) {
-        if l < 0 || state[l] != 1 { return }
+        if !isLaid(l) { return }
         let a = la[l]
         let b = lb[l]
         let ang = random.range(0, TAU)
@@ -588,7 +596,7 @@ public final class OrbWeb {
 
     /// Pull a point of a thread down by `w` px (the spider's weight through a foot).
     public func load(_ l: Int, _ t: Double, _ w: Double) {
-        if l < 0 || state[l] != 1 { return }
+        if !isLaid(l) { return }
         let a = la[l]
         let b = lb[l]
         if isFree(a) { y[a] = Float(Double(y[a]) + w * (1 - t)) }
@@ -597,7 +605,7 @@ public final class OrbWeb {
 
     /// Nearest point of live silk to (px, py) within r, as { link, t }.
     public func snap(_ px: Double, _ py: Double, _ r: Double) -> ThreadPoint? {
-        let x = self.x, y = self.y, la = self.la, lb = self.lb, state = self.state, kind = self.kind, m = self.m
+        let x = self.x.p, y = self.y.p, la = self.la.p, lb = self.lb.p, state = self.state.p, kind = self.kind.p, m = self.m
         var best = r * r
         var found = -1
         var ft = 0.0
@@ -618,7 +626,7 @@ public final class OrbWeb {
     /// Where the capture spiral crosses the segment (x0, y0) → (x1, y1), as { link, t }.
     public func catches(_ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double) -> ThreadPoint? {
         if hypot(x1 - cx, y1 - cy) > outer + 4 { return nil }
-        let x = self.x, y = self.y, la = self.la, lb = self.lb, state = self.state, kind = self.kind, m = self.m
+        let x = self.x.p, y = self.y.p, la = self.la.p, lb = self.lb.p, state = self.state.p, kind = self.kind.p, m = self.m
         for l in 0..<m {
             if state[l] != 1 || kind[l] != SPIRAL { continue }
             let a = la[l]
@@ -630,6 +638,8 @@ public final class OrbWeb {
     }
 
     @inline(__always) public func pos(_ l: Int, _ t: Double) -> Vec {
+        // A stale link: JS reads undefined nodes and gets NaN.
+        if l < 0 || l >= m { return Vec(x: .nan, y: .nan) }
         let a = la[l]
         let b = lb[l]
         return Vec(x: Double(x[a]) + (Double(x[b]) - Double(x[a])) * t, y: Double(y[a]) + (Double(y[b]) - Double(y[a])) * t)
