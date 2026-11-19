@@ -13,7 +13,7 @@ The first release adds a port of **[ascii-spiders](https://github.com/stackedlol
 - Habitats, chosen one at a time from the menu and Settings: **Ocean** (today's sharks, unchanged), **Web** (the spiders port), **Meadow** (butterflies, ours).
 - Every habitat shares: the grid, Geist Mono, Dark/Light/Calm themes, the power policy (pause when covered/locked/asleep, 15 fps economy, still in Low Power Mode), multiple displays, the menu-bar status, the lock-screen still, self-updating.
 - One gesture vocabulary across habitats: **move** disturbs the material, **click** offers something, **holding still** invites trust (see table below).
-- The app is renamed **ASCII Animals** without breaking anyone: same bundle ID, settings kept, self-update carries existing users across.
+- **ASCII Animals is a new app in a new repo** (`zegrt/ascii-animals`, started from this repo's history). ASCII Sharks stays frozen at 2.3 in `zegrt/ascii-sharks-wallpaper`. People moving over keep their settings, and the two apps never run at once.
 
 ## Non-goals (this project)
 
@@ -133,25 +133,25 @@ Material is a meadow of flowers along the bottom of each screen plus scattered f
 
 ### Product
 
-- **Name:** ASCII Animals (`CFBundleName`/`CFBundleDisplayName`, menus, windows, About, README, onboarding). **Bundle ID stays `local.ascii-sharks.wallpaper`.** Company naming as today (XERO WORKS).
-- **GitHub repo is renamed to `zegrt/ascii-animals` when 3.0 ships** *(owner's decision; the exact name is the builder's call)*. GitHub redirects the old API and page URLs, so 2.3 apps still learn about 3.0, but their updater only trusts `zegrt/ascii-sharks-wallpaper` downloads and will fall back to "download the DMG". The owner accepts that one manual update: few people are on 2.3. In 3.0: `AppInfo` URLs, the README, badges, the Release workflow and the git remote move to the new name, and `SelfUpdate.isTrustedDownload` trusts the release's own repo (from its `html_url`) as long as the owner is `zegrt`, so a future rename never breaks updates. Order: publish 3.0's code, rename the repo, then tag `v3.0`.
-- **App file name:** existing installs are updated in place, so their bundle stays `ASCII Sharks.app` on disk unless the updater renames it. New downloads are `ASCII Animals.app`. Builder decides whether the updater renames the bundle across this one release; if it does, the login item and running-copy checks must survive it.
+- **Name:** ASCII Animals everywhere (`CFBundleName`/`CFBundleDisplayName`, the `.app` file, the DMG and zip, menus, windows, About, README, onboarding, log folder). **New bundle ID `local.ascii-animals.wallpaper`** *(owner's decision)*. Company naming as today (XERO WORKS). Version **3.0**, carrying on from Sharks' numbering.
+- **New repo `zegrt/ascii-animals`; the old one is frozen at 2.3** *(owner's decision)*. The new repo starts from this repo's full history. `AppInfo` URLs, `SelfUpdater.repoPath`, the README, badges and the Release workflow point at the new repo from the first release. The old repo gets one README line pointing to ASCII Animals and no new release; installed 2.3 apps keep working and stop finding updates.
+- **Hand-over from ASCII Sharks** (first launch of ASCII Animals, and any launch while Sharks is still around): if ASCII Sharks (`local.ascii-sharks.wallpaper`) is running, ask it to quit (SIGTERM, as `Tools/install.sh` does), which puts the user's own wallpaper back; then copy its settings (`settings.v2` in its defaults domain) into ASCII Animals once, keeping the habitat on Ocean; if it was set to open at login, turn Animals' login item on. Then offer, once, to move ASCII Sharks to the Trash (it can't remove its own login item from here; say so if it was on). Nothing happens when Sharks isn't installed.
 - **Menu:** a Habitat section (Ocean, Web, Meadow) near the top; per-habitat items (shark line-up / spider roster / butterfly species) show only for the current habitat. The menu-bar glyph stays the fish.
 - **Settings:** a Habitat picker at the top; the live preview shows the current habitat; sections that belong to one habitat show only there.
-- **Welcome tour:** new users pick their habitat; Web is never preselected. Existing users stay on Ocean.
+- **Welcome tour:** new users pick their habitat; Web is never preselected. People coming from ASCII Sharks skip the tour and stay on Ocean.
 - **Switching:** a short dissolve, glyphs scattering and re-forming, rather than a cut.
 - **Lock-screen still, power policy, Calm, Light/Dark, Report a Problem diagnostics:** work for every habitat; diagnostics include the habitat.
 
 ### Settings model
 
-`Settings` gains `habitat` (default `ocean`) and per-habitat fields (Web roster, flies, jumper; Meadow species, density). Old settings decode with today's defaults; Ocean fields unchanged.
+`Settings` gains `habitat` (default `ocean`) and per-habitat fields (Web roster, flies, jumper; Meadow species, density). Settings imported from ASCII Sharks decode with today's defaults for the new fields; Ocean fields unchanged.
 
 ## Order of work
 
 1. **Habitat host refactor** — no visible change. Ocean renders pixel-identical stills for the same seed (check), all existing checks pass, energy unchanged.
 2. **Cell canvas + generic compose** — with a trivial test habitat in checks.
 3. **Web port** — parity checks against the original, side-by-side recording for the owner, energy within budget.
-4. **Product** — habitat menu/settings/welcome, switching dissolve, rename to ASCII Animals, README/About/credits. Release **3.0** (Ocean + Web).
+4. **Product** — habitat menu/settings/welcome, switching dissolve, the new identity (name, bundle ID, repo, URLs), the hand-over from ASCII Sharks, README/About/credits, the old repo's pointer line. Release **3.0** (Ocean + Web) from the new repo.
 5. **Meadow** — research, prototype as recorded frames (`OceanTool frames`) for owner review before wiring into the app, ten-minute watch, energy within budget. Release **3.1**.
 
 ## Left to the builder
