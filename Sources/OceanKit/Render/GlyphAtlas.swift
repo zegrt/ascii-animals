@@ -54,6 +54,10 @@ public enum GlyphAtlas {
         case canvas
     }
 
+    /// Device pixels Chrome's canvas glyphs land above the em-box middle baseline (fitted at 1x and 2x against Chrome
+    /// 158's glyph sheet, Tools/web-reference/parity; pinned by `webGlyphsMatchChrome`).
+    static let chromeRasterNudge: CGFloat = 1
+
     public static func makeBytes(cell: CGSize, scale: CGFloat, middle: Middle = .ocean) throws -> Bytes {
         let slotW = Int((cell.width * scale).rounded())
         let slotH = Int((cell.height * scale).rounded())
@@ -71,7 +75,8 @@ public enum GlyphAtlas {
         let size = (cell.height * 0.74).rounded() * scale
         let font = try font(size: size)
         let ascent = CTFontGetAscent(font), descent = CTFontGetDescent(font)
-        let aboveMiddle = middle == .ocean ? (ascent - descent) / 2 : size * (ascent - descent) / (2 * (ascent + descent)) - 1
+        let aboveMiddle = middle == .ocean ? (ascent - descent) / 2
+                                           : size * (ascent - descent) / (2 * (ascent + descent)) - chromeRasterNudge
         let white = CGColor(gray: 1, alpha: 1)
         for (i, g) in glyphs.enumerated() {
             let attr = NSAttributedString(string: g, attributes: [

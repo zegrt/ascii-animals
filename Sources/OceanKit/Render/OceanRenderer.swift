@@ -1,6 +1,10 @@
 import CoreGraphics
 import Foundation
 import Metal
+import os
+
+/// The renderer's rare failures, in the unified log (OceanKit has no app log of its own).
+private let renderLog = Logger(subsystem: "local.ascii-animals.wallpaper", category: "render")
 
 public struct RenderError: Error, CustomStringConvertible {
     public let description: String
@@ -76,8 +80,10 @@ public final class ViewportRenderer {
     private var wakeCurrent = 0
     private var cells: MTLTexture!
     private var atlas: MTLTexture!
-    /// The canvas habitats' atlas (a browser canvas's middle baseline), made on first use.
+    /// The canvas habitats' atlas (a browser canvas's middle baseline), made on first use. If making it fails, that
+    /// is logged once and the Ocean's atlas stands in until the next resize.
     private var canvasAtlas: MTLTexture?
+    private var canvasAtlasFailed = false
     private var needsClear = true
     /// Canvas habitats: the CPU grid and, per ring slot, its upload (block, ink, glyph, overlay ink and glyph).
     private var canvas: CellCanvas?
@@ -134,6 +140,7 @@ public final class ViewportRenderer {
         fishBytes = .allocate(capacity: c * rows * 4)
         atlas = try GlyphAtlas.make(device: r.device, cell: grid.cell, scale: scale)
         canvasAtlas = nil
+        canvasAtlasFailed = false
         needsClear = true
         canvas = nil
         canvasTextures = []
@@ -218,7 +225,14 @@ public final class ViewportRenderer {
             background: SIMD4(c.background, Float(scale)),
             gridColor: c.gridColor,
             misc: SIMD4(reveal, 0, 0, 0))
-        if canvasAtlas == nil { canvasAtlas = try? GlyphAtlas.make(device: r.device, cell: grid.cell, scale: scale, middle: .canvas) }
+        if canvasAtlas == nil && !canvasAtlasFailed {
+            do {
+                canvasAtlas = try GlyphAtlas.make(device: r.device, cell: grid.cell, scale: scale, middle: .canvas)
+            } catch {
+                canvasAtlasFailed = true
+                renderLog.error("canvas glyph atlas failed (\(String(describing: error), privacy: .public)); drawing with the Ocean's")
+            }
+        }
         let atlas = canvasAtlas ?? self.atlas
         pass(cb, target, r.canvasPipe, "canvas compose") { enc in
             enc.setFragmentBytes(&u, length: MemoryLayout<CanvasUniforms>.stride, index: 0)

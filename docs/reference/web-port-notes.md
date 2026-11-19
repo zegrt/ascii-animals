@@ -207,12 +207,14 @@ page), checked instead by `webWorldOnSeveralScreens`.
 **Method.** The original (89a7721) runs in Google Chrome 158 (headless, via puppeteer-core) from a reference-only page
 that is the demo page `/` (the default cast, no options) with `Math.random` replaced by the `WebRandom` stream, its
 animation-frame clock stopped so it steps only when told, `?theme=` for the palette and `?still=1` for the engine's
-`still` option. Vite serves it with the two edits the port makes (the nav-bar gap dropped, the move glide fixed),
-applied in memory. Ours is `OceanTool still … --habitat web [--light] --seed N` and `OceanTool frames … --habitat web
+`still` option, served from the clone patched as for the reference runs above (the nav-bar gap dropped, the move
+glide fixed). Ours is `OceanTool still … --habitat web [--light] --seed N` and `OceanTool frames … --habitat web
 --warmup 0 --interact` (the same pointer, click and jumper script, `Sources/OceanTool/WebScript.swift`). Same seed,
 same 1440 × 900 page, same device scale, same step count: the two show the same scene, so every difference is
 rendering. (`/?still=1` on the demo route is not a still: demo.ts ignores it, and only a reduced-motion preference
 freezes that page; the reference page passes `still: true`.)
+The harness (page, capture, glyph sheet and comparison scripts) and how to rerun it are in
+`Tools/web-reference/parity/` and `Tools/web-reference/README.md` ("Parity with the original").
 
 **Result** (seed 1, 1440 × 900 at 2x):
 - Every cell holds the same glyph in the same colour (peak colours equal; no cell differs by half its ink). Webs,

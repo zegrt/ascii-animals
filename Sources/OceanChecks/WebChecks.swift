@@ -743,7 +743,8 @@ func webPainterChecks() {
     check("webGlyphsMatchChrome") {
         // The canvas atlas draws each glyph where Chrome's canvas draws it, as heavy: ink boxes (coverage > 0.25)
         // within a pixel and total ink within 12 % of Chrome 158's own (600 13px Geist Mono, textBaseline middle at
-        // ch/2 + 1, a 12 x 17 cell), measured from its glyph sheet in Task 11 (docs/reference/web-port-notes.md).
+        // ch/2 + 1, a 12 x 17 cell). The numbers are sheet-boxes.py's on sheet.mjs's glyph sheet, both in
+        // Tools/web-reference/parity (README there, "Parity with the original"); docs/reference/web-port-notes.md.
         let chrome: [Int: [(Character, Int, Int, Int, Int, Double)]] = [
             1: [("|", 3, 14, 5, 6, 21.7), ("-", 8, 9, 3, 8, 8.9), ("_", 13, 14, 3, 8, 11.2), ("¯", 3, 4, 4, 7, 6.1), ("/", 3, 14, 3, 8, 22.5),
                 ("*", 3, 9, 3, 8, 23.1), ("x", 6, 12, 2, 8, 28.2), ("@", 3, 14, 2, 9, 53.6), ("O", 3, 12, 2, 9, 44.3)],
