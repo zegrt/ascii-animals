@@ -49,7 +49,7 @@ private func expectSummary(_ label: String, _ w: OrbWeb, _ want: WebSummary, tol
 }
 
 func webChecks() {
-    // Values printed by running the original math.ts under node (scratchpad port/math-ref.mjs).
+    // Values printed by running the original math.ts under node (Tools/web-reference/math-ref.mjs).
     check("webMathMatchesOriginal") {
         try expect(hash3(1, 2, 3) == 0.63940130639821291, "hash3(1,2,3) \(hash3(1, 2, 3))")
         try expect(hash3(-7, 123456, 91) == 0.98001145850867033, "hash3(-7,123456,91) \(hash3(-7, 123456, 91))")
@@ -132,7 +132,7 @@ func webChecks() {
             try expect(a.x[i] == b.x[i] && a.y[i] == b.y[i], "node \(i) differs")
         }
     }
-    // The original web.ts on the same random stream (scratchpad port/web-ref.mjs): generated, built,
+    // The original web.ts on the same random stream (Tools/web-reference/web-ref.mjs): generated, built,
     // ten seconds plucked at the hub, then one jolt and a step. It agrees to the 12 digits node prints;
     // floats get a small tolerance for libm vs V8 sin/cos/hypot.
     check("orbWebMatchesOriginal") {
@@ -291,6 +291,21 @@ func runWebScript(_ w: WebWorld, steps: Int, _ each: (Int) -> Void) {
     }
 }
 
+/// Every web's hub on a screen, and every frame corner (a pinned end of a frame thread) on the hub's screen.
+private func framesFit(_ w: WebWorld, _ rects: [CGRect]) throws {
+    let t = Terrain(rects: rects)
+    for web in w.webs {
+        let r = rects[t.rectIndex(near: SIMD2(web.cx, web.cy))]
+        try expect(r.contains(CGPoint(x: web.cx, y: web.cy)), "hub \(web.cx), \(web.cy) on no screen")
+        for l in 0..<web.m where web.kind[l] == FRAME {
+            for n in [web.la[l], web.lb[l]] where web.pin[n] != 0 {
+                let p = CGPoint(x: Double(web.x[n]), y: Double(web.y[n]))
+                try expect(r.insetBy(dx: -1, dy: -1).contains(p), "frame corner \(p) off its screen \(r)")
+            }
+        }
+    }
+}
+
 private func step(_ w: WebWorld, _ seconds: Double, until done: () -> Bool = { false }) {
     for _ in 0..<Int(seconds * 60) {
         w.step(1.0 / 60)
@@ -401,7 +416,7 @@ func webWorldChecks() {
         for (x, y) in zip(fa, fb) { try expect(x.0 == y.0 && x.1 == y.1, "\(x.0): \(x.1) vs \(y.1)") }
         try expect(a.random.unit() == b.random.unit(), "random streams differ")
     }
-    // The original world.ts run on the same random stream (scratchpad port9/world-ref.mjs, values in
+    // The original world.ts run on the same random stream (Tools/web-reference/world-ref.mjs, values in
     // WebWorldReference.swift), with the scripted pointer, two clicks and a torn-free fly: the demo page's wall at
     // 1800 x 1169 for ten simulated minutes (every weaver, jumper and fly state), and a small screen with a roster
     // longer than it has room for, laid out settled. Every number agrees to ~1e-13 and the stream ends at the same
@@ -442,19 +457,7 @@ func webWorldChecks() {
         let w = makeWorld(seed: 9, rects: rects)
         let t = Terrain(rects: rects)
         try expect(w.webs.count >= 3 && !w.weavers.isEmpty, "\(w.webs.count) webs")
-        func framesFit() throws {
-            for web in w.webs {
-                let r = rects[t.rectIndex(near: SIMD2(web.cx, web.cy))]
-                try expect(r.contains(CGPoint(x: web.cx, y: web.cy)), "hub \(web.cx), \(web.cy) on no screen")
-                for l in 0..<web.m where web.kind[l] == FRAME {
-                    for n in [web.la[l], web.lb[l]] where web.pin[n] != 0 {
-                        let p = CGPoint(x: Double(web.x[n]), y: Double(web.y[n]))
-                        try expect(r.insetBy(dx: -1, dy: -1).contains(p), "frame corner \(p) off its screen \(r)")
-                    }
-                }
-            }
-        }
-        try framesFit()
+        try framesFit(w, rects)
         var lost: String? = nil
         runWebScript(w, steps: 3600) { s in
             if let sp = w.jumper?.spider, !t.contains(SIMD2(sp.x, sp.y)) { lost = lost ?? "jumper off the screens at \(sp.x), \(sp.y), step \(s)" }
@@ -463,10 +466,43 @@ func webWorldChecks() {
             }
         }
         try expect(lost == nil, lost ?? "")
-        try framesFit()
+        try framesFit(w, rects)
         for v in w.weavers { try expect(v.spider.x.isFinite && v.spider.y.isFinite, "weaver not finite") }
         w.layout(terrain: .single(width: 1800, height: 1169), cell: CGSize(width: 13, height: 19), settled: false)
         step(w, 5)
         try expect(w.webs.count >= 3 && w.weavers.allSatisfy { $0.spider.x.isFinite }, "relayout onto one screen")
     }
+    // Several screens: a weaver past its life eats its web, moves house and builds again; the new web is still
+    // on its screen with its whole frame (Weaver.relocate's several-screens path).
+    check("webWorldRelocatesOnSeveralScreens") {
+        let rects = [CGRect(x: 0, y: 0, width: 2560, height: 1440), CGRect(x: 375, y: 1440, width: 1800, height: 1169)]
+        let t = Terrain(rects: rects)
+        let w = makeWorld(seed: 9, flies: false, jumper: false, rects: rects)
+        // How far a web's hub is inside the band where its whole frame (1.5 R) fits on its screen.
+        func slack(_ web: OrbWeb) -> Double {
+            let r = rects[t.rectIndex(near: SIMD2(web.home.x, web.home.y))]
+            return min(web.cx - Double(r.minX), Double(r.maxX) - web.cx, web.cy - Double(r.minY), Double(r.maxY) - web.cy) - web.radius * 1.5
+        }
+        // The idle weaver whose web sits tightest against that band, so a move could take it off the screen.
+        guard let v = w.weavers.filter({ $0.state == .idle }).min(by: { slack($0.web) < slack($1.web) }) else {
+            throw CheckFailure(detail: "no idle weaver")
+        }
+        try expect(slack(v.web) < 1, "no web against its margin (\(slack(v.web)))")
+        let gen = v.web.gen, home = v.web.home
+        v.life = 0
+        var seen = Set<WeaverState>()
+        step(w, 600) {
+            seen.insert(v.state)
+            return seen.contains(.move) && v.state == .build
+        }
+        try expect(seen.isSuperset(of: [.eat, .move]) && v.state == .build, "states \(seen), now \(v.state)")
+        try expect(v.web.gen == gen + 1, "web generation \(v.web.gen), was \(gen)")
+        let r = rects[t.rectIndex(near: SIMD2(home.x, home.y))]
+        try expect(r.contains(CGPoint(x: v.web.cx, y: v.web.cy)), "moved off its screen to \(v.web.cx), \(v.web.cy)")
+        try expect(slack(v.web) >= -1e-9, "moved \(-slack(v.web)) px past where its frame fits")
+        try framesFit(w, rects)
+        step(w, 5)
+        try framesFit(w, rects)
+    }
+
 }

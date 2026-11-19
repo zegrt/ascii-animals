@@ -1,0 +1,175 @@
+diff --git a/src/flies.ts b/src/flies.ts
+index 958b916..6a8620f 100644
+--- a/src/flies.ts
++++ b/src/flies.ts
+@@ -5,9 +5,9 @@
+  *
+  * mode: fly · rest · stuck · wrapped (carried) · held (being eaten at the hub) · gone (waiting to respawn)
+  */
+-import { TAU, angleDiff, clamp, noise1, rand, randInt, type Vec } from "./math";
+-import { SPIRAL, type OrbWeb, type ThreadPoint } from "./web";
+-import type { Pointer, World } from "./world";
++import { TAU, angleDiff, clamp, noise1, rand, randInt, type Vec } from "./math.ts";
++import { SPIRAL, type OrbWeb, type ThreadPoint } from "./web.ts";
++import type { Pointer, World } from "./world.ts";
+ 
+ const STICK = 0.07;
+ 
+@@ -80,7 +80,10 @@ export class Fly {
+ export class Swarm {
+   flies: Fly[] = [];
+ 
+-  constructor(private world: World) {}
++  private world: World;
++  constructor(world: World) {
++    this.world = world;
++  }
+ 
+   populate(n: number) {
+     const { width: W, height: H } = this.world;
+diff --git a/src/jumper.ts b/src/jumper.ts
+index 31ea9e2..bcbbd30 100644
+--- a/src/jumper.ts
++++ b/src/jumper.ts
+@@ -4,10 +4,10 @@
+  * it holds still, crouches and pounces, landing low and springing back up. It stalks resting flies the
+  * same way. Every jump pays out a dragline from where it took off.
+  */
+-import type { Fly } from "./flies";
+-import { angleDiff, clamp, rand, type Vec } from "./math";
+-import { Spider } from "./spider";
+-import type { World } from "./world";
++import type { Fly } from "./flies.ts";
++import { angleDiff, clamp, rand, type Vec } from "./math.ts";
++import { Spider } from "./spider.ts";
++import type { World } from "./world.ts";
+ 
+ export type JumperState = "pause" | "burst" | "crouch" | "jump";
+ 
+@@ -47,7 +47,9 @@ export class Jumper {
+   private crouch: Interest | null = null;
+   private jump: Leap | null = null;
+ 
+-  constructor(private world: World, B: number) {
++  private world: World;
++  constructor(world: World, B: number) {
++    this.world = world;
+     this.spider = new Spider("jumper", B);
+   }
+ 
+diff --git a/src/spider.ts b/src/spider.ts
+index 2dc01db..39e1b9e 100644
+--- a/src/spider.ts
++++ b/src/spider.ts
+@@ -12,8 +12,8 @@
+  * so it sways in time with the gait; the abdomen breathes; at rest a foot now and then lets go and
+  * re-grips; and a tug on the silk brings a foreleg up toward it.
+  */
+-import { TAU, angleDiff, clamp, lerp, type Vec } from "./math";
+-import type { OrbWeb } from "./web";
++import { TAU, angleDiff, clamp, lerp, type Vec } from "./math.ts";
++import type { OrbWeb } from "./web.ts";
+ 
+ const D = Math.PI / 180;
+ 
+diff --git a/src/weaver.ts b/src/weaver.ts
+index 2848470..56648b7 100644
+--- a/src/weaver.ts
++++ b/src/weaver.ts
+@@ -14,11 +14,11 @@
+  * sprung, so the body swings into each turn. While it lays a thread it holds the loose end, so the new
+  * silk doesn't swing about under it.
+  */
+-import type { Fly } from "./flies";
+-import { angleDiff, clamp, lerp, rand, type Vec } from "./math";
+-import { Spider, type Leg, type SilkHit, type Snap, type SpiderKind } from "./spider";
+-import { SPIRAL, type OrbWeb } from "./web";
+-import type { World } from "./world";
++import type { Fly } from "./flies.ts";
++import { angleDiff, clamp, lerp, rand, type Vec } from "./math.ts";
++import { Spider, type Leg, type SilkHit, type Snap, type SpiderKind } from "./spider.ts";
++import { SPIRAL, type OrbWeb } from "./web.ts";
++import type { World } from "./world.ts";
+ 
+ const DOWN = Math.PI / 2;
+ // Laying speeds per kind of thread (px/s at a 300 px web); walking existing silk is faster. Unhurried:
+@@ -62,7 +62,11 @@ export class Weaver {
+   readonly snap: Snap;
+   readonly land: (leg: Leg) => void;
+ 
+-  constructor(private world: World, readonly web: OrbWeb, kind: SpiderKind, size = web.radius * 0.31) {
++  private world: World;
++  readonly web: OrbWeb;
++  constructor(world: World, web: OrbWeb, kind: SpiderKind, size = web.radius * 0.31) {
++    this.world = world;
++    this.web = web;
+     this.spider = new Spider(kind, size);
+     this.snap = (x: number, y: number, r: number, out: SilkHit) => {
+       const hit = this.web.snap(x, y, r, out);
+@@ -220,7 +224,7 @@ export class Weaver {
+ 
+       case "move": {
+         this.wp = 0;
+-        if (this.glide(dt, WALK * 0.7 * s, (k) => (k === 0 ? [this.goal.x, this.goal.y] : null))) {
++        if (this.glide(dt, WALK * 0.7 * s, (k) => (this.wp + k === 0 ? [this.goal.x, this.goal.y] : null) /* port reference: the hang fix */)) {
+           this.state = "build";
+           this.step = 0;
+         }
+diff --git a/src/web.ts b/src/web.ts
+index ffeeb21..21bf710 100644
+--- a/src/web.ts
++++ b/src/web.ts
+@@ -13,8 +13,8 @@
+  * (each laid out from the hub and walked back), hub rings, the capture spiral from the outside in, and
+  * the stabilimentum. Walking the route backwards is how the spider eats the web before rebuilding.
+  */
+-import type { Fly } from "./flies";
+-import { TAU, angleDiff, clamp, closestT, crossAlong, hash3, lerp, noise1, rand, randInt, type Vec } from "./math";
++import type { Fly } from "./flies.ts";
++import { TAU, angleDiff, clamp, closestT, crossAlong, hash3, lerp, noise1, rand, randInt, type Vec } from "./math.ts";
+ 
+ export const MOOR = 1;
+ export const FRAME = 2;
+diff --git a/src/world.ts b/src/world.ts
+index f5bd66c..e66321f 100644
+--- a/src/world.ts
++++ b/src/world.ts
+@@ -11,12 +11,12 @@
+  * Move through a web to pluck it: the silk rings, and its spider turns toward the tug. A fly dropped on
+  * silk sticks there and the spider comes for it.
+  */
+-import { Swarm } from "./flies";
+-import { Jumper } from "./jumper";
+-import { clamp, lerp, rand } from "./math";
+-import type { SpiderKind } from "./spider";
+-import { Weaver } from "./weaver";
+-import { OrbWeb } from "./web";
++import { Swarm } from "./flies.ts";
++import { Jumper } from "./jumper.ts";
++import { clamp, lerp, rand } from "./math.ts";
++import type { SpiderKind } from "./spider.ts";
++import { Weaver } from "./weaver.ts";
++import { OrbWeb } from "./web.ts";
+ 
+ export type { SpiderKind };
+ 
+@@ -93,7 +93,9 @@ export class World {
+   /** A roster was asked for: every spider in it gets a web. */
+   private readonly cast: boolean;
+ 
+-  constructor(spiders?: SpiderSpec[], private options: WorldOptions = {}) {
++  private options: WorldOptions;
++  constructor(spiders?: SpiderSpec[], options: WorldOptions = {}) {
++    this.options = options;
+     this.spiders = spiders ?? DEFAULT_SPIDERS;
+     this.cast = spiders !== undefined;
+     this.swarm = new Swarm(this);
+@@ -127,7 +129,7 @@ export class World {
+         const x = rand(0.06, 0.94) * W;
+         const y = rand(0.08, 0.94) * H;
+         // On a full page, clear of a floating nav bar at the top centre.
+-        if (full && y < 130 && Math.abs(x - W / 2) < 190) continue;
++        // (port reference: the nav-bar gap is dropped, as in the Swift port)
+         if (options.clearCentre && ((x - W / 2) / (W * 0.32)) ** 2 + ((y - H / 2) / (H * 0.26)) ** 2 < 1) continue;
+         let score = Math.min(x, W - x, y, H - y) / (R * 0.55); // the page edge counts, softly
+         for (const p of placed) score = Math.min(score, Math.hypot(x - p.x, y - p.y) / (p.R + R));

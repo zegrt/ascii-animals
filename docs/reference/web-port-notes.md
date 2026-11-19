@@ -121,15 +121,17 @@ a laptop, offset). With one screen every formula above runs verbatim; with sever
   screens' total area, capped by the biggest screen; a relocated web stays on its screen, frame inside.
 - **The jumper and the flies stay on the screens; outside every screen is a wall.** "Clear of the walls by m" means
   the square of half-side m round the point lies on the screens, so a shared edge between touching screens is no
-  wall and both may cross it. The jumper is clamped back into the screen it came from when it would leave that
-  clearance; its wander goal is on any screen when the straight way there is clear, else on its own. Flies may be
+  wall and both may cross it. When a step would take the jumper out of that clearance it slides along the wall
+  (keeping the move in x, else in y), else stays put; only a start that isn't clear is pulled into its screen. Its
+  wander goal is on any screen when the straight way there is clear, else on its own. Flies may be
   20 px off a screen (the original lets them 20 px off the page); they steer for their screen's middle near a
   wall, rest only clear of walls, spawn on a screen picked by area, and enter over a real edge picked by length.
 
 ## Verification
 
 `webWorldMatchesOriginal` holds the numbers the original world.ts printed for two runs, made by
-`world-ref.mjs` (kept with the scratch reference tools, not in the repo): the original's sources with import paths
+`Tools/web-reference/world-ref.mjs` (see its README to rerun it or regenerate the values; Task 8's `math-ref.mjs`
+and `web-ref.mjs` are there too), on the original's sources with import paths
 given `.ts` and parameter properties spelled out (for node's type stripping), the nav-bar gap dropped and the move
 glide fixed as above, `Math.random` replaced by the `WebRandom` stream. The script moves the pointer through the
 near web, drops a fly on its spiral and one in the air, holds the pointer still by the jumper, and later frees a

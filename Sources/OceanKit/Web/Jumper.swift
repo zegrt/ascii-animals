@@ -119,7 +119,7 @@ public final class Jumper {
                 if let f = j.fly, f.mode == .rest && hypot(f.x - sp.x, f.y - sp.y) < sp.B * 0.7 {
                     f.mode = .gone
                     f.respawn = random.range(3, 7)
-                    world.burst(f.x, f.y)
+                    world.burst(x: f.x, y: f.y)
                     hunger = 0
                     timer = 1.8
                 }

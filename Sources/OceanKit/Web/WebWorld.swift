@@ -269,7 +269,7 @@ public final class WebWorld {
     }
 
     /// A spark of glyphs where a fly was taken.
-    public func burst(_ x: Double, _ y: Double) {
+    public func burst(x: Double, y: Double) {
         for _ in 0..<6 {
             let hx = x + random.range(-1.6, 1.6) * cw
             let hy = y + random.range(-1.2, 1.2) * ch
@@ -336,10 +336,14 @@ public final class WebWorld {
         return covered >= 4 * m * m * (1 - 1e-9)
     }
 
-    /// The jumper's clamp: (x, y) if it is `margin` clear of the walls, else pulled back inside the screen it
-    /// came from.
+    /// The jumper's clamp: (x, y) if it is `margin` clear of the walls, else it slides along the wall (keeping
+    /// the move in x, or in y), else it stays where it was. Only a start that is itself not clear (a fresh
+    /// layout) is pulled into the screen it is on.
     func inside(_ x: Double, _ y: Double, from px: Double, _ py: Double, margin m: Double) -> Vec {
         if clear(x, y, m) { return Vec(x: x, y: y) }
+        if clear(x, py, m) { return Vec(x: x, y: py) }
+        if clear(px, y, m) { return Vec(x: px, y: y) }
+        if clear(px, py, m) { return Vec(x: px, y: py) }
         let s = screen(near: px, py)
         return Vec(x: clamp(x, s.minX + m, s.maxX - m), y: clamp(y, s.minY + m, s.maxY - m))
     }
