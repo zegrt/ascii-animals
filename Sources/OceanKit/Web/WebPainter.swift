@@ -576,8 +576,16 @@ private struct Pass {
         }
     }
 
+    /// `Int(floor(v))` held to [-1, `n`] (NaN gives -1): for a cell range clamped to 0..<n after, the same
+    /// answer as converting first, but a huge or infinite `v` can't trap.
+    @inline(__always) static func cell(_ v: Double, _ n: Int) -> Int {
+        let f = floor(v)
+        guard f >= -1 else { return -1 }
+        return f > Double(n) ? n : Int(f)
+    }
+
     /**
-     * Whether every node of a web lies more than a cell off the grid on one side, so that `StrokeAcc.add`
+     * Whether every node of a web lies more than two cells off the grid on one side, so that `StrokeAcc.add`
      * would drop each of its threads before plotting (it drops a thread wholly beyond -1 or C + 1 cells).
      * Only for sane coordinates (within ±1e7 px, where rounding is far below the cell of margin); a NaN node
      * is passed over, as its threads draw nothing either. Skipping a web changes no output: a dropped
@@ -707,10 +715,11 @@ private struct Pass {
         let reach = (spec.prosoma[0] + spec.abdomen[0]) * 2.1 * B
         let lx = sp.rx - ox, ly = sp.ry - oy
         guard lx.isFinite, ly.isFinite, reach.isFinite else { return }
-        let c0 = max(0, Int(floor((lx - reach) / cw)))
-        let c1 = min(cols - 1, Int(max(-1, floor((lx + reach) / cw))))
-        let r0 = max(0, Int(floor((ly - reach) / ch)))
-        let r1 = min(rows - 1, Int(max(-1, floor((ly + reach) / ch))))
+        // Held to [-1, cols] / [-1, rows] before converting: a finite but far-off spider would trap in Int().
+        let c0 = max(0, Pass.cell((lx - reach) / cw, cols))
+        let c1 = min(cols - 1, Pass.cell((lx + reach) / cw, cols))
+        let r0 = max(0, Pass.cell((ly - reach) / ch, rows))
+        let r1 = min(rows - 1, Pass.cell((ly + reach) / ch, rows))
         guard c0 <= c1, r0 <= r1 else { return }
         let body = Body(sp, cw: cw, ch: ch)
         let tick = floor(t * 2.4)

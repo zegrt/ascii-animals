@@ -598,6 +598,15 @@ func webPainterChecks() {
         try expect(dew.filter { c.glyph[$0] != CellCanvas.noGlyph }.count * 2 > dew.count, "dew mostly not over silk")
         try expect(c.block.allSatisfy { $0 == 0 }, "blocks on a wall with no spiders")
     }
+    check("webPainterFarViewport") {
+        // A viewport absurdly far away (finite, but beyond Int) paints nothing and doesn't trap.
+        let sim = makeSim(seed: 3, rects: [CGRect(x: 0, y: 0, width: 1800, height: 1169)])
+        for _ in 0..<30 { sim.step(OceanClock.step) }
+        for far in [1e300, -1e300, 1e19, -1e19] {
+            let c = paint(sim, CGRect(x: far, y: far, width: 1800, height: 1169), cell: CGSize(width: 13, height: 19))
+            try expect(c.glyph.allSatisfy { $0 == CellCanvas.noGlyph } && c.block.allSatisfy { $0 >> 24 == 0 }, "painted at \(far)")
+        }
+    }
     check("webPainterSpidersAndFlies") {
         // The demo wall: bodies are blocks with carved glyphs, legs are line glyphs on blocks, flies one glyph each.
         let sim = makeSim(seed: 3, rects: [CGRect(x: 0, y: 0, width: 1800, height: 1169)])

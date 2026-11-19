@@ -2,7 +2,8 @@ import Foundation
 import OceanKit
 
 /// The interaction the Task 11 parity recording plays on the Web, step by step (step 1 is the first after the
-/// warm-up). The reference page (scratchpad parity.ts) runs the same script on the original, from the same state.
+/// warm-up). The reference page (Tools/web-reference/parity/page/parity/parity.ts) runs the same script on the
+/// original, from the same state.
 final class WebScript {
     private let w: WebWorld
     private var s = 0
