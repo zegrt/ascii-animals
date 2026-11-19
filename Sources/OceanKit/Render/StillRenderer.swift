@@ -7,9 +7,11 @@ import UniformTypeIdentifiers
 /// Renders a warmed-up habitat offscreen: for the system wallpaper, the app
 /// icon, the previews and the checks.
 public enum StillRenderer {
+    /// `settle`: the habitat's still (`settle()`: the Web's settled wall, as the original's ?still=1) before the
+    /// warm-up steps. nil: every habitat but the Ocean (whose stills stay as they were).
     public static func render(settings: Settings, size: CGSize, scale: CGFloat, warmup: Double,
                               systemIsDark: Bool, accent: SIMD3<Float>, seed: UInt64,
-                              renderer: OceanRenderer? = nil) throws -> CGImage {
+                              renderer: OceanRenderer? = nil, settle: Bool? = nil) throws -> CGImage {
         guard let device = renderer?.device ?? MTLCreateSystemDefaultDevice() else {
             throw RenderError(description: "no Metal device")
         }
@@ -18,6 +20,7 @@ public enum StillRenderer {
         let sim = Habitats.make(settings, seed: seed)
         sim.layout(terrain: .single(width: size.width, height: size.height), cell: vp.grid.cell, settings: settings)
         let theme = ThemeParams.make(settings, systemIsDark: systemIsDark, accent: accent)
+        if settle ?? (settings.habitat != .ocean) { sim.settle() }
 
         // Step the habitat; the wake only needs the last few seconds (it fades in ~2 s).
         let total = max(1, Int(warmup * 60))

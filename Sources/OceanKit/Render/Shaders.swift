@@ -654,7 +654,9 @@ fragment float4 canvas_main(VOut in [[stage_in]],
                             texture2d<float, access::read> block [[texture(0)]],
                             texture2d<float, access::read> ink [[texture(1)]],
                             texture2d<uint, access::read> glyphs [[texture(2)]],
-                            texture2d<float, access::read> atlas [[texture(3)]]) {
+                            texture2d<float, access::read> atlas [[texture(3)]],
+                            texture2d<float, access::read> overInk [[texture(4)]],
+                            texture2d<uint, access::read> overGlyphs [[texture(5)]]) {
     float2 grid = u.grid.xy;
     float2 cwh = u.grid.zw;
     float res = u.background.w;
@@ -683,6 +685,12 @@ fragment float4 canvas_main(VOut in [[stage_in]],
     if (g != 255u) {
         float4 k = ink.read(cu);
         col = mix(col, k.rgb, glyph(atlas, int(g), lp, slot) * k.a);
+    }
+    // Overlay: a second glyph over the first, source-over.
+    uint og = overGlyphs.read(cu).r;
+    if (og != 255u) {
+        float4 k = overInk.read(cu);
+        col = mix(col, k.rgb, glyph(atlas, int(og), lp, slot) * k.a);
     }
     return float4(col, 1.0);
 }

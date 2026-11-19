@@ -15,6 +15,11 @@ public final class CellCanvas {
     public var ink: [UInt32]
     /// `GlyphAtlas` index, or `noGlyph`.
     public var glyph: [UInt8]
+    /// A second glyph drawn over the first (source-over, as a 2D canvas
+    /// draws one glyph on another): `GlyphAtlas` index, or `noGlyph`.
+    public var overGlyph: [UInt8]
+    /// RGBA8 packed like `ink`, for `overGlyph`.
+    public var overInk: [UInt32]
     public var background = SIMD3<Float>(0, 0, 0)
     /// The one-device-pixel line at each cell's top and left edge; a == 0: no grid.
     public var gridColor = SIMD4<Float>(0, 0, 0, 0)
@@ -26,6 +31,8 @@ public final class CellCanvas {
         block = [UInt32](repeating: 0, count: n)
         ink = [UInt32](repeating: 0, count: n)
         glyph = [UInt8](repeating: CellCanvas.noGlyph, count: n)
+        overGlyph = [UInt8](repeating: CellCanvas.noGlyph, count: n)
+        overInk = [UInt32](repeating: 0, count: n)
     }
 
     /// Empties every cell (keeps `background` and `gridColor`), in place.
@@ -33,6 +40,8 @@ public final class CellCanvas {
         block.withUnsafeMutableBufferPointer { $0.update(repeating: 0) }
         ink.withUnsafeMutableBufferPointer { $0.update(repeating: 0) }
         glyph.withUnsafeMutableBufferPointer { $0.update(repeating: CellCanvas.noGlyph) }
+        overGlyph.withUnsafeMutableBufferPointer { $0.update(repeating: CellCanvas.noGlyph) }
+        overInk.withUnsafeMutableBufferPointer { $0.update(repeating: 0) }
     }
 
     /// Sets one cell: `glyph` in `ink` (a = opacity) over `block` (nil: no
@@ -44,6 +53,15 @@ public final class CellCanvas {
         glyph[i] = GlyphAtlas.index(g) ?? CellCanvas.noGlyph
         ink[i] = CellCanvas.pack(color)
         block[i] = fill.map { CellCanvas.pack(SIMD4($0, 1)) } ?? 0
+    }
+
+    /// Sets one cell's overlay: `glyph` in `ink` drawn over whatever the
+    /// cell holds. Cells outside the grid are ignored.
+    public func putOver(_ col: Int, _ row: Int, glyph g: Character, ink color: SIMD4<Float>) {
+        guard col >= 0, col < cols, row >= 0, row < rows else { return }
+        let i = row * cols + col
+        overGlyph[i] = GlyphAtlas.index(g) ?? CellCanvas.noGlyph
+        overInk[i] = CellCanvas.pack(color)
     }
 
     /// RGBA in 0...1 to `r | g<<8 | b<<16 | a<<24`.

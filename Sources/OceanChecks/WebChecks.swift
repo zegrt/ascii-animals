@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import OceanKit
 
@@ -196,6 +197,7 @@ func webChecks() {
         }
     }
     webWorldChecks()
+    webPainterChecks()
 }
 
 // ── Task 9: spiders, weavers, the jumper, flies and the wall ──
@@ -505,4 +507,284 @@ func webWorldChecks() {
         try framesFit(w, rects)
     }
 
+}
+
+// ── Task 10: the painter (renderer.ts) and the habitat ──
+
+private let darkTheme = ThemeParams.make(.defaults, systemIsDark: true, accent: SIMD3(0.2, 0.5, 1))
+
+/// A WebSim laid out over `rects` with the grid of the widest screen.
+private func makeSim(seed: UInt64, rects: [CGRect], spiders: [SpiderKind] = SpiderKind.defaultCast,
+                     flies: Bool = true, jumper: Bool = true) -> WebSim {
+    var s = Settings.defaults
+    s.habitat = .web
+    s.webSpiders = spiders
+    s.webFlies = flies
+    s.webJumper = jumper
+    let sim = WebSim(settings: s, seed: seed)
+    sim.layout(terrain: Terrain(rects: rects), cell: GridSpec.cell(forWidth: Double(rects.map(\.width).max() ?? 0)), settings: s)
+    return sim
+}
+
+/// Paints `viewport` of `sim` into a fresh canvas.
+private func paint(_ sim: CellPainter, _ viewport: CGRect, cell: CGSize, theme: ThemeParams = darkTheme) -> CellCanvas {
+    let grid = GridSpec.make(viewportSize: viewport.size, cell: cell)
+    let c = CellCanvas(cols: grid.cols, rows: grid.rows)
+    sim.paint(viewport: viewport, grid: grid, theme: theme, into: c)
+    return c
+}
+
+private func glyphs(_ s: String) -> Set<UInt8> { Set(s.map { GlyphAtlas.index($0)! }) }
+
+/// Every web's frame points (both ends of every frame thread) inside its own screen or off every screen, never on
+/// another screen (the ruling on Review Focus 2: one screen is the original, whose frames run off the page).
+private func framesOwnScreen(_ w: WebWorld, _ rects: [CGRect]) throws {
+    for (n, web) in w.webs.enumerated() {
+        guard let own = rects.firstIndex(where: { $0.contains(CGPoint(x: web.cx, y: web.cy)) }) else {
+            throw CheckFailure(detail: "web \(n) hub \(web.cx), \(web.cy) on no screen")
+        }
+        for l in 0..<web.m where web.kind[l] == FRAME {
+            for i in [web.la[l], web.lb[l]] {
+                let p = CGPoint(x: Double(web.x[i]), y: Double(web.y[i]))
+                for (k, r) in rects.enumerated() where k != own && r.contains(p) {
+                    throw CheckFailure(detail: "web \(n) on screen \(own) has a frame point \(p) on screen \(k)")
+                }
+            }
+        }
+    }
+}
+
+func webPainterChecks() {
+    check("webPainterLevelThread") {
+        // renderer.ts Strokes: a level thread takes one cell per column, - _ or ¯ by where in the cell it runs.
+        let s = WebStrokes()
+        s.resize(cols: 30, rows: 6)
+        for (frac, want) in [(0.5, "-"), (0.1, "¯"), (0.9, "_")] {
+            s.begin()
+            s.add(2.5 * 12, (3 + frac) * 17, 22.5 * 12, (3 + frac) * 17, 12, 17, 0.5)
+            let cells = (0..<s.length).map { Int(s.cells[$0]) }
+            try expect(Set(cells) == Set((2...21).map { 3 * 30 + $0 }), "\(want): cells \(cells.sorted())")
+            for i in cells {
+                try expect(glyphs("-_¯").contains(s.glyph(i)), "cell \(i) is \(GlyphAtlas.glyphs[Int(s.glyph(i))])")
+                try expect(s.glyph(i) == GlyphAtlas.index(Character(want))!, "at \(frac) of the cell: \(GlyphAtlas.glyphs[Int(s.glyph(i))]), want \(want)")
+            }
+        }
+        // Off the grid's left and right: only the 30 columns on it are plotted.
+        s.begin()
+        s.add(-40, 2.5 * 17, 50 * 12, 2.5 * 17, 12, 17, 0.5)
+        try expect(s.length == 30, "clipped to the grid: \(s.length) cells")
+    }
+    check("webPainterHubKnot") {
+        // Empty webs (no roster) are finished at once: every hub, where the radials meet, is a * knot.
+        let w = WebWorld(spiders: [], flies: false, jumper: false, random: WebRandom(seed: 2))
+        let cell = CGSize(width: 13, height: 19)
+        w.layout(terrain: .single(width: 1800, height: 1169), cell: cell, settled: true)
+        try expect(w.webs.count >= 5 && w.weavers.isEmpty, "\(w.webs.count) webs, \(w.weavers.count) weavers")
+        let painter = WebPainter()
+        let grid = GridSpec.make(viewportSize: CGSize(width: 1800, height: 1169), cell: cell)
+        let c = CellCanvas(cols: grid.cols, rows: grid.rows)
+        painter.paint(w, viewport: CGRect(x: 0, y: 0, width: 1800, height: 1169), grid: grid, theme: darkTheme, into: c)
+        for web in w.webs {
+            let col = Int(floor(Double(web.x[web.hub]) / 13)), row = Int(floor(Double(web.y[web.hub]) / 19))
+            guard col >= 0, col < c.cols, row >= 0, row < c.rows else { continue }
+            let g = c.glyph[row * c.cols + col]
+            try expect(g == GlyphAtlas.index("*")!, "hub cell (\(col),\(row)) holds \(g == CellCanvas.noGlyph ? "nothing" : GlyphAtlas.glyphs[Int(g)])")
+        }
+        // Silk is all line glyphs and knots; dew sits over it as · or +.
+        let silk = glyphs("-_¯/\\|*")
+        try expect(c.glyph.allSatisfy { $0 == CellCanvas.noGlyph || silk.contains($0) }, "a silk cell holds something else")
+        let dew = (0..<c.glyph.count).filter { c.overGlyph[$0] != CellCanvas.noGlyph }
+        try expect(dew.count > 20 && dew.allSatisfy { glyphs("·+").contains(c.overGlyph[$0]) }, "\(dew.count) dew beads")
+        try expect(dew.filter { c.glyph[$0] != CellCanvas.noGlyph }.count * 2 > dew.count, "dew mostly not over silk")
+        try expect(c.block.allSatisfy { $0 == 0 }, "blocks on a wall with no spiders")
+    }
+    check("webPainterSpidersAndFlies") {
+        // The demo wall: bodies are blocks with carved glyphs, legs are line glyphs on blocks, flies one glyph each.
+        let sim = makeSim(seed: 3, rects: [CGRect(x: 0, y: 0, width: 1800, height: 1169)])
+        for _ in 0..<120 { sim.step(OceanClock.step) }
+        let c = paint(sim, CGRect(x: 0, y: 0, width: 1800, height: 1169), cell: CGSize(width: 13, height: 19))
+        let blocks = c.block.filter { $0 >> 24 != 0 }.count
+        try expect(blocks > 60, "\(blocks) block cells for \(sim.world.weavers.count) spiders and a jumper")
+        try expect(c.glyph.contains(GlyphAtlas.index("O")!), "no jumper eyes")
+        let skin = glyphs(":;t%SX8#@")
+        try expect((0..<c.glyph.count).contains { c.block[$0] >> 24 != 0 && skin.contains(c.glyph[$0]) }, "no skin glyphs on blocks")
+        for f in sim.world.swarm.flies where f.mode == .fly {
+            let i = Int(floor(f.y / 19)) * c.cols + Int(floor(f.x / 13))
+            guard f.x >= 0, f.y >= 0, f.x < 1800, f.y < 1169 else { continue }
+            try expect(glyphs("x+").contains(c.glyph[i]) || c.block[i] >> 24 != 0, "fly at \(f.x), \(f.y) not drawn")
+        }
+    }
+    check("webPalettes") {
+        let sim = makeSim(seed: 3, rects: [CGRect(x: 0, y: 0, width: 900, height: 600)])
+        for _ in 0..<60 { sim.step(OceanClock.step) }
+        let vp = CGRect(x: 0, y: 0, width: 900, height: 600), cell = GridSpec.cell(forWidth: 900)
+        var s = Settings.defaults
+        let dark = paint(sim, vp, cell: cell)
+        try expect(dark.background == .zero, "dark background \(dark.background)")
+        try expect(dark.gridColor == SIMD4(1, 1, 1, 0.055), "dark grid \(dark.gridColor)")
+        s.appearance = .light
+        let lightTheme = ThemeParams.make(s, systemIsDark: true, accent: .zero)
+        let light = paint(sim, vp, cell: cell, theme: lightTheme)
+        try expect(light.background == SIMD3(247, 246, 243) / 255, "paper \(light.background)")
+        try expect(light.gridColor == SIMD4(SIMD3(35, 35, 35) / 255, 0.08), "light grid \(light.gridColor)")
+        s.grid = false
+        try expect(paint(sim, vp, cell: cell, theme: ThemeParams.make(s, systemIsDark: true, accent: .zero)).gridColor.w == 0, "grid off")
+        // Calm: dark multiplies ink and block by the brightness; light mixes them toward the paper.
+        func rgba(_ v: UInt32) -> SIMD4<Float> { SIMD4(Float(v & 0xff), Float((v >> 8) & 0xff), Float((v >> 16) & 0xff), Float(v >> 24)) }
+        // (Accents at the full rate here, so the same cells take the same colours; Calm's rate is checked below.)
+        func calmTheme(_ light: Bool) -> ThemeParams {
+            var t = Settings.defaults
+            t.calm = true
+            t.appearance = light ? .light : .dark
+            var p = ThemeParams.make(t, systemIsDark: true, accent: .zero)
+            p.accentRate = 1
+            return p
+        }
+        for (normal, theme, isLight) in [(dark, calmTheme(false), false), (light, calmTheme(true), true)] {
+            let calm = paint(sim, vp, cell: cell, theme: theme)
+            try expect(calm.glyph == normal.glyph, "calm changed the glyphs")
+            var compared = 0
+            for i in 0..<normal.ink.count where normal.glyph[i] != CellCanvas.noGlyph {
+                for (a, b) in [(rgba(normal.ink[i]), rgba(calm.ink[i])), (rgba(normal.block[i]), rgba(calm.block[i]))] where a.w > 0 {
+                    let paper = SIMD3<Float>(247, 246, 243)
+                    let want = isLight ? SIMD3(a.x, a.y, a.z) + (paper - SIMD3(a.x, a.y, a.z)) * (1 - theme.brightness)
+                                       : SIMD3(a.x, a.y, a.z) * theme.brightness
+                    let d = SIMD3(b.x, b.y, b.z) - want
+                    try expect(max(abs(d.x), abs(d.y), abs(d.z)) <= 1.01 && a.w == b.w, "calm \(isLight ? "light" : "dark") cell \(i): \(a) -> \(b), want \(want)")
+                    compared += 1
+                }
+            }
+            try expect(compared > 100, "compared \(compared) colours")
+        }
+        // Accents (dark only) at the original's 6 % of skin cells, scaled by the theme's rate.
+        let accents = Set([(224, 137, 44), (224, 58, 50), (180, 74, 224), (51, 200, 204), (60, 181, 74), (49, 80, 232), (217, 193, 74)]
+            .map { UInt32($0.0) | UInt32($0.1) << 8 | UInt32($0.2) << 16 | 255 << 24 })
+        let skin = glyphs(":;t%SX8#@")
+        func accented(_ c: CellCanvas) -> Int { (0..<c.ink.count).filter { skin.contains(c.glyph[$0]) && accents.contains(c.ink[$0]) }.count }
+        var none = ThemeParams.make(.defaults, systemIsDark: true, accent: .zero)
+        none.accentRate = 0
+        try expect(accented(dark) > 0 && accented(paint(sim, vp, cell: cell, theme: none)) == 0, "accents \(accented(dark)) at rate 1")
+    }
+    check("webLayoutRespectsTerrain") {
+        // Ruling on Review Focus 2: on several screens every web's frame points lie on its own screen or off every
+        // screen; on one screen the layout is the original's (frames may run off the page) and nothing crashes.
+        let desk = [CGRect(x: 0, y: 0, width: 2560, height: 1440), CGRect(x: 375, y: 1440, width: 1800, height: 1169)]
+        let laptop = [CGRect(x: 0, y: 0, width: 1800, height: 1169)]
+        let cell = GridSpec.cell(forWidth: 2560)
+        for seed: UInt64 in [1, 2, 9, 21] {
+            let sim = makeSim(seed: seed, rects: desk)
+            try framesOwnScreen(sim.world, desk)
+            for _ in 0..<120 { sim.step(OceanClock.step) }
+            for r in desk { _ = paint(sim, r, cell: cell) }
+            // Unplug the monitor: one screen, then plug it back.
+            sim.layout(terrain: Terrain(rects: laptop), cell: GridSpec.cell(forWidth: 1800), settings: .defaults)
+            for _ in 0..<120 { sim.step(OceanClock.step) }
+            try framesOwnScreen(sim.world, laptop)
+            _ = paint(sim, laptop[0], cell: GridSpec.cell(forWidth: 1800))
+            sim.layout(terrain: Terrain(rects: desk), cell: cell, settings: .defaults)
+            try framesOwnScreen(sim.world, desk)
+            for _ in 0..<120 { sim.step(OceanClock.step) }
+            for r in desk { _ = paint(sim, r, cell: cell) }
+            try expect(sim.world.weavers.allSatisfy { $0.spider.x.isFinite && $0.spider.y.isFinite }, "seed \(seed): not finite")
+        }
+        // One screen: WebSim lays out exactly as the original's world (WebWorld, checked against it).
+        let sim = makeSim(seed: 4, rects: laptop)
+        let ref = WebWorld(spiders: SpiderKind.defaultCast, flies: true, jumper: true, random: WebRandom(seed: 4))
+        ref.layout(terrain: Terrain(rects: laptop), cell: GridSpec.cell(forWidth: 1800), settled: false)
+        for _ in 0..<60 { sim.step(OceanClock.step); ref.step(OceanClock.step) }
+        let a = webWorldFeatures(sim.world), b = webWorldFeatures(ref)
+        try expect(a.count == b.count && zip(a, b).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 }, "WebSim's wall differs from WebWorld's")
+        try expect(sim.world.webs.contains { web in (0..<web.n).contains { web.x[$0] < 0 || web.y[$0] < 0 || web.x[$0] > 1800 || web.y[$0] > 1169 } },
+                   "no frame runs off the page (the original's frames do)")
+    }
+    check("webTinyViewport") {
+        let r = CGRect(x: 0, y: 0, width: 340, height: 150)
+        let sim = makeSim(seed: 5, rects: [r])
+        try expect(sim.world.webs.count >= 1, "\(sim.world.webs.count) webs")
+        for s in 0..<300 {
+            sim.step(OceanClock.step)
+            if s % 30 == 0 { _ = paint(sim, r, cell: GridSpec.cell(forWidth: 340)) }
+        }
+        for web in sim.world.webs { for i in 0..<web.n { try expect(web.x[i].isFinite && web.y[i].isFinite, "node not finite") } }
+        for v in sim.world.weavers { try expect(v.spider.x.isFinite && v.spider.y.isFinite, "weaver not finite") }
+        if let j = sim.world.jumper { try expect(j.spider.x.isFinite && j.spider.y.isFinite, "jumper not finite") }
+        for f in sim.world.swarm.flies { try expect(f.x.isFinite && f.y.isFinite, "fly not finite") }
+        let c = paint(sim, r, cell: GridSpec.cell(forWidth: 340))
+        try expect(c.glyph.contains { $0 != CellCanvas.noGlyph }, "nothing drawn")
+    }
+    check("webSimFromSettings") {
+        var s = Settings.defaults
+        try expect(Habitats.make(s, seed: 1) is OceanSim, "ocean")
+        s.habitat = .web
+        s.webSpiders = [.nephila]
+        s.webFlies = false
+        s.webJumper = true
+        let sim = Habitats.make(s, seed: 4)
+        guard let web = sim as? WebSim else { throw CheckFailure(detail: "\(type(of: sim)) for .web") }
+        try expect(sim.kind == .web, "kind \(sim.kind)")
+        sim.layout(terrain: .single(width: 1800, height: 1169), cell: GridSpec.cell(forWidth: 1800), settings: s)
+        try expect(web.world.weavers.count == 1 && web.world.weavers[0].spider.kind == .nephila, "weavers \(web.world.weavers.map(\.spider.kind))")
+        try expect(web.world.swarm.flies.isEmpty && web.world.jumper != nil, "flies \(web.world.swarm.flies.count), jumper \(web.world.jumper != nil)")
+        s.webFlies = true
+        s.webJumper = false
+        let other = Habitats.make(s, seed: 4) as! WebSim
+        other.layout(terrain: .single(width: 1800, height: 1169), cell: GridSpec.cell(forWidth: 1800), settings: s)
+        try expect(!other.world.swarm.flies.isEmpty && other.world.jumper == nil, "flies \(other.world.swarm.flies.count), jumper \(other.world.jumper != nil)")
+        // Steps, the pointer, a click.
+        let before = other.world.swarm.flies.count
+        other.step(OceanClock.step)
+        other.pointerMoved(100, 100)
+        other.step(OceanClock.step)
+        other.pointerDown(900, 20)
+        other.pointerLeft()
+        try expect(other.stepCount == 2 && other.world.swarm.flies.count == before + 1 && !other.world.pointer.active,
+                   "steps \(other.stepCount), flies \(other.world.swarm.flies.count)")
+    }
+    check("webSettleIsTheOriginalStill") {
+        // settle(): a fresh wall is laid out settled (every web finished, flies resting) and stepped 120 times, as
+        // engine.ts does for ?still=1; settling again, or once the wall has lived, changes nothing.
+        let r = CGRect(x: 0, y: 0, width: 1800, height: 1169)
+        let sim = makeSim(seed: 6, rects: [r])
+        sim.settle()
+        let ref = WebWorld(spiders: SpiderKind.defaultCast, flies: true, jumper: true, random: WebRandom(seed: 6))
+        ref.layout(terrain: .single(width: 1800, height: 1169), cell: GridSpec.cell(forWidth: 1800), settled: false)
+        ref.layout(terrain: .single(width: 1800, height: 1169), cell: GridSpec.cell(forWidth: 1800), settled: true)
+        for _ in 0..<120 { ref.step(1.0 / 60) }
+        let a = webWorldFeatures(sim.world), b = webWorldFeatures(ref)
+        try expect(a.count == b.count && zip(a, b).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 }, "settled wall differs")
+        try expect(sim.world.webs.allSatisfy { $0.laid == $0.m }, "an unfinished web in the still")
+        let modes = sim.world.swarm.flies.map(\.mode)
+        try expect(modes.filter { $0 == .rest }.count >= modes.count - 1 && !modes.contains(.fly), "flies in the still: \(modes)")
+        sim.settle()
+        try expect(webWorldFeatures(sim.world).map(\.1) == a.map(\.1), "settling twice changed the wall")
+        let live = makeSim(seed: 6, rects: [r])
+        for _ in 0..<600 { live.step(OceanClock.step) }
+        let f = webWorldFeatures(live.world)
+        live.settle()
+        try expect(webWorldFeatures(live.world).map(\.1) == f.map(\.1), "settling a living wall changed it")
+    }
+}
+
+func webRenderChecks() {
+    check("webStillRenders") {
+        var s = Settings.defaults
+        s.habitat = .web
+        for light in [false, true] {
+            s.appearance = light ? .light : .dark
+            let img = try StillRenderer.render(settings: s, size: CGSize(width: 480, height: 300), scale: 1, warmup: 1,
+                                               systemIsDark: true, accent: SIMD3(0.2, 0.5, 1), seed: 3)
+            let w = img.width, h = img.height
+            var bytes = [UInt8](repeating: 0, count: w * h * 4)
+            let ctx = CGContext(data: &bytes, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+            let bg: [Int] = light ? [247, 246, 243] : [0, 0, 0]
+            var plain = 0, other = 0
+            for i in stride(from: 0, to: bytes.count, by: 4) {
+                if abs(Int(bytes[i]) - bg[0]) <= 1 && abs(Int(bytes[i + 1]) - bg[1]) <= 1 && abs(Int(bytes[i + 2]) - bg[2]) <= 1 { plain += 1 } else { other += 1 }
+            }
+            try expect(plain > w * h / 3, "\(light ? "light" : "dark"): background pixels \(plain) of \(w * h)")
+            try expect(other > w * h / 50, "\(light ? "light" : "dark"): drawn pixels \(other) of \(w * h)")
+        }
+    }
 }

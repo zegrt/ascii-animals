@@ -1,7 +1,11 @@
 // OceanTool: offline renders.
 //   OceanTool still <out.png> <W>x<H> [--scale N] [--light] [--calm] [--seed N] [--warmup S] [--sharks a,b,c]
+//                   [--habitat ocean|web] [--spiders a,b] [--live]
 //   OceanTool iconset <dir.iconset>
 //   OceanTool frames <dir> <W>x<H> [--seconds S] [--fps F] [--scale N] [--light] [--calm] [--seed N] [--sharks a,b]
+//                    [--habitat ocean|web] [--spiders a,b]
+//   OceanTool bench [--habitat ocean|web]
+// A Web still is the original's ?still=1 (settled), unless --live: then the live wall after the warm-up.
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -27,6 +31,15 @@ func option(_ name: String) -> String? {
 guard let command = args.first else { fail("usage: OceanTool still|iconset ...") }
 args.removeFirst()
 
+/// `--habitat` and `--spiders` into `s`.
+func habitatOptions(_ s: inout Settings) {
+    if let h = option("--habitat") {
+        guard let kind = HabitatKind(rawValue: h) else { fail("unknown habitat \(h)") }
+        s.habitat = kind
+    }
+    if let list = option("--spiders") { s.webSpiders = list.split(separator: ",").compactMap { SpiderKind(rawValue: String($0)) } }
+}
+
 switch command {
 case "still":
     var s = Settings.defaults
@@ -36,11 +49,14 @@ case "still":
     let warmup = Double(option("--warmup") ?? "6") ?? 6
     let scale = CGFloat(Double(option("--scale") ?? "2") ?? 2)
     if let list = option("--sharks") { s.sharks = list.split(separator: ",").compactMap { SharkKind(rawValue: String($0)) } }
+    habitatOptions(&s)
+    let live = flag("--live")
     guard args.count == 2 else { fail("usage: OceanTool still <out.png> <W>x<H>") }
     let dims = args[1].split(separator: "x").compactMap { Double($0) }
     guard dims.count == 2 else { fail("bad size \(args[1])") }
     let img = try StillRenderer.render(settings: s.sanitized(), size: CGSize(width: dims[0], height: dims[1]), scale: scale,
-                                       warmup: warmup, systemIsDark: true, accent: SIMD3(0.2, 0.5, 1), seed: seed)
+                                       warmup: warmup, systemIsDark: true, accent: SIMD3(0.2, 0.5, 1), seed: seed,
+                                       settle: s.habitat != .ocean && !live)
     try StillRenderer.writePNG(img, to: URL(fileURLWithPath: args[0]))
     print("wrote \(args[0]) \(img.width)x\(img.height)")
 
@@ -53,6 +69,7 @@ case "frames":
     let fps = Int(option("--fps") ?? "20") ?? 20
     let scale = CGFloat(Double(option("--scale") ?? "1") ?? 1)
     if let list = option("--sharks") { s.sharks = list.split(separator: ",").compactMap { SharkKind(rawValue: String($0)) } }
+    habitatOptions(&s)
     guard args.count == 2, 60 % fps == 0 else { fail("usage: OceanTool frames <dir> <W>x<H> [--fps 10|12|15|20|30|60]") }
     let dims = args[1].split(separator: "x").compactMap { Double($0) }
     guard dims.count == 2 else { fail("bad size \(args[1])") }
@@ -79,6 +96,42 @@ case "iconset":
     try IconMaker.write(to: URL(fileURLWithPath: args[0]))
 
 case "bench":
+    var s = Settings.defaults
+    habitatOptions(&s)
+    if s.habitat == .web {
+        // Simulation per step and painting per frame (one 1800 x 1169 screen, its cell canvas), the demo wall.
+        let size = CGSize(width: 1800, height: 1169)
+        let cell = GridSpec.cell(forWidth: 1800)
+        let grid = GridSpec.make(viewportSize: size, cell: cell)
+        let sim = WebSim(settings: s.sanitized(), seed: 1)
+        sim.layout(terrain: .single(width: 1800, height: 1169), cell: cell, settings: s)
+        let canvas = CellCanvas(cols: grid.cols, rows: grid.rows)
+        let viewport = CGRect(origin: .zero, size: size)
+        for _ in 0..<600 { sim.step(OceanClock.step) }
+        for light in [false, true] {
+            var ts = s
+            ts.appearance = light ? .light : .dark
+            let theme = ThemeParams.make(ts, systemIsDark: true, accent: .zero)
+            var stepT = 0.0, paintT = 0.0, worstPaint = 0.0
+            let frames = 1800
+            for _ in 0..<frames {
+                var t0 = DispatchTime.now().uptimeNanoseconds
+                sim.step(OceanClock.step)
+                stepT += Double(DispatchTime.now().uptimeNanoseconds - t0)
+                t0 = DispatchTime.now().uptimeNanoseconds
+                canvas.clear()
+                sim.paint(viewport: viewport, grid: grid, theme: theme, into: canvas)
+                let p = Double(DispatchTime.now().uptimeNanoseconds - t0)
+                paintT += p
+                worstPaint = max(worstPaint, p)
+            }
+            print(String(format: "web %@  webs %d  weavers %d  flies %d  sim %.1f µs/step (%.2f%% of a core at 60 steps/s)  paint %.3f ms/frame (worst %.3f; clear included)  grid %dx%d",
+                         light ? "light" : "dark", sim.world.webs.count, sim.world.weavers.count, sim.world.swarm.flies.count,
+                         stepT / Double(frames) / 1000, stepT / Double(frames) * 60 / 1e7, paintT / Double(frames) / 1e6, worstPaint / 1e6,
+                         grid.cols, grid.rows))
+        }
+        break
+    }
     // Simulation + packing cost per simulated second at the built-in display's size.
     let w = World(sharks: Settings.defaults.sharks, rng: Rng(seed: 1))
     let cell = GridSpec.cell(forWidth: 1800)

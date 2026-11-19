@@ -127,6 +127,48 @@ a laptop, offset). With one screen every formula above runs verbatim; with sever
   20 px off a screen (the original lets them 20 px off the page); they steer for their screen's middle near a
   wall, rest only clear of walls, spawn on a screen picked by area, and enter over a real edge picked by length.
 
+## renderer.ts → Web/WebPainter.swift, and Web/WebSim.swift
+
+The renderer draws onto the shared `CellCanvas` (one block, one glyph and its ink per cell, composed by
+`canvas_main`) instead of a 2D canvas. Its grid is ours already: `GridSpec.cell(forWidth:)` is the original's
+`cw = clamp(round(W / 124), 8, 13)`, `ch = round(cw · 1.45)`; the atlas draws Geist Mono SemiBold at
+`round(ch · 0.74)` centred at `ch / 2 + 1`, and a block is the original's `fillRect(x + 1, y + 1, cw − 1, ch − 1)`.
+Everything is the "full" stage (the blueprint pages' stages aren't used). What differs:
+
+- **Dew is drawn over the silk glyph: the canvas has an overlay layer.** The original draws a dew bead with a second
+  `fillText` in a cell that already holds its thread's glyph, so the cell shows both. `CellCanvas` gained
+  `overGlyph` / `overInk`, mixed in `canvas_main` after the first glyph (source-over, as the 2D canvas draws).
+  Two beads in one cell (two capture threads' dew in the same cell): the same glyph combines as drawing it twice,
+  `1 − (1 − a)(1 − b)`, in the dew colour. **One case differs:** two *different* beads in one cell (a `·` and a
+  twinkling `+`) keep the last drawn glyph at that combined opacity, where the original shows both glyphs.
+- **Colours are packed RGBA8, final.** `rgba(…, a.toFixed(3))` styles become packed inks, alphas rounded as the
+  original formats them (`toFixed(3)`, the heat's `toFixed(2)`). The bucketed draw (cells grouped by style to save
+  `fillStyle` changes) is just each cell's ink; the order of layers is the original's (silk, then dew over it, then
+  the top layer, which hides both).
+- **Theme:** dark and light are `PALETTES.dark` and `PALETTES.light` (backgrounds black and paper 247, 246, 243;
+  grid white at 5.5 % and ink at 8 %, none when the grid setting is off). The Ocean's dark background is black too.
+  Calm (a platform addition) dims dark ink and blocks by `brightness` and mixes light ones toward the paper by
+  `1 − brightness`; the background and grid stay. The skin's accents (6 %) and flecks (10 %) are scaled by
+  `accentRate`, as the Ocean scales its own; the fang's and ringing silk's cyan are not accents and stay.
+- **Typed arrays are grow-only buffers** (`Strokes`, the top layer), reset by frame stamp as the original's are:
+  painting allocates nothing once warm, and two screens of different sizes share them. The parcel lines
+  (`for (const parcel of [prey, bundle])`) are two calls instead of a literal array.
+- **The viewport.** A screen draws the part of the wall inside its viewport: positions are taken relative to its
+  top-left (one screen: the original's page, unchanged). A thread's columns (or rows) off the grid are skipped
+  without being visited, and a thread wholly off it is skipped: what is plotted is the same.
+- **NaN.** A thread with a NaN end is skipped (the original would push a NaN cell and throw); a weaver's partial
+  thread from a stale node index is skipped. Neither happens on a sound wall.
+- **`spider.solve()`** runs in the painter as in `render` (it only places hips and knees for drawing), once per
+  screen drawn.
+
+**WebSim** is engine.ts's host part: `step` is the fixed 1/60 s step (the app's clock runs it), the pointer feeds
+`pointerMoved` / `pointerLeft` / `pointerDown` (a click over the terrain drops a fly; the app only listens while
+live, as the engine ignores clicks on a still). `layout` lays the wall out again (engine.ts `resize`, e.g. a screen
+plugged in or out). **`settle()` is `?still=1`** for a fresh wall (no step since its layout): laid out settled
+(every web finished, flies resting) and stepped 120 times. A wall that has already lived is held as it is (as the
+Ocean's settle holds a warmed-up ocean), so a pause or Low Power doesn't re-arrange it, and settling twice (one
+call per screen) changes nothing. `StillRenderer` settles a Web still (the system wallpaper, `OceanTool still`).
+
 ## Verification
 
 `webWorldMatchesOriginal` holds the numbers the original world.ts printed for two runs, made by

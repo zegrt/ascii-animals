@@ -22,7 +22,7 @@ public enum Habitats {
     public static func make(_ s: Settings, seed: UInt64) -> HabitatSim {
         switch s.habitat {
         case .ocean: return OceanSim(settings: s, seed: seed)
-        case .web: return OceanSim(settings: s, seed: seed) // Task 10: WebSim
+        case .web: return WebSim(settings: s, seed: seed)
         }
     }
 

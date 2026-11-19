@@ -77,9 +77,9 @@ public final class ViewportRenderer {
     private var cells: MTLTexture!
     private var atlas: MTLTexture!
     private var needsClear = true
-    /// Canvas habitats: the CPU grid and, per ring slot, its upload (block, ink, glyph).
+    /// Canvas habitats: the CPU grid and, per ring slot, its upload (block, ink, glyph, overlay ink and glyph).
     private var canvas: CellCanvas?
-    private var canvasTextures: [(block: MTLTexture, ink: MTLTexture, glyph: MTLTexture)] = []
+    private var canvasTextures: [(block: MTLTexture, ink: MTLTexture, glyph: MTLTexture, overInk: MTLTexture, overGlyph: MTLTexture)] = []
     /// What this viewport has already drawn of its world: steps run through
     /// the wake, and events stamped. A world shared by several screens is
     /// drawn by each at its own pace.
@@ -193,7 +193,9 @@ public final class ViewportRenderer {
                 canvasTextures = try (0..<ViewportRenderer.inFlight).map { i in
                     (try texture(.rgba8Unorm, grid.cols, grid.rows, .shaderRead, "canvas block \(i)"),
                      try texture(.rgba8Unorm, grid.cols, grid.rows, .shaderRead, "canvas ink \(i)"),
-                     try texture(.r8Uint, grid.cols, grid.rows, .shaderRead, "canvas glyph \(i)"))
+                     try texture(.r8Uint, grid.cols, grid.rows, .shaderRead, "canvas glyph \(i)"),
+                     try texture(.rgba8Unorm, grid.cols, grid.rows, .shaderRead, "canvas over ink \(i)"),
+                     try texture(.r8Uint, grid.cols, grid.rows, .shaderRead, "canvas over glyph \(i)"))
                 }
             } catch {
                 clear(target, cb)
@@ -205,6 +207,8 @@ public final class ViewportRenderer {
         c.block.withUnsafeBytes { t.block.replace(region: region, mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: grid.cols * 4) }
         c.ink.withUnsafeBytes { t.ink.replace(region: region, mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: grid.cols * 4) }
         c.glyph.withUnsafeBytes { t.glyph.replace(region: region, mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: grid.cols) }
+        c.overInk.withUnsafeBytes { t.overInk.replace(region: region, mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: grid.cols * 4) }
+        c.overGlyph.withUnsafeBytes { t.overGlyph.replace(region: region, mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: grid.cols) }
 
         var u = CanvasUniforms(
             grid: SIMD4(Float(grid.cols), Float(grid.rows), Float(grid.cell.width), Float(grid.cell.height)),
@@ -218,6 +222,8 @@ public final class ViewportRenderer {
             enc.setFragmentTexture(t.ink, index: 1)
             enc.setFragmentTexture(t.glyph, index: 2)
             enc.setFragmentTexture(atlas, index: 3)
+            enc.setFragmentTexture(t.overInk, index: 4)
+            enc.setFragmentTexture(t.overGlyph, index: 5)
         }
     }
 

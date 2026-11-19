@@ -36,9 +36,18 @@ func canvasChecks() {
         c.put(0, 0, glyph: "Q", ink: SIMD4(1, 1, 1, 1))
         try expect(c.glyph[0] == CellCanvas.noGlyph && c.block[0] >> 24 == 0, "cell 0 \(c.glyph[0]) \(c.block[0])")
         try expect(c.glyph.filter { $0 != CellCanvas.noGlyph }.count == 1, "out-of-range put wrote a cell")
+        // The overlay: a second glyph over the first, its own ink; starts empty.
+        try expect(c.overGlyph.count == 12 && c.overInk.count == 12 && c.overGlyph.allSatisfy { $0 == CellCanvas.noGlyph },
+                   "overlay starts empty")
+        c.putOver(2, 1, glyph: "·", ink: SIMD4(0, 1, 0, 0.5))
+        c.putOver(9, 1, glyph: "·", ink: SIMD4(0, 1, 0, 0.5))
+        try expect(c.overGlyph[i] == GlyphAtlas.index("·")! && rgba(c.overInk[i]) == (0, 255, 0, 128), "overlay \(c.overGlyph[i])")
+        try expect(c.glyph[i] == GlyphAtlas.index("x")!, "overlay replaced the base glyph")
+        try expect(c.overGlyph.filter { $0 != CellCanvas.noGlyph }.count == 1, "out-of-range putOver wrote a cell")
         c.clear()
         try expect(c.glyph.allSatisfy { $0 == CellCanvas.noGlyph } && c.block.allSatisfy { $0 == 0 } && c.ink.allSatisfy { $0 == 0 },
                    "clear")
+        try expect(c.overGlyph.allSatisfy { $0 == CellCanvas.noGlyph } && c.overInk.allSatisfy { $0 == 0 }, "clear overlay")
     }
     check("dissolveTiming") {
         let a = Dissolve.reveal(elapsed: 0)
@@ -204,6 +213,50 @@ func canvasRenderChecks() {
         for y in 0..<h { for x in 0..<w where !near(px(hidden, x, y), bg) {
             throw CheckFailure(detail: "reveal 0: pixel (\(x),\(y)) is \(px(hidden, x, y)), not background")
         } }
+    }
+    check("canvasOverlayGlyph") {
+        // A "-" overlay over a "|" base (as dew over silk): both show, the overlay on top where they cross; an
+        // overlay alone draws too.
+        final class Overlay: CellPainter {
+            static let base = SIMD3<Float>(240, 40, 40) / 255
+            static let over = SIMD3<Float>(40, 240, 240) / 255
+            var kind: HabitatKind { .web }
+            var time: Double { 0 }
+            var stepCount: Int { 0 }
+            func layout(terrain: Terrain, cell: CGSize, settings: Settings) {}
+            func step(_ dt: Double) {}
+            func pointerMoved(_ x: Double, _ y: Double) {}
+            func pointerLeft() {}
+            func pointerDown(_ x: Double, _ y: Double) {}
+            func update(settings: Settings) {}
+            func settle() {}
+            func paint(viewport: CGRect, grid: GridSpec, theme: ThemeParams, into canvas: CellCanvas) {
+                canvas.background = TestPainter.background
+                canvas.gridColor = SIMD4(1, 1, 1, 0)
+                canvas.put(1, 1, glyph: "|", ink: SIMD4(Overlay.base, 1))
+                canvas.putOver(1, 1, glyph: "-", ink: SIMD4(Overlay.over, 1))
+                canvas.putOver(3, 2, glyph: "-", ink: SIMD4(Overlay.over, 1))
+            }
+        }
+        let r = try OceanRenderer(device: device)
+        let vp = try r.makeViewport(pointSize: size, scale: scale, cell: cell)
+        let p = try frame(r, vp, Overlay())
+        let cw = Int(cell.width * scale), ch = Int(cell.height * scale)
+        func count(_ c: Int, _ row: Int, _ colour: SIMD3<Float>) -> (n: Int, xs: Set<Int>, ys: Set<Int>) {
+            var n = 0, xs = Set<Int>(), ys = Set<Int>()
+            for y in (row * ch)..<((row + 1) * ch) { for x in (c * cw)..<((c + 1) * cw) where near(px(p, x, y), colour, 2) {
+                n += 1; xs.insert(x); ys.insert(y)
+            } }
+            return (n, xs, ys)
+        }
+        let base = count(1, 1, Overlay.base), over = count(1, 1, Overlay.over)
+        try expect(base.n > 4, "base glyph pixels \(base.n)")
+        try expect(over.n > 4, "overlay glyph pixels \(over.n)")
+        // Where the dash crosses the bar the overlay wins: overlay pixels in the bar's columns.
+        try expect(!over.xs.isDisjoint(with: base.xs), "overlay not drawn over the base where they cross")
+        try expect(base.ys.count > over.ys.count, "bar rows \(base.ys.count) vs dash rows \(over.ys.count)")
+        try expect(count(3, 2, Overlay.over).n > 4, "overlay alone not drawn")
+        try expect(count(3, 2, Overlay.base).n == 0 && count(2, 1, Overlay.over).n == 0, "overlay leaked")
     }
     check("canvasGridOff") {
         let r = try OceanRenderer(device: device)

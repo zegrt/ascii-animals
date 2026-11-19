@@ -23,6 +23,7 @@ if ProcessInfo.processInfo.environment["OCEAN_SKIP_GPU"] == nil {
     renderChecks()
     sharedRenderChecks()
     canvasRenderChecks()
+    webRenderChecks()
 } else {
     print("SKIP GPU checks (OCEAN_SKIP_GPU)")
 }
