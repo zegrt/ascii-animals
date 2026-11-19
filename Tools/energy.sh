@@ -23,6 +23,10 @@ SHARKS_APP="$HOME/Applications/ASCII Sharks.app"
 BACKUP="$ROOT/build/energy-settings.$DOMAIN.backup.hex"
 SETTLE=10
 
+if [ "$DRY" = 1 ] && [ "$DOMAIN" = local.ascii-animals.wallpaper ]; then
+  echo "ENERGY_DRY=1 is refused for the real domain; set ENERGY_DOMAIN to a throwaway one" >&2; exit 1
+fi
+
 for tool in jq xxd plutil base64 defaults top osascript; do
   command -v "$tool" >/dev/null 2>&1 || { echo "energy.sh needs '$tool' on the PATH" >&2; exit 1; }
 done
@@ -68,7 +72,7 @@ cleanup() {
   [ "$DONE" = 1 ] && return 0; DONE=1
   set +e; trap - EXIT INT TERM
   local ok=1
-  if ! quit_app; then
+  if [ "$DRY" != 1 ] && ! quit_app; then
     echo "WARNING: ASCIIAnimals would not quit; NOT restoring settings while it is alive." >&2
     ok=0
   fi
@@ -150,6 +154,13 @@ else
     *"No value at that key path"*) KEYSTATE=absent; echo '{}' >"$TMP/old.json" ;;
     *) echo "could not read $KEY ($ERR); aborting (nothing changed)" >&2; exit 1 ;;
   esac
+fi
+# A leftover backup means an earlier run did not verify its restore: it holds the TRUE original.
+if [ -e "$BACKUP" ]; then
+  echo "stale backup exists: $BACKUP (an earlier run did not finish restoring); aborting (nothing changed)" >&2
+  echo "  restore with: defaults write $DOMAIN $KEY -data \"\$(cat '$BACKUP')\"   (or, if it says ABSENT: defaults delete $DOMAIN $KEY)" >&2
+  echo "  then delete the backup file and rerun" >&2
+  exit 1
 fi
 # Durable backup before the first write.
 mkdir -p "$(dirname "$BACKUP")"
