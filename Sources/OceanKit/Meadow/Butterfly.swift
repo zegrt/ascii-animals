@@ -66,6 +66,11 @@ public final class Butterfly {
     // The morpho's bounds: +1 climbing, -1 dropping.
     private var bound: Double = 0
     private var boundLeft: Int = 0
+    /// The flight state after the last step that left everything finite: a step that doesn't is undone to it.
+    private struct Snapshot {
+        var x, y, vx, vy, ux, uy, heading, turnRate, jink, phase, bank, pitch, stroke, prefer: Double
+    }
+    private var good: Snapshot
 
     /// Jink offsets on the target heading relax back with this time constant, s.
     static let jinkRelax = 1.5
@@ -115,6 +120,29 @@ public final class Butterfly {
             bound = random.unit() < 0.5 ? -1 : 1
             boundLeft = random.int(sp.boundBeats.lowerBound, sp.boundBeats.upperBound)
         }
+        good = Snapshot(x: x, y: y, vx: ux, vy: 0, ux: ux, uy: 0, heading: heading, turnRate: 0, jink: 0,
+                        phase: phase, bank: 0, pitch: 0, stroke: stroke, prefer: prefer)
+    }
+
+    private var snapshot: Snapshot {
+        Snapshot(x: x, y: y, vx: vx, vy: vy, ux: ux, uy: uy, heading: heading, turnRate: turnRate, jink: jink,
+                 phase: phase, bank: bank, pitch: pitch, stroke: stroke, prefer: prefer)
+    }
+
+    private var isFinite: Bool {
+        let a: Bool = x.isFinite && y.isFinite && vx.isFinite && vy.isFinite && ux.isFinite && uy.isFinite
+        let b: Bool = heading.isFinite && turnRate.isFinite && jink.isFinite && phase.isFinite
+        let c: Bool = bank.isFinite && pitch.isFinite && stroke.isFinite && prefer.isFinite
+        return a && b && c
+    }
+
+    /// Back to the last finite state, with a fresh waypoint to come (the old one may be what went wrong).
+    private func restore() {
+        let g = good
+        x = g.x; y = g.y; vx = g.vx; vy = g.vy; ux = g.ux; uy = g.uy
+        heading = g.heading; turnRate = g.turnRate; jink = g.jink; phase = g.phase
+        bank = g.bank; pitch = g.pitch; stroke = g.stroke; prefer = g.prefer
+        hasWaypoint = false
     }
 
     /// The wing elevation held in a glide: cos φ = the pose's projected width.
@@ -214,8 +242,17 @@ public final class Butterfly {
         waypointLeft = random.range(3, sp.persistence.lowerBound)
     }
 
+    /// One step of flight. A non-finite target is ignored (free flight); a step that would leave anything
+    /// non-finite, or one taken from a state poisoned from outside, is undone to the last finite state.
     public func fly(_ dt: Double, target: SIMD2<Double>?, breeze: Breeze, terrain: Terrain, random: WebRandom) {
-        guard dt > 0 else { return }
+        guard dt > 0 && dt.isFinite else { return }
+        if !isFinite { restore() }
+        step(dt, target: target.flatMap { $0.x.isFinite && $0.y.isFinite ? $0 : nil },
+             breeze: breeze, terrain: terrain, random: random)
+        if isFinite { good = snapshot } else { restore() }
+    }
+
+    private func step(_ dt: Double, target: SIMD2<Double>?, breeze: Breeze, terrain: Terrain, random: WebRandom) {
         time += dt
         let sp = species
         let span: Double = wingspan

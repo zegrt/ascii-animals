@@ -65,8 +65,9 @@ public final class Breeze {
         (clamp((x - ox) / sx, 0, Double(nx - 1)), clamp((y - oy) / sy, 0, Double(ny - 1)))
     }
 
-    /// The wind at a point, bilinear between samples.
+    /// The wind at a point, bilinear between samples. No wind at a non-finite point.
     public func sample(_ x: Double, _ y: Double) -> SIMD2<Double> {
+        guard x.isFinite && y.isFinite else { return SIMD2<Double>(0, 0) }
         let (gx, gy) = grid(x, y)
         let i = min(Int(gx), nx - 2), j = min(Int(gy), ny - 2)
         let fx: Double = gx - Double(i), fy: Double = gy - Double(j)
