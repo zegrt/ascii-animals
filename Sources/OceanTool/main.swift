@@ -3,7 +3,9 @@
 //                   [--habitat ocean|web] [--spiders a,b] [--live]
 //   OceanTool iconset <dir.iconset>
 //   OceanTool frames <dir> <W>x<H> [--seconds S] [--fps F] [--scale N] [--light] [--calm] [--seed N] [--sharks a,b]
-//                    [--habitat ocean|web] [--spiders a,b]
+//                    [--habitat ocean|web] [--spiders a,b] [--warmup S] [--interact]
+//     --interact (Web): the parity script (WebScript.swift): the pointer drawn through the near web, a click
+//     dropping a fly on it, the pointer held still near the jumper.
 //   OceanTool bench [--habitat ocean|web]
 // A Web still is the original's ?still=1 (settled), unless --live: then the live wall after the warm-up.
 import CoreGraphics
@@ -67,6 +69,8 @@ case "frames":
     let seed = UInt64(option("--seed") ?? "1") ?? 1
     let seconds = Double(option("--seconds") ?? "6") ?? 6
     let fps = Int(option("--fps") ?? "20") ?? 20
+    let frameWarmup = Double(option("--warmup") ?? "8") ?? 8
+    let interact = flag("--interact")
     let scale = CGFloat(Double(option("--scale") ?? "1") ?? 1)
     if let list = option("--sharks") { s.sharks = list.split(separator: ",").compactMap { SharkKind(rawValue: String($0)) } }
     habitatOptions(&s)
@@ -75,12 +79,16 @@ case "frames":
     guard dims.count == 2 else { fail("bad size \(args[1])") }
     let dir = URL(fileURLWithPath: args[0], isDirectory: true)
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    let rec = try FrameRecorder(settings: s.sanitized(), size: CGSize(width: dims[0], height: dims[1]), scale: scale, seed: seed, warmup: 8)
+    let rec = try FrameRecorder(settings: s.sanitized(), size: CGSize(width: dims[0], height: dims[1]), scale: scale, seed: seed,
+                                warmup: frameWarmup)
     let count = Int(seconds * Double(fps))
+    let script = interact ? (rec.habitat as? WebSim).map { WebScript(world: $0.world) } : nil
+    if interact && script == nil { fail("--interact needs --habitat web") }
     for i in 0..<count {
-        let img = try rec.next(steps: 60 / fps)
+        let img = try rec.next(steps: 60 / fps) { script?.step() }
         try StillRenderer.writePNG(img, to: dir.appendingPathComponent(String(format: "f%04d.png", i)))
     }
+    if let script { for e in script.events { print(e) } }
     print("wrote \(count) frames to \(dir.path)")
 
 case "crossing":

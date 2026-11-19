@@ -7,8 +7,9 @@ import UniformTypeIdentifiers
 /// Renders a warmed-up habitat offscreen: for the system wallpaper, the app
 /// icon, the previews and the checks.
 public enum StillRenderer {
-    /// `settle`: the habitat's still (`settle()`: the Web's settled wall, as the original's ?still=1) before the
-    /// warm-up steps. nil: every habitat but the Ocean (whose stills stay as they were).
+    /// `settle`: the habitat's still (`settle()`) instead of the warm-up steps. For the Web that is the original's
+    /// ?still=1 frame exactly (the settled wall and its 120 steps, nothing more). nil: every habitat but the
+    /// Ocean. The Ocean settles (if asked) and then warms up as it always has.
     public static func render(settings: Settings, size: CGSize, scale: CGFloat, warmup: Double,
                               systemIsDark: Bool, accent: SIMD3<Float>, seed: UInt64,
                               renderer: OceanRenderer? = nil, settle: Bool? = nil) throws -> CGImage {
@@ -20,10 +21,12 @@ public enum StillRenderer {
         let sim = Habitats.make(settings, seed: seed)
         sim.layout(terrain: .single(width: size.width, height: size.height), cell: vp.grid.cell, settings: settings)
         let theme = ThemeParams.make(settings, systemIsDark: systemIsDark, accent: accent)
-        if settle ?? (settings.habitat != .ocean) { sim.settle() }
+        let settled = settle ?? (settings.habitat != .ocean)
+        if settled { sim.settle() }
 
-        // Step the habitat; the wake only needs the last few seconds (it fades in ~2 s).
-        let total = max(1, Int(warmup * 60))
+        // Step the habitat; the wake only needs the last few seconds (it fades in ~2 s). A settled canvas habitat
+        // is already its still.
+        let total = settled && sim.kind != .ocean ? 0 : max(1, Int(warmup * 60))
         let wakeFrom = max(0, total - 180)
         var last: MTLCommandBuffer?
         for i in 0..<total {
@@ -89,9 +92,16 @@ public final class FrameRecorder {
         }
     }
 
-    /// Advance `steps` simulation steps (1/60 s each) and render a frame.
-    public func next(steps: Int) throws -> CGImage {
-        for _ in 0..<steps { sim.step(OceanClock.step) }
+    /// The habitat being recorded (for scripted pointer input).
+    public var habitat: HabitatSim { sim }
+
+    /// Advance `steps` simulation steps (1/60 s each) and render a frame. `beforeEachStep` runs before every
+    /// step (scripted input).
+    public func next(steps: Int, beforeEachStep: () -> Void = {}) throws -> CGImage {
+        for _ in 0..<steps {
+            beforeEachStep()
+            sim.step(OceanClock.step)
+        }
         return try FrameRecorder.compose(size: size, scale: scale, renderer: renderer) { [viewport, sim, theme] target, cb in
             viewport.encode(habitat: sim, theme: theme, target: target, commandBuffer: cb)
         }

@@ -135,6 +135,15 @@ The renderer draws onto the shared `CellCanvas` (one block, one glyph and its in
 `round(ch · 0.74)` centred at `ch / 2 + 1`, and a block is the original's `fillRect(x + 1, y + 1, cw − 1, ch − 1)`.
 Everything is the "full" stage (the blueprint pages' stages aren't used). What differs:
 
+- **Glyphs are drawn as Chrome draws canvas text** (Task 11). Canvas habitats get their own atlas
+  (`GlyphAtlas.Middle.canvas`; the Ocean's is unchanged): the baseline is `textBaseline = "middle"` as Chrome places
+  it, the middle of the em box (the font's ascent and descent scaled to sum to one em: 3.55 px above the baseline at
+  13 px, where half of CoreText's ascent − descent is 4.62), and the glyphs land one device pixel higher than that, as
+  Chrome's do at 1x and 2x. Font smoothing is on, so strokes get macOS's stem darkening as Chrome's canvas text does
+  (a `|` is four device pixels wide at 2x, not three). Fitted against Chrome's own glyph sheet and pinned by
+  `webGlyphsMatchChrome`. Before this the silk had 21 % fewer lit pixels and 18 % less ink than the original's, and
+  sat 1.5 pt low.
+
 - **Dew is drawn over the silk glyph: the canvas has an overlay layer.** The original draws a dew bead with a second
   `fillText` in a cell that already holds its thread's glyph, so the cell shows both. `CellCanvas` gained
   `overGlyph` / `overInk`, mixed in `canvas_main` after the first glyph (source-over, as the 2D canvas draws).
@@ -156,18 +165,25 @@ Everything is the "full" stage (the blueprint pages' stages aren't used). What d
 - **The viewport.** A screen draws the part of the wall inside its viewport: positions are taken relative to its
   top-left (one screen: the original's page, unchanged). A thread's columns (or rows) off the grid are skipped
   without being visited, and a thread wholly off it is skipped: what is plotted is the same.
-- **NaN.** A thread with a NaN end is skipped (the original would push a NaN cell and throw); a weaver's partial
-  thread from a stale node index is skipped. Neither happens on a sound wall.
+- **NaN.** A thread with a NaN end is skipped. The original doesn't throw: its loops' comparisons with NaN are false,
+  so they don't run, and the "stub" fallback plots a NaN cell, which the `Int32Array` cell list stores as cell 0
+  with nothing added to it (typed arrays ignore writes at a NaN index). So it draws nothing new; at most cell 0 is
+  listed twice and drawn twice. A weaver's partial thread from a stale node index is skipped the same way. Neither
+  happens on a sound wall.
 - **`spider.solve()`** runs in the painter as in `render` (it only places hips and knees for drawing), once per
   screen drawn.
 
 **WebSim** is engine.ts's host part: `step` is the fixed 1/60 s step (the app's clock runs it), the pointer feeds
 `pointerMoved` / `pointerLeft` / `pointerDown` (a click over the terrain drops a fly; the app only listens while
 live, as the engine ignores clicks on a still). `layout` lays the wall out again (engine.ts `resize`, e.g. a screen
-plugged in or out). **`settle()` is `?still=1`** for a fresh wall (no step since its layout): laid out settled
-(every web finished, flies resting) and stepped 120 times. A wall that has already lived is held as it is (as the
-Ocean's settle holds a warmed-up ocean), so a pause or Low Power doesn't re-arrange it, and settling twice (one
-call per screen) changes nothing. `StillRenderer` settles a Web still (the system wallpaper, `OceanTool still`).
+plugged in or out). **`settle()` is the engine's still** for a fresh wall (no step since its layout): laid out
+settled (every web finished, flies resting) and stepped 120 times. A wall that has never stepped first restarts its
+random stream, because the host has already laid it out live once and the original's still page lays out only
+once, settled: with the same seed the still is the original's, draw for draw. A wall that has already lived is held
+as it is (as the Ocean's settle holds a warmed-up ocean), so a pause or Low Power doesn't re-arrange it, and
+settling twice (one call per screen) changes nothing. **A Web still is exactly that frame**: `StillRenderer`
+settles a Web still (the system wallpaper, the previews, `OceanTool still`) and runs no warm-up steps after it
+(the Ocean's stills warm up as before, byte for byte).
 
 ## Verification
 
@@ -185,3 +201,40 @@ the demo wall at 1800 × 1169 for ten minutes and passes through every weaver, j
 also agreed for 2560 × 1440, 1440 × 900, 900 × 600 and 340 × 150, a 20-minute run, a lone nephila, a thirteen-spider
 roster, no flies and no jumper, and an empty roster. Not covered by the original: several screens (it has one
 page), checked instead by `webWorldOnSeveralScreens`.
+
+## Parity with the original, side by side (Task 11)
+
+**Method.** The original (89a7721) runs in Google Chrome 158 (headless, via puppeteer-core) from a reference-only page
+that is the demo page `/` (the default cast, no options) with `Math.random` replaced by the `WebRandom` stream, its
+animation-frame clock stopped so it steps only when told, `?theme=` for the palette and `?still=1` for the engine's
+`still` option. Vite serves it with the two edits the port makes (the nav-bar gap dropped, the move glide fixed),
+applied in memory. Ours is `OceanTool still … --habitat web [--light] --seed N` and `OceanTool frames … --habitat web
+--warmup 0 --interact` (the same pointer, click and jumper script, `Sources/OceanTool/WebScript.swift`). Same seed,
+same 1440 × 900 page, same device scale, same step count: the two show the same scene, so every difference is
+rendering. (`/?still=1` on the demo route is not a still: demo.ts ignores it, and only a reduced-motion preference
+freezes that page; the reference page passes `still: true`.)
+
+**Result** (seed 1, 1440 × 900 at 2x):
+- Every cell holds the same glyph in the same colour (peak colours equal; no cell differs by half its ink). Webs,
+  hub knots, dew, flies, bodies, markings, eyes and fangs, leg blocks: identical.
+- Mean absolute difference per channel 0.31 of 255 (dark) and 0.30 (light), was 2.07 and 1.63 before the glyph fix;
+  lit pixels within 1 %, lit silk pixels +2.2 %, silk ink +0.7 %.
+- 20 s at 20 fps from load, with the pointer drawn through a web, a fly dropped by a click and the pointer held by
+  the jumper (it pounces twice): every frame matches (mean 0.23 of 255 at 1x, worst frame 0.24). Build speed, gait,
+  sway, hunt, wrap, carry and the jumper's timing are the original's step for step.
+- Task 10's "45 % fewer lit silk pixels than the README banner" was two things: a different scene (the banner is a
+  live 960 × 300 moment of another wall) and thinner glyphs (21 % of it, now fixed).
+
+**Platform differences that remain** (rasterisation, not the scene):
+- **Sub-pixel placement.** Chrome positions glyphs at fractions of a pixel across; the atlas draws each glyph once per
+  cell at a whole pixel, so a glyph can sit up to half a device pixel off Chrome's. This is most of the 0.3/255.
+- **The font file.** The page loads Geist Mono 600 from Google Fonts (a static instance, split into subsets; the
+  canvas waits for it, and Chrome draws in it). We embed the variable Geist Mono at weight 600. Same outlines at these
+  sizes as far as the comparison can tell.
+- **Light** is the light palette on the demo cast. The `light` route also lays a soft paper pool over the middle,
+  keeps hubs out of it (`clearCentre`) and uses the chat screen's hero cast; those belong to that page, not to the
+  palette, and aren't ported. As in the original, Light tints the spiders a little (argiope's bands reach
+  saturation 0.36 in the original's own light still); silk, dew, flies, ringing silk and every accent are graphite or
+  paper (`webLightHasNoAccents`).
+- **Device scale.** The original caps its canvas at 2x; Macs draw at 1x or 2x, so this never differs.
+

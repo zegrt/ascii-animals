@@ -43,7 +43,18 @@ public enum GlyphAtlas {
         return CTFontCreateWithGraphicsFont(cg, size, nil, desc)
     }
 
-    public static func makeBytes(cell: CGSize, scale: CGFloat) throws -> Bytes {
+    /// Where the "middle" baseline sits.
+    public enum Middle {
+        /// The Ocean's atlas, as it has always been: half of CoreText's ascent minus descent above the middle.
+        case ocean
+        /// A browser canvas's `textBaseline = "middle"`, as Chrome on macOS draws it: the middle of the em box (the
+        /// font's ascent and descent scaled to sum to one em), glyphs landing one device pixel higher than that,
+        /// and font smoothing on (macOS's stem darkening, which Chrome's canvas text gets). Fitted against Chrome's
+        /// own glyphs at 1x and 2x (docs/reference/web-port-notes.md). The Web habitat draws as the original page.
+        case canvas
+    }
+
+    public static func makeBytes(cell: CGSize, scale: CGFloat, middle: Middle = .ocean) throws -> Bytes {
         let slotW = Int((cell.width * scale).rounded())
         let slotH = Int((cell.height * scale).rounded())
         let width = slotW * glyphs.count
@@ -53,11 +64,14 @@ public enum GlyphAtlas {
         ctx.setFillColor(gray: 0, alpha: 1)
         ctx.fill(CGRect(x: 0, y: 0, width: width, height: slotH))
         ctx.setShouldAntialias(true)
-        ctx.setShouldSmoothFonts(false)
+        ctx.setAllowsFontSmoothing(middle == .canvas)
+        ctx.setShouldSmoothFonts(middle == .canvas)
 
         // renderer.ts: ctx.font = 600 round(ch * 0.74)px, centred, baseline "middle" at ch/2 + 1.
-        let font = try font(size: (cell.height * 0.74).rounded() * scale)
+        let size = (cell.height * 0.74).rounded() * scale
+        let font = try font(size: size)
         let ascent = CTFontGetAscent(font), descent = CTFontGetDescent(font)
+        let aboveMiddle = middle == .ocean ? (ascent - descent) / 2 : size * (ascent - descent) / (2 * (ascent + descent)) - 1
         let white = CGColor(gray: 1, alpha: 1)
         for (i, g) in glyphs.enumerated() {
             let attr = NSAttributedString(string: g, attributes: [
@@ -68,7 +82,7 @@ public enum GlyphAtlas {
             let advance = CTLineGetTypographicBounds(line, nil, nil, nil)
             let cx = CGFloat(i * slotW) + CGFloat(slotW) / 2
             let middleY = CGFloat(slotH) / 2 + scale                // from the top
-            let baselineFromTop = middleY + (ascent - descent) / 2
+            let baselineFromTop = middleY + aboveMiddle
             ctx.textPosition = CGPoint(x: cx - advance / 2, y: CGFloat(slotH) - baselineFromTop)
             CTLineDraw(line, ctx)
         }
@@ -78,8 +92,8 @@ public enum GlyphAtlas {
         return Bytes(bytes: bytes, width: width, height: slotH, slotWidth: slotW)
     }
 
-    static func make(device: MTLDevice, cell: CGSize, scale: CGFloat) throws -> MTLTexture {
-        let a = try makeBytes(cell: cell, scale: scale)
+    static func make(device: MTLDevice, cell: CGSize, scale: CGFloat, middle: Middle = .ocean) throws -> MTLTexture {
+        let a = try makeBytes(cell: cell, scale: scale, middle: middle)
         let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: a.width, height: a.height, mipmapped: false)
         d.usage = .shaderRead
         guard let t = device.makeTexture(descriptor: d) else { throw FontError() }

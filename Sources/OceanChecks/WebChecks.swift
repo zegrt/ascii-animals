@@ -740,14 +740,40 @@ func webPainterChecks() {
         try expect(other.stepCount == 2 && other.world.swarm.flies.count == before + 1 && !other.world.pointer.active,
                    "steps \(other.stepCount), flies \(other.world.swarm.flies.count)")
     }
+    check("webGlyphsMatchChrome") {
+        // The canvas atlas draws each glyph where Chrome's canvas draws it, as heavy: ink boxes (coverage > 0.25)
+        // within a pixel and total ink within 12 % of Chrome 158's own (600 13px Geist Mono, textBaseline middle at
+        // ch/2 + 1, a 12 x 17 cell), measured from its glyph sheet in Task 11 (docs/reference/web-port-notes.md).
+        let chrome: [Int: [(Character, Int, Int, Int, Int, Double)]] = [
+            1: [("|", 3, 14, 5, 6, 21.7), ("-", 8, 9, 3, 8, 8.9), ("_", 13, 14, 3, 8, 11.2), ("¯", 3, 4, 4, 7, 6.1), ("/", 3, 14, 3, 8, 22.5),
+                ("*", 3, 9, 3, 8, 23.1), ("x", 6, 12, 2, 8, 28.2), ("@", 3, 14, 2, 9, 53.6), ("O", 3, 12, 2, 9, 44.3)],
+            2: [("|", 6, 28, 10, 13, 82.9), ("-", 16, 19, 7, 16, 33.9), ("_", 25, 28, 6, 17, 41.7), ("¯", 7, 9, 8, 15, 22.6), ("/", 6, 28, 6, 17, 82.6),
+                ("*", 7, 18, 6, 17, 85.3), ("x", 11, 25, 5, 18, 108.1), ("@", 7, 28, 4, 19, 196.4), ("O", 7, 26, 5, 18, 167.8)],
+        ]
+        for (scale, refs) in chrome {
+            let a = try GlyphAtlas.makeBytes(cell: CGSize(width: 12, height: 17), scale: CGFloat(scale), middle: .canvas)
+            for (g, y0, y1, x0, x1, ink) in refs {
+                let slot = Int(GlyphAtlas.index(g)!)
+                var box = (Int.max, Int.min, Int.max, Int.min), sum = 0.0
+                for y in 0..<a.height { for x in 0..<a.slotWidth {
+                    let v = Double(a.bytes[y * a.width + slot * a.slotWidth + x]) / 255
+                    sum += v
+                    if v > 0.25 { box = (min(box.0, y), max(box.1, y), min(box.2, x), max(box.3, x)) }
+                } }
+                let off = [box.0 - y0, box.1 - y1, box.2 - x0, box.3 - x1].map(abs).max()!
+                try expect(off <= 1, "\(scale)x \(g): box rows \(box.0)-\(box.1) cols \(box.2)-\(box.3), Chrome \(y0)-\(y1), \(x0)-\(x1)")
+                try expect(abs(sum / ink - 1) < 0.12, "\(scale)x \(g): ink \(sum), Chrome \(ink)")
+            }
+        }
+    }
     check("webSettleIsTheOriginalStill") {
         // settle(): a fresh wall is laid out settled (every web finished, flies resting) and stepped 120 times, as
         // engine.ts does for ?still=1; settling again, or once the wall has lived, changes nothing.
         let r = CGRect(x: 0, y: 0, width: 1800, height: 1169)
         let sim = makeSim(seed: 6, rects: [r])
         sim.settle()
+        // The original's still page: one layout, settled, from the seed's first draw.
         let ref = WebWorld(spiders: SpiderKind.defaultCast, flies: true, jumper: true, random: WebRandom(seed: 6))
-        ref.layout(terrain: .single(width: 1800, height: 1169), cell: GridSpec.cell(forWidth: 1800), settled: false)
         ref.layout(terrain: .single(width: 1800, height: 1169), cell: GridSpec.cell(forWidth: 1800), settled: true)
         for _ in 0..<120 { ref.step(1.0 / 60) }
         let a = webWorldFeatures(sim.world), b = webWorldFeatures(ref)
@@ -786,5 +812,116 @@ func webRenderChecks() {
             try expect(plain > w * h / 3, "\(light ? "light" : "dark"): background pixels \(plain) of \(w * h)")
             try expect(other > w * h / 50, "\(light ? "light" : "dark"): drawn pixels \(other) of \(w * h)")
         }
+        // A Web still is the original's still frame: no warm-up steps after settling, whatever the warm-up asked.
+        s.appearance = .dark
+        let short = try StillRenderer.render(settings: s, size: CGSize(width: 480, height: 300), scale: 1, warmup: 1,
+                                             systemIsDark: true, accent: SIMD3(0.2, 0.5, 1), seed: 3)
+        let long = try StillRenderer.render(settings: s, size: CGSize(width: 480, height: 300), scale: 1, warmup: 6,
+                                            systemIsDark: true, accent: SIMD3(0.2, 0.5, 1), seed: 3)
+        try expect(rgbBytes(short) == rgbBytes(long), "the warm-up changed the Web still")
     }
+    check("webLightHasNoAccents") {
+        // Review Focus 4: Light is graphite on paper. The still's background is paper, and the only colour in it is
+        // the species' tint on their bodies (the original's light palette tints bodies and legs too: argiope's
+        // bands reach saturation 0.36 in the original's own light still). No accent hue anywhere: not on silk,
+        // dew, flies or ringing silk, and the cells that take an accent, the cyan ring, the fang or the heat on
+        // black are graphite or paper on paper.
+        var s = Settings.defaults
+        s.habitat = .web
+        s.appearance = .light
+        let size = CGSize(width: 900, height: 600)
+        let img = try StillRenderer.render(settings: s, size: size, scale: 1, warmup: 1, systemIsDark: true,
+                                           accent: SIMD3(0.2, 0.5, 1), seed: 5)
+        let px = rgbBytes(img)
+        // The same wall on the CPU (the still is settle(), deterministic): which cells hold a spider.
+        let cell = GridSpec.cell(forWidth: size.width)
+        let sim = makeSim(seed: 5, rects: [CGRect(origin: .zero, size: size)])
+        sim.settle()
+        let lightTheme = ThemeParams.make(s, systemIsDark: true, accent: .zero)
+        let canvas = paint(sim, CGRect(origin: .zero, size: size), cell: cell, theme: lightTheme)
+        let cols = canvas.cols, rows = canvas.rows
+        var body = [Bool](repeating: false, count: cols * rows)
+        for r in 0..<rows { for c in 0..<cols where canvas.block[r * cols + c] >> 24 > 0 {
+            // A body or leg block, and the edge glyphs around it.
+            for rr in max(0, r - 1)...min(rows - 1, r + 1) { for cc in max(0, c - 1)...min(cols - 1, c + 1) { body[rr * cols + cc] = true } }
+        } }
+        try expect(body.contains(true), "no spider in the still")
+        var paper = 0, saturated = 0, stray = 0
+        for y in 0..<img.height { for x in 0..<img.width {
+            let i = (y * img.width + x) * 4
+            let r = Double(px[i]), g = Double(px[i + 1]), b = Double(px[i + 2])
+            if abs(r - 247) <= 1 && abs(g - 246) <= 1 && abs(b - 243) <= 1 { paper += 1 }
+            let mx = max(r, g, b), sat = mx > 0 ? (mx - min(r, g, b)) / mx : 0
+            guard sat > 0.15 else { continue }
+            saturated += 1
+            let c = min(cols - 1, Int(Double(x) / cell.width)), rr = min(rows - 1, Int(Double(y) / cell.height))
+            if !body[rr * cols + c] { stray += 1 }
+        } }
+        try expect(paper > img.width * img.height / 3, "paper pixels \(paper) of \(img.width * img.height)")
+        try expect(stray == 0, "\(stray) saturated pixels off the spiders (of \(saturated) saturated)")
+
+        // A live wall with every kind of accent: the pointer drawn through the near web (cyan rings on black),
+        // accents at the full rate, the jumper's cyan fang. Light paints those cells graphite or paper.
+        let live = makeSim(seed: 5, rects: [CGRect(origin: .zero, size: size)])
+        for _ in 0..<300 { live.step(OceanClock.step) }
+        let web = live.world.weavers.last!.web
+        for k in 0..<40 {
+            live.pointerMoved(Double(web.x[web.hub]) + web.outer * (0.7 - 1.4 * Double(k) / 40), Double(web.y[web.hub]) + 7)
+            live.step(OceanClock.step)
+        }
+        var dt = darkTheme, lt = lightTheme
+        dt.accentRate = 1
+        lt.accentRate = 1
+        let dark = paint(live, CGRect(origin: .zero, size: size), cell: cell, theme: dt)
+        let light = paint(live, CGRect(origin: .zero, size: size), cell: cell, theme: lt)
+        let chroma = Set(([(224, 137, 44), (224, 58, 50), (180, 74, 224), (51, 200, 204), (60, 181, 74), (49, 80, 232), (217, 193, 74),
+                           (110, 230, 255), (255, 120, 60)] as [(UInt32, UInt32, UInt32)]).map { $0.0 | $0.1 << 8 | $0.2 << 16 })
+        func saturation(_ v: UInt32) -> Double {
+            let r = Double(v & 0xff), g = Double((v >> 8) & 0xff), b = Double((v >> 16) & 0xff), mx = max(r, g, b)
+            return mx > 0 ? (mx - min(r, g, b)) / mx : 0
+        }
+        var accentCells = 0, ringCells = 0
+        for i in 0..<dark.ink.count where dark.glyph[i] != CellCanvas.noGlyph && chroma.contains(dark.ink[i] & 0xffffff) {
+            accentCells += 1
+            if dark.ink[i] & 0xffffff == 110 | 230 << 8 | 255 << 16 { ringCells += 1 }
+            try expect(saturation(light.ink[i]) <= 0.15, "light cell \(i) ink \(String(light.ink[i], radix: 16)) where dark has an accent")
+        }
+        try expect(accentCells > 10 && ringCells > 3, "accent cells on black \(accentCells), ringing \(ringCells)")
+        for i in 0..<light.ink.count where light.glyph[i] != CellCanvas.noGlyph && light.block[i] >> 24 == 0 {
+            // Off the bodies' blocks (silk, dew, flies, edges): graphite or a body's tinted tone, never an accent hue.
+            try expect(!chroma.contains(light.ink[i] & 0xffffff), "light cell \(i) in an accent colour")
+        }
+        for i in 0..<light.overInk.count where light.overGlyph[i] != CellCanvas.noGlyph {
+            try expect(saturation(light.overInk[i]) <= 0.15, "light dew \(i) \(String(light.overInk[i], radix: 16))")
+        }
+    }
+    check("webCalmIsDimmer") {
+        // Calm on black: the ink is dimmer (its pixels' mean luminance lower), the background and grid stay.
+        var s = Settings.defaults
+        s.habitat = .web
+        func still(_ calm: Bool) throws -> [UInt8] {
+            s.calm = calm
+            return rgbBytes(try StillRenderer.render(settings: s, size: CGSize(width: 900, height: 600), scale: 1, warmup: 1,
+                                                     systemIsDark: true, accent: SIMD3(0.2, 0.5, 1), seed: 5))
+        }
+        let normal = try still(false), calm = try still(true)
+        func lum(_ p: [UInt8], _ i: Int) -> Double { 0.2126 * Double(p[i]) + 0.7152 * Double(p[i + 1]) + 0.0722 * Double(p[i + 2]) }
+        var inkN = 0.0, inkC = 0.0, n = 0
+        for i in stride(from: 0, to: normal.count, by: 4) where lum(normal, i) > 24 {
+            inkN += lum(normal, i)
+            inkC += lum(calm, i)
+            n += 1
+        }
+        try expect(n > 2000, "ink pixels \(n)")
+        try expect(inkC / Double(n) < inkN / Double(n) * 0.8, "calm ink \(inkC / Double(n)) vs \(inkN / Double(n))")
+    }
+}
+
+/// A still's pixels as RGBA bytes, top row first.
+private func rgbBytes(_ img: CGImage) -> [UInt8] {
+    var bytes = [UInt8](repeating: 0, count: img.width * img.height * 4)
+    let ctx = CGContext(data: &bytes, width: img.width, height: img.height, bitsPerComponent: 8, bytesPerRow: img.width * 4,
+                        space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    ctx.draw(img, in: CGRect(x: 0, y: 0, width: img.width, height: img.height))
+    return bytes
 }

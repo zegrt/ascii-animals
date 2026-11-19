@@ -76,6 +76,8 @@ public final class ViewportRenderer {
     private var wakeCurrent = 0
     private var cells: MTLTexture!
     private var atlas: MTLTexture!
+    /// The canvas habitats' atlas (a browser canvas's middle baseline), made on first use.
+    private var canvasAtlas: MTLTexture?
     private var needsClear = true
     /// Canvas habitats: the CPU grid and, per ring slot, its upload (block, ink, glyph, overlay ink and glyph).
     private var canvas: CellCanvas?
@@ -131,6 +133,7 @@ public final class ViewportRenderer {
         fishBytes?.deallocate()
         fishBytes = .allocate(capacity: c * rows * 4)
         atlas = try GlyphAtlas.make(device: r.device, cell: grid.cell, scale: scale)
+        canvasAtlas = nil
         needsClear = true
         canvas = nil
         canvasTextures = []
@@ -215,7 +218,8 @@ public final class ViewportRenderer {
             background: SIMD4(c.background, Float(scale)),
             gridColor: c.gridColor,
             misc: SIMD4(reveal, 0, 0, 0))
-        let atlas = self.atlas
+        if canvasAtlas == nil { canvasAtlas = try? GlyphAtlas.make(device: r.device, cell: grid.cell, scale: scale, middle: .canvas) }
+        let atlas = canvasAtlas ?? self.atlas
         pass(cb, target, r.canvasPipe, "canvas compose") { enc in
             enc.setFragmentBytes(&u, length: MemoryLayout<CanvasUniforms>.stride, index: 0)
             enc.setFragmentTexture(t.block, index: 0)

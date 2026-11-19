@@ -104,8 +104,15 @@ public struct Vec: Equatable {
 /// the whole wall) replays exactly. Pass the same instance everywhere the original shares `Math.random`.
 public final class WebRandom {
     private var rng: Rng
+    private let seed: UInt64
 
-    public init(seed: UInt64) { rng = Rng(seed: seed) }
+    public init(seed: UInt64) {
+        self.seed = seed
+        rng = Rng(seed: seed)
+    }
+
+    /// Back to the start of the stream, as a page loaded afresh with the same seed.
+    public func restart() { rng = Rng(seed: seed) }
 
     /// `Math.random()`: uniform in [0, 1).
     @inline(__always) public func unit() -> Double { rng.unit() }

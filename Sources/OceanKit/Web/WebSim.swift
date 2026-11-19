@@ -45,8 +45,11 @@ public final class WebSim: CellPainter {
 
     /// engine.ts for `?still=1`: a fresh wall is laid out settled (every web finished, flies resting) and stepped
     /// 120 times. A wall that has already lived is held as it is, and settling again changes nothing.
+    /// A wall that has never stepped starts its random stream again first, so the still is the original's still
+    /// page for the same seed (that page lays out once, settled; here the host's live layout came first).
     public func settle() {
         guard fresh else { return }
+        if stepCount == 0 { world.random.restart() }
         world.layout(terrain: terrain, cell: cell, settled: true)
         for _ in 0..<120 { world.step(1.0 / 60) }
         stepCount += 120
