@@ -6,9 +6,11 @@ public final class OceanSim: HabitatSim {
     public let world: World
     private var terrain = Terrain(rects: [])
     private var cell = CGSize(width: 13, height: 19)
+    private var density: Double
 
     public init(settings: Settings, seed: UInt64) {
         world = World(sharks: settings.sharks, rng: Rng(seed: seed))
+        density = settings.fishDensity
     }
 
     public var kind: HabitatKind { .ocean }
@@ -18,6 +20,7 @@ public final class OceanSim: HabitatSim {
     public func layout(terrain: Terrain, cell: CGSize, settings: Settings) {
         self.terrain = terrain
         self.cell = cell
+        density = settings.fishDensity
         world.resize(terrain: terrain, cell: cell, density: settings.fishDensity)
     }
 
@@ -26,8 +29,12 @@ public final class OceanSim: HabitatSim {
     public func pointerLeft() { world.pointer.active = false }
     public func pointerDown(_ x: Double, _ y: Double) { world.splash(x, y) }
 
+    /// Only a density change touches the world: the host calls this on every
+    /// settings change, and a resize would nudge stray fish back inside.
     public func update(settings: Settings) {
-        world.resize(terrain: terrain, cell: cell, density: settings.fishDensity)
+        guard settings.fishDensity != density else { return }
+        density = settings.fishDensity
+        world.resize(terrain: terrain, cell: cell, density: density)
     }
 
     public func settle() {

@@ -47,23 +47,23 @@ enum OnboardingController {
             if env["ASCII_ANIMALS_SNAPSHOT_LIGHT"] != nil { s.appearance = .light }
             let theme = ThemeParams.make(s, systemIsDark: true, accent: SIMD3(0.2, 0.5, 1))
             let vp = try renderer.makeViewport(pointSize: size, scale: scale)
-            let world = World(sharks: s.sharks, rng: Rng(seed: 11))
-            world.resize(width: size.width, height: size.height, cell: vp.grid.cell, density: s.fishDensity)
+            let sim = Habitats.make(s, seed: 11)
+            sim.layout(terrain: .single(width: size.width, height: size.height), cell: vp.grid.cell, settings: s)
             // Warm up; on the interactive steps, sweep a pointer and drop a splash in the last seconds.
             let total = 7 * 60
             for i in 0..<total {
                 let t = Double(i - (total - 150)) / 150
                 if beat == .pointer, t >= 0 {
-                    world.pointer = (size.width * (0.62 + 0.16 * t), size.height * (0.72 - 0.1 * sin(t * 3)), true)
+                    sim.pointerMoved(size.width * (0.62 + 0.16 * t), size.height * (0.72 - 0.1 * sin(t * 3)))
                 }
-                if beat == .splash, i == total - 40 { world.splash(size.width * 0.7, size.height * 0.74) }
-                world.step(OceanClock.step)
+                if beat == .splash, i == total - 40 { sim.pointerDown(size.width * 0.7, size.height * 0.74) }
+                sim.step(OceanClock.step)
                 if i >= total - 180, let cb = renderer.queue.makeCommandBuffer() {
-                    vp.encode(world: world, theme: theme, target: nil, commandBuffer: cb)
+                    vp.encode(habitat: sim, theme: theme, target: nil, commandBuffer: cb)
                     cb.commit()
                 }
             }
-            guard let ocean = LiveOceanView.image(of: world, viewport: vp, theme: theme, renderer: renderer) else {
+            guard let ocean = LiveOceanView.image(of: sim, viewport: vp, theme: theme, renderer: renderer) else {
                 throw RenderError(description: "no ocean frame")
             }
 
@@ -441,7 +441,7 @@ final class OnboardingSession: NSObject {
         guard Presets.all.indices.contains(i) else { return }
         app.store.update { $0.sharks = Presets.all[i].sharks }
         model.settings = app.store.settings
-        ocean.rebuild(sharks: model.settings.sharks)
+        ocean.rebuild(model.settings)
     }
 
     // MARK: Input

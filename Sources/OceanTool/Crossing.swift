@@ -40,12 +40,16 @@ enum Crossing {
         print("crossing at \(Double(hit.step) / 60) s, x \(Int(hit.x))")
 
         // Replay the same ocean up to a few seconds before the crossing.
-        let world = makeWorld()
+        var settings = Settings.defaults
+        settings.sharks = kinds
+        settings.fishDensity = 1
+        let sim = Habitats.make(settings, seed: seed)
+        sim.layout(terrain: terrain, cell: cell, settings: settings)
         let theme = ThemeParams.make(.defaults, systemIsDark: true, accent: .zero)
-        let rec = try SceneRecorder(world: world, viewports: screens, cell: cell, scale: 1, theme: theme)
+        let rec = try SceneRecorder(habitat: sim, viewports: screens, cell: cell, scale: 1, theme: theme)
         let start = max(0, hit.step - Int(seconds * 0.45 * 60))
         for s in 0..<start {
-            world.step(OceanClock.step)
+            sim.step(OceanClock.step)
             if s >= start - 180 { rec.advanceWake() }
         }
 
@@ -54,7 +58,7 @@ enum Crossing {
         let crop = CGRect(x: min(max(0, hit.x - cw / 2), Double(bounds.width) - cw), y: door.y - chh / 2, width: cw, height: chh)
         let count = Int(seconds * Double(fps))
         for f in 0..<count {
-            for _ in 0..<(60 / fps) { world.step(OceanClock.step) }
+            for _ in 0..<(60 / fps) { sim.step(OceanClock.step) }
             let shots = try rec.capture()
             try write(compose(shots, screens: screens, region: crop, scale: 1), dir.appendingPathComponent(String(format: "f%04d.png", f)))
             if f == count / 2 {

@@ -4,8 +4,8 @@ import ImageIO
 import Metal
 import UniformTypeIdentifiers
 
-/// Renders a warmed-up ocean offscreen: for the system wallpaper, the app
-/// icon and the checks.
+/// Renders a warmed-up habitat offscreen: for the system wallpaper, the app
+/// icon, the previews and the checks.
 public enum StillRenderer {
     public static func render(settings: Settings, size: CGSize, scale: CGFloat, warmup: Double,
                               systemIsDark: Bool, accent: SIMD3<Float>, seed: UInt64,
@@ -15,33 +15,36 @@ public enum StillRenderer {
         }
         let r = try renderer ?? OceanRenderer(device: device)
         let vp = try r.makeViewport(pointSize: size, scale: scale)
-        let world = World(sharks: settings.sharks, rng: Rng(seed: seed))
-        world.resize(width: size.width, height: size.height, cell: vp.grid.cell, density: settings.fishDensity)
+        let sim = Habitats.make(settings, seed: seed)
+        sim.layout(terrain: .single(width: size.width, height: size.height), cell: vp.grid.cell, settings: settings)
         let theme = ThemeParams.make(settings, systemIsDark: systemIsDark, accent: accent)
 
-        // Step the ocean; the wake only needs the last few seconds (it fades in ~2 s).
+        // Step the habitat; the wake only needs the last few seconds (it fades in ~2 s).
         let total = max(1, Int(warmup * 60))
         let wakeFrom = max(0, total - 180)
         var last: MTLCommandBuffer?
         for i in 0..<total {
-            world.step(OceanClock.step)
+            sim.step(OceanClock.step)
             if i >= wakeFrom, let cb = r.queue.makeCommandBuffer() {
-                vp.encode(world: world, theme: theme, target: nil, commandBuffer: cb)
+                vp.encode(habitat: sim, theme: theme, target: nil, commandBuffer: cb)
                 cb.commit()
                 last = cb
             }
-            world.events.removeAll()
         }
         last?.waitUntilCompleted()
 
-        return try FrameRecorder.compose(vp, world: world, theme: theme, size: size, scale: scale, renderer: r)
+        return try FrameRecorder.compose(size: size, scale: scale, renderer: r) { target, cb in
+            vp.encode(habitat: sim, theme: theme, target: target, commandBuffer: cb)
+        }
     }
 
     /// One viewport of an existing world, as it looks right now (no wake history).
     public static func snapshot(_ world: World, viewport: CGRect, cell: CGSize, theme: ThemeParams, scale: CGFloat,
                                 renderer r: OceanRenderer) throws -> CGImage {
         let vp = try r.makeViewport(pointSize: viewport.size, scale: scale, cell: cell)
-        return try FrameRecorder.compose(vp, world: world, viewport: viewport, theme: theme, size: viewport.size, scale: scale, renderer: r)
+        return try FrameRecorder.compose(size: viewport.size, scale: scale, renderer: r) { target, cb in
+            vp.encode(world: world, viewport: viewport, theme: theme, target: target, commandBuffer: cb)
+        }
     }
 
     public static func writePNG(_ image: CGImage, to url: URL) throws {
@@ -57,7 +60,7 @@ public enum StillRenderer {
 public final class FrameRecorder {
     private let renderer: OceanRenderer
     private let viewport: ViewportRenderer
-    private let world: World
+    private let sim: HabitatSim
     private let theme: ThemeParams
     private let size: CGSize
     private let scale: CGFloat
@@ -67,33 +70,34 @@ public final class FrameRecorder {
         guard let device = MTLCreateSystemDefaultDevice() else { throw RenderError(description: "no Metal device") }
         renderer = try OceanRenderer(device: device)
         viewport = try renderer.makeViewport(pointSize: size, scale: scale)
-        world = World(sharks: settings.sharks, rng: Rng(seed: seed))
-        world.resize(width: size.width, height: size.height, cell: viewport.grid.cell, density: settings.fishDensity)
+        sim = Habitats.make(settings, seed: seed)
+        sim.layout(terrain: .single(width: size.width, height: size.height), cell: viewport.grid.cell, settings: settings)
         theme = ThemeParams.make(settings, systemIsDark: systemIsDark, accent: accent)
         self.size = size
         self.scale = scale
         // Warm up with the wake running for the last few seconds.
         let total = max(1, Int(warmup * 60)), wakeFrom = max(0, total - 180)
         for i in 0..<total {
-            world.step(OceanClock.step)
+            sim.step(OceanClock.step)
             if i >= wakeFrom, let cb = renderer.queue.makeCommandBuffer() {
-                viewport.encode(world: world, theme: theme, target: nil, commandBuffer: cb)
+                viewport.encode(habitat: sim, theme: theme, target: nil, commandBuffer: cb)
                 cb.commit()
             }
-            world.events.removeAll()
         }
     }
 
     /// Advance `steps` simulation steps (1/60 s each) and render a frame.
     public func next(steps: Int) throws -> CGImage {
-        for _ in 0..<steps { world.step(OceanClock.step) }
-        let img = try FrameRecorder.compose(viewport, world: world, theme: theme, size: size, scale: scale, renderer: renderer)
-        world.events.removeAll()
-        return img
+        for _ in 0..<steps { sim.step(OceanClock.step) }
+        return try FrameRecorder.compose(size: size, scale: scale, renderer: renderer) { [viewport, sim, theme] target, cb in
+            viewport.encode(habitat: sim, theme: theme, target: target, commandBuffer: cb)
+        }
     }
 
-    static func compose(_ vp: ViewportRenderer, world: World, viewport: CGRect? = nil, theme: ThemeParams, size: CGSize, scale: CGFloat,
-                        renderer r: OceanRenderer) throws -> CGImage {
+    /// A `size` x `scale` frame: `draw` encodes into the target, then the
+    /// pixels are read back.
+    static func compose(size: CGSize, scale: CGFloat, renderer r: OceanRenderer,
+                        draw: (MTLTexture, MTLCommandBuffer) -> Void) throws -> CGImage {
         let w = Int((size.width * scale).rounded()), h = Int((size.height * scale).rounded())
         let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: OceanRenderer.outputFormat, width: w, height: h, mipmapped: false)
         d.usage = .renderTarget
@@ -101,7 +105,7 @@ public final class FrameRecorder {
         guard let target = r.device.makeTexture(descriptor: d), let cb = r.queue.makeCommandBuffer() else {
             throw RenderError(description: "no frame target")
         }
-        vp.encode(world: world, viewport: viewport, theme: theme, target: target, commandBuffer: cb)
+        draw(target, cb)
         if let blit = cb.makeBlitCommandEncoder() {
             blit.synchronize(resource: target)
             blit.endEncoding()
@@ -121,21 +125,21 @@ public final class FrameRecorder {
     }
 }
 
-/// Several viewports of one world, captured together (shared-ocean previews).
-/// The caller steps the world; each capture runs the wake for the steps since
+/// Several viewports of one habitat, captured together (shared-ocean previews).
+/// The caller steps the habitat; each capture runs the wake for the steps since
 /// the last one.
 public final class SceneRecorder {
     private let renderer: OceanRenderer
-    private let world: World
+    private let sim: HabitatSim
     private let views: [(rect: CGRect, vp: ViewportRenderer)]
     private let theme: ThemeParams
     private let scale: CGFloat
 
-    public init(world: World, viewports: [CGRect], cell: CGSize, scale: CGFloat, theme: ThemeParams) throws {
+    public init(habitat: HabitatSim, viewports: [CGRect], cell: CGSize, scale: CGFloat, theme: ThemeParams) throws {
         guard let device = MTLCreateSystemDefaultDevice() else { throw RenderError(description: "no Metal device") }
         let r = try OceanRenderer(device: device)
         renderer = r
-        self.world = world
+        sim = habitat
         self.theme = theme
         self.scale = scale
         views = try viewports.map { ($0, try r.makeViewport(pointSize: $0.size, scale: scale, cell: cell)) }
@@ -145,13 +149,17 @@ public final class SceneRecorder {
     public func advanceWake() {
         for v in views {
             guard let cb = renderer.queue.makeCommandBuffer() else { continue }
-            v.vp.encode(world: world, viewport: v.rect, theme: theme, target: nil, commandBuffer: cb)
+            v.vp.encode(habitat: sim, viewport: v.rect, theme: theme, target: nil, commandBuffer: cb)
             cb.commit()
         }
     }
 
     /// One image per viewport, in the order given.
     public func capture() throws -> [CGImage] {
-        try views.map { try FrameRecorder.compose($0.vp, world: world, viewport: $0.rect, theme: theme, size: $0.rect.size, scale: scale, renderer: renderer) }
+        try views.map { v in
+            try FrameRecorder.compose(size: v.rect.size, scale: scale, renderer: renderer) { target, cb in
+                v.vp.encode(habitat: sim, viewport: v.rect, theme: theme, target: target, commandBuffer: cb)
+            }
+        }
     }
 }

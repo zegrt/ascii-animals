@@ -133,11 +133,25 @@ public final class ViewportRenderer {
         enc.endEncoding()
     }
 
+    /// Draws `habitat` the way its kind draws: the part inside `viewport`
+    /// (ocean space; nil = all of it), into `target` when given (nil only
+    /// advances per-step state such as the Ocean's wake). `reveal` dissolves
+    /// the picture in: cells whose revealHash is at or above it draw bare
+    /// background; 1 shows everything. The caller commits `commandBuffer`.
+    public func encode(habitat: HabitatSim, viewport: CGRect? = nil, theme: ThemeParams, reveal: Float = 1,
+                       target: MTLTexture?, commandBuffer cb: MTLCommandBuffer) {
+        if let ocean = habitat as? OceanSim {
+            encode(world: ocean.world, viewport: viewport, theme: theme, reveal: reveal, target: target, commandBuffer: cb)
+        }
+        // Task 7: other habitats paint a CellCanvas, drawn by canvas_main.
+    }
+
     /// Packs the part of `world` inside `viewport` (ocean space; nil = all of
     /// it) and encodes one wake pass per simulation step since this viewport
     /// last drew (at most 4), the cell pass, and (when `target` is given) the
     /// compose pass into `target`. The caller commits `commandBuffer`.
-    public func encode(world: World, viewport: CGRect? = nil, theme: ThemeParams, target: MTLTexture?, commandBuffer cb: MTLCommandBuffer) {
+    func encode(world: World, viewport: CGRect? = nil, theme: ThemeParams, reveal: Float = 1, target: MTLTexture?,
+                commandBuffer cb: MTLCommandBuffer) {
         let id = ObjectIdentifier(world)
         if lastWorld != id {
             lastWorld = id
@@ -160,7 +174,7 @@ public final class ViewportRenderer {
 
         lastEventSeq = FramePacker.pack(world: world, viewport: area, afterEventSeq: lastEventSeq, grid: grid,
                                         pixelSize: CGSize(width: pointSize.width * scale, height: pointSize.height * scale),
-                                        scale: Float(scale), theme: theme, clearWake: clear, uniforms: ubo.contents(), fishGrid: fishBytes!)
+                                        scale: Float(scale), theme: theme, reveal: reveal, clearWake: clear, uniforms: ubo.contents(), fishGrid: fishBytes!)
         fishTex.replace(region: MTLRegionMake2D(0, 0, grid.cols, grid.rows), mipmapLevel: 0,
                         withBytes: fishBytes!, bytesPerRow: grid.cols * 4)
 

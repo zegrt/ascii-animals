@@ -439,6 +439,28 @@ static float hash2(uint a, uint b) {
     return float(h) / 4294967296.0;
 }
 
+// The dissolve between habitats: a cell shows its habitat while
+// revealHash(cell) < reveal (hd6.w), and bare background otherwise, so reveal
+// 0 -> 1 fades the picture in cell by cell. canvas_main (Task 7) uses this
+// same function, so every habitat dissolves with the same pattern. 24 bits,
+// so it is exact in float and never reaches 1: reveal 1 shows every cell.
+static float revealHash(uint2 c) {
+    uint h = (c.x * 374761393u) ^ (c.y * 668265263u) ^ 2654435769u;
+    h = (h ^ (h >> 13u)) * 1274126177u;
+    h = h ^ (h >> 16u);
+    return float(h >> 8u) / 16777216.0;
+}
+
+// Brightness, then the light look (invert lightness, keep hue).
+static float4 finish(float3 col, float4 theme) {
+    col *= theme.y;
+    if (theme.x > 0.5) {
+        float y = dot(col, float3(0.2126, 0.7152, 0.0722));
+        col = clamp(col + (1.0 - 2.0 * y), 0.0, 1.0);
+    }
+    return float4(col, 1.0);
+}
+
 static int finGlyph(uint i) {
     switch (i) { case 0u: return 3; case 1u: return 1; case 2u: return 2; case 3u: return 4; default: return 0; }
 }
@@ -506,6 +528,7 @@ fragment float4 compose_main(VOut in [[stage_in]],
     uint2 cu = uint2(cellF);
 
     float3 col = float3(0.0);
+    if (revealHash(cu) >= hd[6].w) { return finish(col, theme); }
 
     // Grid: one device pixel, white at 5.5%.
     if (theme.w > 0.5 && (floor(px.x) == round(cellF.x * slot.x) || floor(px.y) == round(cellF.y * slot.y))) {
@@ -611,13 +634,7 @@ fragment float4 compose_main(VOut in [[stage_in]],
         }
     }
 
-    col *= theme.y;
-    if (theme.x > 0.5) {
-        // Light: invert lightness, keep hue.
-        float y = dot(col, float3(0.2126, 0.7152, 0.0722));
-        col = clamp(col + (1.0 - 2.0 * y), 0.0, 1.0);
-    }
-    return float4(col, 1.0);
+    return finish(col, theme);
 }
 """#
 }

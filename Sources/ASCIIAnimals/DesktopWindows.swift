@@ -24,13 +24,13 @@ final class OceanView: NSView {
 }
 
 /// One display: its window, Metal layer, display link and GPU state, looking
-/// into a scene's world through `oceanRect`.
+/// into a scene's habitat through `oceanRect`.
 final class OceanScreen: NSObject {
     let displayID: CGDirectDisplayID
     let window: OceanWindow
     let view: OceanView
     private(set) var viewport: ViewportRenderer
-    private(set) var scene: OceanScene
+    private(set) var scene: HabitatScene
     /// This screen's area in the scene's ocean space.
     private(set) var oceanRect: CGRect
     private(set) var link: CADisplayLink?
@@ -42,7 +42,7 @@ final class OceanScreen: NSObject {
     let onTick: (OceanScreen, CADisplayLink) -> Void
     let onVisibility: () -> Void
 
-    init(screen: NSScreen, renderer: OceanRenderer, scene: OceanScene, rect: CGRect,
+    init(screen: NSScreen, renderer: OceanRenderer, scene: HabitatScene, rect: CGRect,
          onTick: @escaping (OceanScreen, CADisplayLink) -> Void, onVisibility: @escaping () -> Void) throws {
         displayID = screen.displayID
         self.scene = scene
@@ -89,7 +89,7 @@ final class OceanScreen: NSObject {
     }
 
     /// Same display, maybe a new frame, scale or scene.
-    func fit(to screen: NSScreen, scene: OceanScene, rect: CGRect) throws {
+    func fit(to screen: NSScreen, scene: HabitatScene, rect: CGRect) throws {
         self.scene = scene
         oceanRect = rect
         let frame = screen.frame

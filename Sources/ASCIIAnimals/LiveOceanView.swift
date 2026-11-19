@@ -3,20 +3,21 @@ import Metal
 import OceanKit
 import QuartzCore
 
-/// A small, self-contained live ocean for UI surfaces (the welcome, About):
-/// its own world and viewport, drawn with the app's renderer by its own
+/// A small, self-contained live habitat for UI surfaces (the welcome, About):
+/// its own sim and viewport, drawn with the app's renderer by its own
 /// display link. Not the desktop: it never touches the director's scenes.
 final class LiveOceanView: NSView {
     let metalLayer = CAMetalLayer()
     private let renderer: OceanRenderer
-    private(set) var world: World
+    private(set) var sim: HabitatSim
+    private var settings: OceanKit.Settings
+    /// The sim has been laid out (and warmed) at least once.
+    private var laidOut = false
     private var viewport: ViewportRenderer?
     private var clock = OceanClock()
     private var link: CADisplayLink?
-    private var sharks: [SharkKind]
-    private let density: Double
     private let seed: UInt64
-    /// World points per view point. 1 draws at desktop size; 1.8 is "seen from a step back".
+    /// Ocean points per view point. 1 draws at desktop size; 1.8 is "seen from a step back".
     let zoom: CGFloat
     var theme: ThemeParams
     var speed = 1.0
@@ -29,9 +30,8 @@ final class LiveOceanView: NSView {
         self.theme = theme
         self.zoom = zoom
         self.seed = seed
-        sharks = settings.sharks
-        density = settings.fishDensity
-        world = World(sharks: settings.sharks, rng: Rng(seed: seed))
+        self.settings = settings
+        sim = Habitats.make(settings, seed: seed)
         super.init(frame: .zero)
         wantsLayer = true
         metalLayer.device = renderer.device
@@ -50,7 +50,7 @@ final class LiveOceanView: NSView {
 
     // MARK: Geometry
 
-    private var worldSize: CGSize { CGSize(width: bounds.width * zoom, height: bounds.height * zoom) }
+    private var oceanSize: CGSize { CGSize(width: bounds.width * zoom, height: bounds.height * zoom) }
     private var backing: CGFloat { window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2 }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -65,7 +65,7 @@ final class LiveOceanView: NSView {
 
     private func layoutOcean() {
         guard bounds.width >= 1, bounds.height >= 1 else { return }
-        let size = worldSize
+        let size = oceanSize
         let scale = backing / zoom
         metalLayer.contentsScale = backing
         metalLayer.drawableSize = CGSize(width: (bounds.width * backing).rounded(), height: (bounds.height * backing).rounded())
@@ -79,32 +79,36 @@ final class LiveOceanView: NSView {
             NSLog("ASCII Animals: UI ocean viewport failed: %@", "\(error)")
             return
         }
-        let first = world.width == 0
-        world.resize(width: size.width, height: size.height, cell: viewport!.grid.cell, density: density)
+        let first = !laidOut
+        sim.layout(terrain: .single(width: size.width, height: size.height), cell: viewport!.grid.cell, settings: settings)
+        laidOut = true
         if first { warm(seconds: 5) }
     }
 
-    /// Step a fresh world until it looks lived-in, with a few frames of wake.
+    /// Step a fresh sim until it looks lived-in, with a few frames of wake.
     private func warm(seconds: Double) {
         guard let vp = viewport else { return }
         let total = Int(seconds * 60)
         for i in 0..<total {
-            world.step(OceanClock.step)
+            sim.step(OceanClock.step)
             if i >= total - 60, let cb = renderer.queue.makeCommandBuffer() {
-                vp.encode(world: world, theme: theme, target: nil, commandBuffer: cb)
+                vp.encode(habitat: sim, theme: theme, target: nil, commandBuffer: cb)
                 cb.commit()
             }
         }
         clock.reset()
     }
 
-    /// A new line-up: a new world, warmed, with a soft fade so the swap doesn't pop.
-    func rebuild(sharks newSharks: [SharkKind]) {
-        guard newSharks != sharks else { return }
-        sharks = newSharks
-        world = World(sharks: newSharks, rng: Rng(seed: seed &+ 1))
+    /// A new line-up: when `Habitats.needsRebuild` says so, a new sim, warmed,
+    /// with a soft fade so the swap doesn't pop. Other changes are ignored.
+    func rebuild(_ newSettings: OceanKit.Settings) {
+        guard Habitats.needsRebuild(old: settings, new: newSettings) else { return }
+        settings = newSettings
+        sim = Habitats.make(newSettings, seed: seed &+ 1)
+        laidOut = false
         guard let vp = viewport else { return }
-        world.resize(width: worldSize.width, height: worldSize.height, cell: vp.grid.cell, density: density)
+        sim.layout(terrain: .single(width: oceanSize.width, height: oceanSize.height), cell: vp.grid.cell, settings: settings)
+        laidOut = true
         warm(seconds: 4)
         let fade = CABasicAnimation(keyPath: "opacity")
         fade.fromValue = 0.35
@@ -143,29 +147,29 @@ final class LiveOceanView: NSView {
     @objc private func tick(_ l: CADisplayLink) {
         guard let vp = viewport else { return }
         let steps = clock.advance(to: l.targetTimestamp, speed: speed)
-        for _ in 0..<steps { world.step(OceanClock.step) }
+        for _ in 0..<steps { sim.step(OceanClock.step) }
         guard let drawable = metalLayer.nextDrawable(), let cb = renderer.queue.makeCommandBuffer() else { return }
-        vp.encode(world: world, theme: theme, target: drawable.texture, commandBuffer: cb)
+        vp.encode(habitat: sim, theme: theme, target: drawable.texture, commandBuffer: cb)
         cb.present(drawable)
         cb.commit()
     }
 
     // MARK: Pointer
 
-    /// A point in this view's coordinates, in world space (top-left origin).
-    func worldPoint(_ p: NSPoint) -> (Double, Double) {
+    /// A point in this view's coordinates, in ocean space (top-left origin).
+    func oceanPoint(_ p: NSPoint) -> (Double, Double) {
         (Double(p.x * zoom), Double((bounds.height - p.y) * zoom))
     }
 
     func pointer(at p: NSPoint?) {
-        guard let p, bounds.contains(p) else { world.pointer.active = false; return }
-        let (x, y) = worldPoint(p)
-        world.pointer = (x, y, true)
+        guard let p, bounds.contains(p) else { sim.pointerLeft(); return }
+        let (x, y) = oceanPoint(p)
+        sim.pointerMoved(x, y)
     }
 
     func splash(at p: NSPoint) {
-        let (x, y) = worldPoint(p)
-        world.splash(x, y)
+        let (x, y) = oceanPoint(p)
+        sim.pointerDown(x, y)
     }
 
     override func updateTrackingAreas() {
@@ -188,14 +192,14 @@ final class LiveOceanView: NSView {
 
     // MARK: Offscreen
 
-    /// One frame of `world` as an image, for snapshots (no window needed).
-    static func image(of world: World, viewport vp: ViewportRenderer, theme: ThemeParams, renderer r: OceanRenderer) -> CGImage? {
+    /// One frame of `sim` as an image, for snapshots (no window needed).
+    static func image(of sim: HabitatSim, viewport vp: ViewportRenderer, theme: ThemeParams, renderer r: OceanRenderer) -> CGImage? {
         let w = Int((vp.pointSize.width * vp.scale).rounded()), h = Int((vp.pointSize.height * vp.scale).rounded())
         let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: OceanRenderer.outputFormat, width: w, height: h, mipmapped: false)
         d.usage = .renderTarget
         d.storageMode = .managed
         guard let target = r.device.makeTexture(descriptor: d), let cb = r.queue.makeCommandBuffer() else { return nil }
-        vp.encode(world: world, theme: theme, target: target, commandBuffer: cb)
+        vp.encode(habitat: sim, theme: theme, target: target, commandBuffer: cb)
         if let blit = cb.makeBlitCommandEncoder() {
             blit.synchronize(resource: target)
             blit.endEncoding()

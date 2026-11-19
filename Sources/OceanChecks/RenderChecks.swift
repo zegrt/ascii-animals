@@ -120,6 +120,36 @@ func renderChecks() {
         let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         try expect(hash == "c08e379d5657f7750ffecdb18108081e4a23e50b60b4095cc79a5956f85ef08b", "ocean still hash \(hash)")
     }
+    check("revealDissolves") {
+        // reveal 0: bare background everywhere; 0.5: some cells shown, some not.
+        let r = try OceanRenderer(device: device)
+        let size = CGSize(width: 400, height: 250)
+        let vp = try r.makeViewport(pointSize: size, scale: 1)
+        let s = Settings.defaults
+        let sim = Habitats.make(s, seed: 7)
+        sim.layout(terrain: .single(width: size.width, height: size.height), cell: vp.grid.cell, settings: s)
+        for _ in 0..<240 { sim.step(OceanClock.step) }
+        let theme = ThemeParams.make(s, systemIsDark: true, accent: SIMD3(0.2, 0.5, 1))
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: OceanRenderer.outputFormat, width: 400, height: 250, mipmapped: false)
+        d.usage = .renderTarget
+        d.storageMode = .managed
+        func frame(_ reveal: Float) throws -> [UInt8] {
+            let target = r.device.makeTexture(descriptor: d)!, cb = r.queue.makeCommandBuffer()!
+            vp.encode(habitat: sim, theme: theme, reveal: reveal, target: target, commandBuffer: cb)
+            let blit = cb.makeBlitCommandEncoder()!
+            blit.synchronize(resource: target)
+            blit.endEncoding()
+            cb.commit()
+            cb.waitUntilCompleted()
+            var bytes = [UInt8](repeating: 0, count: 400 * 250 * 4)
+            target.getBytes(&bytes, bytesPerRow: 400 * 4, from: MTLRegionMake2D(0, 0, 400, 250), mipmapLevel: 0)
+            return bytes
+        }
+        func lit(_ p: [UInt8]) -> Int { stride(from: 0, to: p.count, by: 4).filter { p[$0] > 0 || p[$0 + 1] > 0 || p[$0 + 2] > 0 }.count }
+        let none = lit(try frame(0)), half = lit(try frame(0.5)), all = lit(try frame(1))
+        try expect(none == 0, "reveal 0 lit \(none) pixels")
+        try expect(all > 0 && half > all / 4 && half < all * 3 / 4, "reveal 0.5 lit \(half) of \(all)")
+    }
     check("stillPNGSize") {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("ocean-check-\(getpid()).png")
         try StillRenderer.writePNG(try still(warmup: 1), to: url)

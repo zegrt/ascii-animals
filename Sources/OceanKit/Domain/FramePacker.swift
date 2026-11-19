@@ -24,7 +24,7 @@ public struct GridSpec: Equatable, Sendable {
 ///   hd0 (W, H, cols, rows)            hd1 (cw, ch, time, stepDt)
 ///   hd2 (outW px, outH px, scale, 0)   hd3 (sharkCount, eventCount, pointerActive, clearWake)
 ///   hd4 (pointerX, pointerY, 0, 0)     hd5 (light, brightness, accentRate, grid)
-///   hd6 (wake r, g, b, 0)
+///   hd6 (wake r, g, b, reveal)      reveal: cells whose revealHash >= it draw bare background (1 = all shown)
 /// Shark i at sharkBase + i * sharkStride:
 ///   0 (L, depth, kind, id)  1 (tipLeft, tipRight, speed, arcTotal)  2 pectoral  3 pelvic
 ///   4 (caudal, falcate, dorsal0, dorsal1)  5 (secondDorsal0, secondDorsal1, eye0, eye1)
@@ -92,7 +92,7 @@ public enum FramePacker {
     /// packed. Returns the world's newest event seq, to pass next time.
     @discardableResult
     public static func pack(world w: World, viewport: CGRect, afterEventSeq: Int, grid: GridSpec, pixelSize: CGSize, scale: Float,
-                            theme: ThemeParams, clearWake: Bool, uniforms: UnsafeMutableRawPointer,
+                            theme: ThemeParams, reveal: Float = 1, clearWake: Bool, uniforms: UnsafeMutableRawPointer,
                             fishGrid: UnsafeMutablePointer<UInt8>) -> Int {
         let u = uniforms.bindMemory(to: SIMD4<Float>.self, capacity: FrameLayout.slots)
         let cw = Double(grid.cell.width), ch = Double(grid.cell.height)
@@ -130,7 +130,7 @@ public enum FramePacker {
         u[3] = SIMD4(Float(visible.count), Float(eventCount), w.pointer.active ? 1 : 0, clearWake ? 1 : 0)
         u[4] = SIMD4(Float(w.pointer.x - ox), Float(w.pointer.y - oy), 0, 0)
         u[5] = SIMD4(theme.light ? 1 : 0, theme.brightness, theme.accentRate, theme.grid ? 1 : 0)
-        u[6] = SIMD4(theme.wake, 0)
+        u[6] = SIMD4(theme.wake, reveal)
 
         packFish(w, grid: grid, cw: cw, ch: ch, origin: (ox, oy), into: fishGrid)
         return w.eventSeq
