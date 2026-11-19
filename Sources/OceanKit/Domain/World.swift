@@ -60,14 +60,9 @@ private let fishCohesionK = 1.0
 private let fishFleeK = 1100.0
 private let blindCos = -0.6
 
-@inline(__always) func angleDiff(_ a: Double, _ b: Double) -> Double {
-    var d = fmod(b - a, tau)
-    if d > .pi { d -= tau }
-    if d < -.pi { d += tau }
-    return d
-}
+// angleDiff (shortest signed angle from a to b) is shared with the Web habitat: Web/WebMath.swift.
 
-@inline(__always) private func clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { min(hi, max(lo, v)) }
+@inline(__always) private func oceanClamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { min(hi, max(lo, v)) }
 @inline(__always) private func hypot2(_ x: Double, _ y: Double) -> Double { (x * x + y * y).squareRoot() }
 
 /// Divergence-free ocean current: the curl of a slowly drifting stream function.
@@ -207,7 +202,7 @@ public final class World {
             let W = Double(rect.width), H = Double(rect.height)
             let ox = Double(rect.minX), oy = Double(rect.minY)
             let minSide = min(W, H)
-            let baseLength = clamp(minSide * 0.44, 170, 430)
+            let baseLength = oceanClamp(minSide * 0.44, 170, 430)
             let count = Double(perRect)
             for (i, spec) in specs.prefix(perRect).enumerated() {
                 let length = baseLength * spec.size
@@ -235,7 +230,7 @@ public final class World {
         sharks = made.sorted { $0.length < $1.length }
 
         // Each screen keeps world.ts's density; the total is scaled and capped.
-        let quotas = rects.map { r in clamp(floor(Double(r.width * r.height) / 4400 + 0.5), 85, 340) }
+        let quotas = rects.map { r in oceanClamp(floor(Double(r.width * r.height) / 4400 + 0.5), 85, 340) }
         let total = min(World.maxFish, Int(floor(quotas.reduce(0, +) * density + 0.5)))
         fish = []
         fish.reserveCapacity(total)
@@ -271,8 +266,8 @@ public final class World {
     // MARK: Spatial hash
 
     @inline(__always) private func bucketOf(_ x: Double, _ y: Double) -> Int {
-        let c = Int(clamp(floor(x / perception) + 2, 0, Double(bucketCols - 1)))
-        let r = Int(clamp(floor(y / perception) + 2, 0, Double(bucketRows - 1)))
+        let c = Int(oceanClamp(floor(x / perception) + 2, 0, Double(bucketCols - 1)))
+        let r = Int(oceanClamp(floor(y / perception) + 2, 0, Double(bucketRows - 1)))
         return r * bucketCols + c
     }
 
@@ -326,8 +321,8 @@ public final class World {
             var n = 0
             var neighbourAlarm = 0.0
 
-            let bc = Int(clamp(floor(f.x / R) + 2, 0, Double(cols - 1)))
-            let br = Int(clamp(floor(f.y / R) + 2, 0, Double(rows - 1)))
+            let bc = Int(oceanClamp(floor(f.x / R) + 2, 0, Double(cols - 1)))
+            let br = Int(oceanClamp(floor(f.y / R) + 2, 0, Double(rows - 1)))
             for r in max(0, br - 1)...min(rows - 1, br + 1) {
                 for c in max(0, bc - 1)...min(cols - 1, bc + 1) {
                     var j = bucketHead[r * cols + c]
@@ -449,8 +444,8 @@ public final class World {
             }
             f.turn += (angleDiff(before, atan2(f.vy, f.vx)) / dt - f.turn) * min(1, dt * 8)
             f.phase += dt * (7 + hypot2(f.vx, f.vy) * 0.12)
-            f.x = clamp(f.x + f.vx * dt, -60, W + 60)
-            f.y = clamp(f.y + f.vy * dt, -60, H + 60)
+            f.x = oceanClamp(f.x + f.vx * dt, -60, W + 60)
+            f.y = oceanClamp(f.y + f.vy * dt, -60, H + 60)
             fish[i] = f
         }
     }
@@ -497,7 +492,7 @@ public final class World {
             sh.hunger = min(1, sh.hunger + dt * 0.03)
 
             var dx = cos(sh.heading), dy = sin(sh.heading)
-            sh.wander = clamp(sh.wander + (rng.unit() - 0.5) * dt * 3.2, -1.1, 1.1)
+            sh.wander = oceanClamp(sh.wander + (rng.unit() - 0.5) * dt * 3.2, -1.1, 1.1)
             dx += cos(sh.heading + sh.wander) * 0.45
             dy += sin(sh.heading + sh.wander) * 0.45
 
@@ -537,7 +532,7 @@ public final class World {
                 dx += tx / d * wgt
                 dy += ty / d * wgt
                 hunting = true
-                closing = clamp(1 - d / (L * 0.9), 0, 1)
+                closing = oceanClamp(1 - d / (L * 0.9), 0, 1)
             } else {
                 // Patrol: a lazy circuit around the middle.
                 let rx = (hx - cxW) / (W / minSide)
@@ -545,7 +540,7 @@ public final class World {
                 var r = hypot2(rx, ry)
                 if r == 0 { r = 1 }
                 let radius = sh.orbitFrac * minSide * (1 + 0.15 * sin(t * 0.05 + Double(sh.id)))
-                let radial = clamp((radius - r) / radius, -1, 1)
+                let radial = oceanClamp((radius - r) / radius, -1, 1)
                 dx += (-ry / r * sh.orbitDir + rx / r * radial * 0.9) * 0.55
                 dy += (rx / r * sh.orbitDir + ry / r * radial * 0.9) * 0.55
             }
@@ -579,7 +574,7 @@ public final class World {
             // Turn back once the snout leaves the ocean (screen edges no other screen continues).
             let over = terrain.signedOutside(SIMD2(hx, hy))
             if over > -L * 0.05 {
-                let wgt = clamp((over + L * 0.05) / (L * 0.35), 0, 1) * 3.5
+                let wgt = oceanClamp((over + L * 0.05) / (L * 0.35), 0, 1) * 3.5
                 let toX = cxW - hx, toY = cyW - hy
                 var d = hypot2(toX, toY)
                 if d == 0 { d = 1 }
@@ -590,7 +585,7 @@ public final class World {
             let desired = atan2(dy, dx)
             let agility = min(hunting ? 1.7 + closing : 0.8, sh.speed / (L * 0.22))
             let maxTurn = agility * dt
-            let turned = clamp(angleDiff(sh.heading, desired), -maxTurn, maxTurn)
+            let turned = oceanClamp(angleDiff(sh.heading, desired), -maxTurn, maxTurn)
             sh.heading += turned
             sh.turn += (turned / dt - sh.turn) * min(1, dt * 3)
 
@@ -609,7 +604,7 @@ public final class World {
             for k in 1..<World.sharkNodes {
                 let px = sh.nodes[(k - 1) * 2], py = sh.nodes[(k - 1) * 2 + 1]
                 var angle = atan2(sh.nodes[k * 2 + 1] - py, sh.nodes[k * 2] - px)
-                angle = prevAngle + clamp(angleDiff(prevAngle, angle), -maxBend, maxBend)
+                angle = prevAngle + oceanClamp(angleDiff(prevAngle, angle), -maxBend, maxBend)
                 sh.nodes[k * 2] = px + cos(angle) * seg
                 sh.nodes[k * 2 + 1] = py + sin(angle) * seg
                 prevAngle = angle
