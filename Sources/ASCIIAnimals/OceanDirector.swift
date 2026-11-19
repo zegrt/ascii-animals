@@ -57,8 +57,13 @@ final class OceanDirector {
             for s in screens { s.stillPending = true; s.setFrameRate(PowerPolicy.economyFPS); s.setRunning(true) }
         case .paused:
             // Do no work, except a still owed to a user pause (see showChangeIfHeld),
-            // drawn once its screen is visible.
-            for s in screens { s.setRunning(s.stillPending) }
+            // drawn once its screen is visible. Covered, locked or asleep: drop
+            // any still left over from `.still`; the next visible mode draws.
+            let owed = Dissolve.drawsStillNow(newMode, userPaused: signals.inputs.userPaused)
+            for s in screens {
+                if !owed { s.stillPending = false }
+                s.setRunning(owed && s.stillPending)
+            }
         }
         updatePointer()
     }
@@ -88,13 +93,24 @@ final class OceanDirector {
             reveal = f.reveal
         }
         let sim = s.scene.sim
+        let drawable: CAMetalDrawable
         if s.stillPending {
-            // Reduce Motion / Low Power: let the ecosystem settle, then hold one frame.
+            // Reduce Motion / Low Power / a paused change: let the ecosystem
+            // settle, then hold one frame. No drawable (a hidden screen): stop
+            // rather than fire every frame; `stillPending` stays, so the next
+            // mode or visibility change runs it again.
+            guard let d = s.view.metalLayer.nextDrawable() else { s.setRunning(false); return }
+            drawable = d
             sim.settle()
         } else {
             s.scene.advance(to: link.targetTimestamp, speed: store.settings.speed)
+            guard let d = s.view.metalLayer.nextDrawable() else { return }
+            drawable = d
         }
-        guard let drawable = s.view.metalLayer.nextDrawable(), let cb = renderer.queue.makeCommandBuffer() else { return }
+        guard let cb = renderer.queue.makeCommandBuffer() else {
+            if s.stillPending { s.setRunning(false) }
+            return
+        }
         s.viewport.encode(habitat: sim, viewport: s.oceanRect, theme: theme, reveal: reveal, target: drawable.texture, commandBuffer: cb)
         cb.present(drawable)
         let first = !s.presented
