@@ -5,6 +5,8 @@ import OceanKit
 /// ASCII Animals runs, quits it whenever it opens, so the two never run together.
 enum SharksHandover {
     private static let importedKey = "handover.imported"
+    /// The hand-over ran, on this launch or an earlier one: this user came from ASCII Sharks.
+    static var happened: Bool { UserDefaults.standard.bool(forKey: importedKey) }
     private static let offeredKey = "handover.offered"
     /// How long Sharks' own uninstaller may take (it starts Metal to put the wallpaper back).
     private static let uninstallTimeout: TimeInterval = 30

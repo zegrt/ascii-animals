@@ -6,23 +6,32 @@ import SwiftUI
 /// The immersive first-launch welcome: a full-screen live habitat with a few
 /// typed lines over it, ending in a dissolve to the real desktop one.
 /// Return or a click moves on, Esc leaves at any time.
+/// The same window, as a single card, tells people who came from ASCII Sharks about the Web.
 enum OnboardingController {
     static let seenKey = "onboarded.v1"
     private static var current: OnboardingSession?
 
-    /// First launch only.
+    /// First launch: the tour. After the hand-over from ASCII Sharks (which skips it): the Web card, once.
     static func showIfNeeded(app: AppDelegate) {
-        guard !UserDefaults.standard.bool(forKey: seenKey) else { return }
-        // A moment for the desktop ocean to come up first, so the dissolve has something to reveal.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { show(app: app) }
+        let d = UserDefaults.standard
+        let welcome = Handover.launchWelcome(onboarded: d.bool(forKey: seenKey), handedOver: SharksHandover.happened,
+                                             webCardShown: d.bool(forKey: Handover.webCardKey), habitat: app.store.settings.habitat)
+        guard welcome != .nothing else { return }
+        // A moment for the desktop habitat to come up first, so the dissolve has something to reveal.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { present(app: app, card: welcome == .webCard) }
     }
 
-    static func show(app: AppDelegate) {
-        UserDefaults.standard.set(true, forKey: seenKey)
+    static func show(app: AppDelegate) { present(app: app, card: false) }
+
+    private static func present(app: AppDelegate, card: Bool) {
+        let d = UserDefaults.standard
+        // The tour opens with the habitat choice, so whoever sees it knows about the Web too.
+        d.set(true, forKey: Handover.webCardKey)
+        if !card { d.set(true, forKey: seenKey) }
         if let current { current.focus(); return }
         // No renderer means no ocean to show; the menu still explains a failed start.
         guard let renderer = app.director?.renderer, !NSScreen.screens.isEmpty else { return }
-        let session = OnboardingSession(app: app, renderer: renderer)
+        let session = OnboardingSession(app: app, renderer: renderer, card: card)
         current = session
         session.onFinish = { current = nil }
         session.start()
@@ -34,11 +43,15 @@ enum OnboardingController {
     static func statusMenuOpened() { current?.statusMenuOpened() }
 
     /// Debug: render to a PNG (no Screen Recording needed). `--snapshot-onboarding <png>`
-    /// `ASCII_ANIMALS_ONBOARDING_STEP=0…5` picks the step (default 0); `ASCII_ANIMALS_SNAPSHOT_LIGHT=1` the light look;
-    /// `ASCII_ANIMALS_SNAPSHOT_HABITAT=web` the Web (default Ocean, as a new user has it).
+    /// `ASCII_ANIMALS_ONBOARDING_STEP=0…6` picks the step (default 0: 0 habitat, 1 hello, 2 pointer, 3 splash,
+    /// 4 menu, 5 make it yours, 6 dive), or `card` the Web card for people from ASCII Sharks;
+    /// `ASCII_ANIMALS_SNAPSHOT_LIGHT=1` the light look;
+    /// `ASCII_ANIMALS_SNAPSHOT_HABITAT=web` the Web (default Ocean, as a new user has it; the card always shows the Web).
     static func snapshot(to url: URL) {
         let env = ProcessInfo.processInfo.environment
-        let beat = OnboardingBeat(rawValue: Int(env["ASCII_ANIMALS_ONBOARDING_STEP"] ?? "") ?? 0) ?? .hello
+        let step = env["ASCII_ANIMALS_ONBOARDING_STEP"] ?? ""
+        let card = step == "card"
+        let beat = OnboardingBeat(rawValue: Int(step) ?? 0) ?? .habitat
         let size = CGSize(width: 1512, height: 982)
         let scale: CGFloat = 2
         do {
@@ -47,6 +60,7 @@ enum OnboardingController {
             var s = OceanKit.Settings.defaults
             if env["ASCII_ANIMALS_SNAPSHOT_LIGHT"] != nil { s.appearance = .light }
             if let h = env["ASCII_ANIMALS_SNAPSHOT_HABITAT"].flatMap(HabitatKind.init(rawValue:)) { s.habitat = h }
+            if card { s.habitat = .web }
             let theme = ThemeParams.make(s, systemIsDark: true, accent: SIMD3(0.2, 0.5, 1))
             let vp = try renderer.makeViewport(pointSize: size, scale: scale)
             let sim = Habitats.make(s, seed: 11)
@@ -70,12 +84,13 @@ enum OnboardingController {
             }
 
             let model = OnboardingModel(settings: s, light: theme.light)
+            model.card = card
             model.beat = beat
             model.iconHidden = false
             model.finishTyping()
             model.hintVisible = true
             model.contentVisible = true
-            model.done = beat == .pointer || beat == .splash
+            model.done = !card && (beat == .pointer || beat == .splash)
             // Where a menu-bar icon would sit, for the callout.
             model.iconRect = CGRect(x: size.width - 214, y: 0, width: 30, height: 33)
             let host = NSHostingView(rootView: OnboardingView(model: model))
@@ -101,7 +116,7 @@ enum OnboardingController {
             if let overlay = rep.cgImage { ctx.draw(overlay, in: full) }
             guard let image = ctx.makeImage() else { throw RenderError(description: "no image") }
             try StillRenderer.writePNG(image, to: url)
-            print("wrote \(url.path) (step \(beat.rawValue))")
+            print("wrote \(url.path) (\(card ? "card" : "step \(beat.rawValue)"))")
         } catch {
             FileHandle.standardError.write(Data("onboarding snapshot failed: \(error)\n".utf8))
         }
@@ -111,11 +126,12 @@ enum OnboardingController {
 // MARK: - Steps
 
 enum OnboardingBeat: Int, CaseIterable {
-    case hello, pointer, splash, menu, choose, dive
+    case habitat, hello, pointer, splash, menu, choose, dive
 
     func title(iconHidden: Bool, habitat: HabitatKind) -> String {
         let web = habitat == .web
         switch self {
+        case .habitat: return "Meet ASCII Animals."
         case .hello: return web ? "Your desktop is now covered in webs." : "Your desktop is now an ocean."
         case .pointer: return "Move your pointer."
         case .splash: return web ? "Click to drop a fly." : "Click for a splash."
@@ -128,6 +144,7 @@ enum OnboardingBeat: Int, CaseIterable {
     func subtitle(iconHidden: Bool, habitat: HabitatKind) -> String {
         let web = habitat == .web
         switch self {
+        case .habitat: return "Pick a habitat. You can change it any time."
         case .hello:
             return web ? "Orb weavers spin, flies wander, and all of it is drawn in text."
                        : "Sharks hunt, fish school, and all of it is drawn in text."
@@ -137,10 +154,13 @@ enum OnboardingBeat: Int, CaseIterable {
             return iconHidden
                 ? "The menu bar icon is hidden. Open ASCII Animals again any time to get Settings."
                 : "Click the fish in the menu bar for habitats, looks and pause."
-        case .choose: return "Pick a habitat, a look, a line-up. All can change in Settings."
+        case .choose: return "Pick a look and a line-up. Both can change in Settings."
         case .dive: return web ? "It lives behind your windows from now on." : "It swims behind your windows from now on."
         }
     }
+
+    /// The steps with chips: their clicks pick, they don't move on.
+    var hasChoices: Bool { self == .habitat || self == .choose }
 
     /// Shown once the step's little task is done.
     func doneLine(habitat: HabitatKind) -> String {
@@ -176,8 +196,16 @@ enum OnboardingLook: Int, CaseIterable {
 
 // MARK: - Model
 
+/// The card for people who came from ASCII Sharks, who skipped the tour and its habitat choice.
+enum WebCard {
+    static let title = "There's a new habitat: the Web."
+    static let subtitle = "Spiders spin webs on your desktop. Flies wander in."
+}
+
 final class OnboardingModel: ObservableObject {
-    @Published var beat: OnboardingBeat = .hello
+    @Published var beat: OnboardingBeat = .habitat
+    /// The Web card instead of the tour.
+    @Published var card = false
     @Published var typedTitle = 0
     @Published var typedSubtitle = 0
     @Published var cursorOn = true
@@ -195,15 +223,18 @@ final class OnboardingModel: ObservableObject {
     var onLook: (OnboardingLook) -> Void = { _ in }
     var onPreset: (Int) -> Void = { _ in }
     var onContinue: () -> Void = {}
+    var onTryWeb: () -> Void = {}
 
     init(settings: OceanKit.Settings, light: Bool) {
         self.settings = settings
         self.light = light
     }
 
-    var title: String { beat.title(iconHidden: iconHidden, habitat: settings.habitat) }
-    var subtitle: String { beat.subtitle(iconHidden: iconHidden, habitat: settings.habitat) }
-    var doneLine: String { beat.doneLine(habitat: settings.habitat) }
+    var title: String { card ? WebCard.title : beat.title(iconHidden: iconHidden, habitat: settings.habitat) }
+    var subtitle: String { card ? WebCard.subtitle : beat.subtitle(iconHidden: iconHidden, habitat: settings.habitat) }
+    var doneLine: String { card ? "" : beat.doneLine(habitat: settings.habitat) }
+    /// Chips on screen: clicks pick, they don't move on.
+    var hasChoices: Bool { card || beat.hasChoices }
     var isTyping: Bool { typedTitle < title.count || typedSubtitle < subtitle.count }
 
     func finishTyping() {
@@ -256,13 +287,18 @@ final class OnboardingSession: NSObject {
     private var tornDown = false
     private var typingPause = 0
     private let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    private let card: Bool
     var onFinish: (() -> Void)?
 
-    init(app: AppDelegate, renderer: OceanRenderer) {
+    /// `card`: the Web card, with the Web live behind it (the desktop stays as it is until "Try the Web").
+    init(app: AppDelegate, renderer: OceanRenderer, card: Bool = false) {
         self.app = app
-        let s = app.store.settings
+        self.card = card
+        var s = app.store.settings
+        if card { s.habitat = .web }
         let theme = OceanDirector.currentTheme(s)
         model = OnboardingModel(settings: s, light: theme.light)
+        model.card = card
 
         // The display with the menu-bar icon (it follows the active display), else the main one.
         let iconFrame = app.menu?.iconScreenFrame
@@ -320,6 +356,7 @@ final class OnboardingSession: NSObject {
         model.onLook = { [weak self] l in self?.pickLook(l) }
         model.onPreset = { [weak self] i in self?.pickPreset(i) }
         model.onContinue = { [weak self] in self?.advance() }
+        model.onTryWeb = { [weak self] in self?.tryWeb() }
         window.onKey = { [weak self] e in self?.key(e) ?? false }
         window.onMouse = { [weak self] e in self?.mouse(e) }
     }
@@ -356,7 +393,7 @@ final class OnboardingSession: NSObject {
             self.finish(fast: false)
         }
         blinker = Timer.scheduledTimer(withTimeInterval: 0.53, repeats: true) { [weak self] _ in self?.model.cursorOn.toggle() }
-        after(reduceMotion ? 0.2 : 0.9) { [weak self] in self?.enter(.hello) }
+        after(reduceMotion ? 0.2 : 0.9) { [weak self] in self?.enter(.habitat) }
     }
 
     func focus() {
@@ -405,13 +442,14 @@ final class OnboardingSession: NSObject {
         }
     }
 
-    /// Return / click: finish the line being typed, else go on.
+    /// Return / click: finish the line being typed, else go on (on the card: keep the Ocean).
     private func advance() {
         guard !finishing else { return }
         if model.isTyping {
             model.finishTyping()
             return
         }
+        if card { finish(fast: false); return }
         guard let next = OnboardingBeat(rawValue: model.beat.rawValue + 1) else {
             finish(fast: false)
             return
@@ -453,6 +491,13 @@ final class OnboardingSession: NSObject {
         ocean.rebuild(model.settings)
     }
 
+    /// The card's "Try the Web": the desktop dissolves to it as the card goes.
+    private func tryWeb() {
+        guard !finishing else { return }
+        app.store.update { $0.habitat = .web }
+        finish(fast: false)
+    }
+
     /// A line-up of the current habitat: sharks or spiders.
     private func pickPreset(_ i: Int) {
         switch model.settings.habitat {
@@ -488,9 +533,9 @@ final class OnboardingSession: NSObject {
         case .mouseExited:
             ocean.pointer(at: nil)
         case .leftMouseDown:
-            if model.beat == .choose {
+            if model.hasChoices {
                 ocean.pointer(at: p)
-                return // the habitat, look and line-up buttons own clicks here
+                return // the habitat, look, line-up and card buttons own clicks here
             }
             ocean.splash(at: p)
             switch model.beat {
@@ -574,7 +619,7 @@ struct OnboardingView: View {
                     .init(color: Ink.plate(model.light).opacity(0.82), location: 0.5),
                     .init(color: Ink.plate(model.light).opacity(0), location: 1),
                 ]), center: .center, startRadiusFraction: 0, endRadiusFraction: 0.5)
-                    .frame(width: 1240 * unit, height: (model.beat == .choose ? 840 : 560) * unit)
+                    .frame(width: 1240 * unit, height: plateHeight * unit)
                     .opacity(model.contentVisible ? 1 : 0)
                     .allowsHitTesting(false)
 
@@ -600,6 +645,15 @@ struct OnboardingView: View {
         .foregroundStyle(Ink.text(model.light))
         .ignoresSafeArea()
     }
+
+    private var plateHeight: CGFloat {
+        if model.card { return 600 }
+        switch model.beat {
+        case .choose: return 760
+        case .habitat: return 620
+        default: return 560
+        }
+    }
 }
 
 private struct StepContent: View {
@@ -609,8 +663,10 @@ private struct StepContent: View {
     var body: some View {
         let ink = Ink.text(model.light)
         VStack(spacing: 0) {
-            Progress(model: model, unit: unit)
-                .padding(.bottom, 34 * unit)
+            if !model.card {
+                Progress(model: model, unit: unit)
+                    .padding(.bottom, 34 * unit)
+            }
 
             Typed(full: model.title, count: model.typedTitle,
                   cursor: model.typedTitle < model.title.count || model.cursorOn,
@@ -628,7 +684,11 @@ private struct StepContent: View {
                 .frame(maxWidth: 760 * unit)
 
             ZStack {
-                if model.beat == .choose {
+                if model.card {
+                    CardChoices(model: model, unit: unit)
+                } else if model.beat == .habitat {
+                    HabitatChoices(model: model, unit: unit)
+                } else if model.beat == .choose {
                     Choices(model: model, unit: unit)
                         .transition(.opacity)
                 } else if model.beat == .dive {
@@ -695,11 +755,6 @@ private struct Choices: View {
         let look = model.look
         let habitat = model.settings.habitat
         VStack(spacing: 22 * unit) {
-            row("HABITAT") {
-                ForEach(HabitatKind.allCases, id: \.self) { h in
-                    Chip(title: h.title, selected: h == habitat, light: model.light, unit: unit, model: model) { model.onHabitat(h) }
-                }
-            }
             row("LOOK") {
                 ForEach(OnboardingLook.allCases, id: \.rawValue) { l in
                     Chip(title: l.title, selected: l == look, light: model.light, unit: unit, model: model) { model.onLook(l) }
@@ -742,6 +797,44 @@ private struct Choices: View {
                 .foregroundStyle(Ink.text(model.light).opacity(0.45))
             HStack(spacing: 10 * unit) { content() }
         }
+    }
+}
+
+/// The first step: the habitat the rest of the tour plays in. The scene behind switches at once.
+private struct HabitatChoices: View {
+    @ObservedObject var model: OnboardingModel
+    let unit: CGFloat
+
+    var body: some View {
+        let habitat = model.settings.habitat
+        VStack(spacing: 22 * unit) {
+            HStack(spacing: 12 * unit) {
+                ForEach(HabitatKind.allCases, id: \.self) { h in
+                    Chip(title: h.title, selected: h == habitat, light: model.light, unit: unit, prominent: true, model: model) {
+                        model.onHabitat(h)
+                    }
+                }
+            }
+            Chip(title: "Continue  ↵", selected: false, light: model.light, unit: unit, quiet: true, model: model) { model.onContinue() }
+                .padding(.top, 14 * unit)
+        }
+        .opacity(model.isTyping ? 0 : 1)
+        .animation(.easeOut(duration: 0.5), value: model.isTyping)
+    }
+}
+
+/// The Web card's two answers; keeping the Ocean is the default (Return).
+private struct CardChoices: View {
+    @ObservedObject var model: OnboardingModel
+    let unit: CGFloat
+
+    var body: some View {
+        HStack(spacing: 12 * unit) {
+            Chip(title: "Try the Web", selected: false, light: model.light, unit: unit, prominent: true, model: model) { model.onTryWeb() }
+            Chip(title: "Keep the Ocean  ↵", selected: true, light: model.light, unit: unit, prominent: true, model: model) { model.onContinue() }
+        }
+        .opacity(model.isTyping ? 0 : 1)
+        .animation(.easeOut(duration: 0.5), value: model.isTyping)
     }
 }
 
@@ -799,16 +892,21 @@ private struct HintBar: View {
         let ink = Ink.text(model.light)
         HStack(spacing: 10 * unit) {
             Keycap(text: "return", light: model.light, unit: unit)
-            Text(model.beat == .dive ? "dive in" : "continue")
+            Text(returnLine)
             Spacer().frame(width: 22 * unit)
             Keycap(text: "esc", light: model.light, unit: unit)
-            Text(model.beat == .dive ? "close" : "skip the tour")
+            Text(model.card || model.beat == .dive ? "close" : "skip the tour")
         }
         .font(UIFonts.swiftUI(12.5 * unit))
         .foregroundStyle(ink.opacity(0.55))
         .padding(.horizontal, 16 * unit)
         .padding(.vertical, 9 * unit)
         .background(Capsule().fill(Ink.plate(model.light).opacity(0.6)))
+    }
+
+    private var returnLine: String {
+        if model.card { return "keep the ocean" }
+        return model.beat == .dive ? "dive in" : "continue"
     }
 }
 

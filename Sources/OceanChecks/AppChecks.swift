@@ -195,6 +195,21 @@ func handoverChecks() {
         try expect(!Handover.shouldQuit(inserted: ["com.apple.Safari", nil], enabled: true, quitting: false), "another app")
         try expect(!Handover.shouldQuit(inserted: [], enabled: true, quitting: false), "nothing new")
     }
+    func welcome(onboarded: Bool, handedOver: Bool, cardShown: Bool = false, habitat: HabitatKind = .ocean) -> LaunchWelcome {
+        Handover.launchWelcome(onboarded: onboarded, handedOver: handedOver, webCardShown: cardShown, habitat: habitat)
+    }
+    check("welcomeTourForNewUsers") {
+        try expect(welcome(onboarded: false, handedOver: false) == .tour, "a new user")
+        // A hand-over that didn't skip the tour: the tour opens with the habitat choice, so no card on top.
+        try expect(welcome(onboarded: false, handedOver: true) == .tour, "handed over, tour not skipped")
+        try expect(welcome(onboarded: true, handedOver: false) == .nothing, "a new user who saw the tour")
+    }
+    check("welcomeWebCardOnceForSharksUsers") {
+        try expect(welcome(onboarded: true, handedOver: true) == .webCard, "came from ASCII Sharks")
+        try expect(welcome(onboarded: true, handedOver: true, cardShown: true) == .nothing, "only once")
+        try expect(welcome(onboarded: true, handedOver: true, habitat: .web) == .nothing, "already on the Web")
+        try expect(Handover.webCardKey == "whatsNew.web.v1", "the flag's name")
+    }
     check("handoverLoginItemOnlyFromAnInstalledCopy") {
         try expect(Handover.canAddLoginItem(bundlePath: "/Applications/ASCII Animals.app", onReadOnlyVolume: false), "Applications")
         try expect(Handover.canAddLoginItem(bundlePath: "/Users/x/Applications/ASCII Animals.app", onReadOnlyVolume: false), "~/Applications")

@@ -32,6 +32,15 @@ public enum HandoverStep: Equatable {
     case quitSharks, importSettings, skipWelcome, offerTrash(URL)
 }
 
+/// What greets someone at launch, once the hand-over is done.
+public enum LaunchWelcome: Equatable {
+    /// The welcome tour, which opens with the habitat choice.
+    case tour
+    /// The one "There's a new habitat: the Web." card, for someone who came from ASCII Sharks.
+    case webCard
+    case nothing
+}
+
 /// The hand-over from ASCII Sharks: quit it, take its settings, offer to remove it, and never run
 /// alongside it.
 public enum Handover {
@@ -67,6 +76,17 @@ public enum Handover {
     /// the user can't write to (an admin-installed copy) is fine.
     public static func canAddLoginItem(bundlePath: String, onReadOnlyVolume: Bool) -> Bool {
         !onReadOnlyVolume && SelfUpdate.blocker(bundlePath: bundlePath) == nil
+    }
+
+    /// Marks the Web card as shown (the tour sets it too: it opens with the habitat choice).
+    public static let webCardKey = "whatsNew.web.v1"
+
+    /// A new user gets the tour. Someone who came from ASCII Sharks skipped it, habitat choice and all,
+    /// so they get the Web card instead: once (this launch or a later one, so 3.0 hand-overs get it
+    /// too), and not if they found the Web already.
+    public static func launchWelcome(onboarded: Bool, handedOver: Bool, webCardShown: Bool, habitat: HabitatKind) -> LaunchWelcome {
+        if !onboarded { return .tour }
+        return handedOver && !webCardShown && habitat == .ocean ? .webCard : .nothing
     }
 
     public static func plan(_ f: HandoverFacts) -> [HandoverStep] {
