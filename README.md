@@ -35,7 +35,7 @@
 - 🖱 **Move your mouse** over the desktop. Fish scatter and leave a ripple; spider silk rings as you pass through it.
 - 💦 **Click empty desktop.** In the Ocean, a splash. In the Web, a fly drops in, and if it lands in a web, the spider comes for it.
 - 🕷 **Hold the pointer still** near the jumping spider. It may pounce.
-- 🦈 **Choose your animals.** Up to eight sharks from eight species (hammerhead, tiger, mako, thresher and more), or up to eight spiders: garden spiders, wasp spiders and golden orb weavers.
+- 🦈 **Choose your animals.** Up to eight sharks from eight species (hammerhead, tiger, mako, thresher and more), or a line-up of spiders: the classic six, or all garden spiders, wasp spiders or golden orb weavers.
 - 🌗 **Dark, Light or Calm.** Calm is dimmer, so your desktop icons stand out.
 - 🖥 **Two screens?** They join into one habitat, and animals move from one to the other.
 - ⏸ **⌃⌥⌘P** pauses it from anywhere.
