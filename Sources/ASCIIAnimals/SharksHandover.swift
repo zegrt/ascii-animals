@@ -55,8 +55,11 @@ enum SharksHandover {
         let alert = NSAlert()
         alert.messageText = "ASCII Animals takes over from ASCII Sharks"
         alert.informativeText = "Your settings came with you. You don't need ASCII Sharks any more, and having both installed is just clutter."
-        alert.addButton(withTitle: "Move ASCII Sharks to the Trash")
-        alert.addButton(withTitle: "Keep It")
+        let trashButton = alert.addButton(withTitle: "Move ASCII Sharks to the Trash")
+        let keepButton = alert.addButton(withTitle: "Keep It")
+        // Never make the destructive choice the one a stray Return picks.
+        trashButton.keyEquivalent = ""
+        keepButton.keyEquivalent = "\r"
         alert.showsSuppressionButton = true
         alert.suppressionButton?.title = "Open ASCII Animals at login"
         alert.suppressionButton?.state = .on
