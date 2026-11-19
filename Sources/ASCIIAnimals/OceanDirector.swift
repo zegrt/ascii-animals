@@ -145,7 +145,7 @@ final class OceanDirector {
             } catch { report(error) }
         }
         if OceanDirector.debug {
-            NSLog("scenes: %@", scenes.map { "\($0.screenIDs.sorted()) rects=\($0.plan.habitat.rects.count) sharks=\($0.world.sharks.count) fish=\($0.world.fish.count)" }.joined(separator: " | "))
+            NSLog("scenes: %@", scenes.map { "\($0.screenIDs.sorted()) rects=\($0.plan.terrain.rects.count) sharks=\($0.world.sharks.count) fish=\($0.world.fish.count)" }.joined(separator: " | "))
         }
         apply(mode == .paused ? PowerPolicy.mode(signals.inputs) : mode)
     }

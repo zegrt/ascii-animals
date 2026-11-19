@@ -8,18 +8,18 @@ import OceanKit
 enum Crossing {
     static func run(out dir: URL, screens: [CGRect], seed: UInt64, seconds: Double, fps: Int) throws {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let habitat = Habitat(rects: screens)
+        let terrain = Terrain(rects: screens)
         let cell = GridSpec.cell(forWidth: Double(screens.map(\.width).max()!))
         let kinds: [SharkKind] = [.greathammer, .classic, .mako, .tiger]
         func makeWorld() -> World {
             let w = World(sharks: kinds, rng: Rng(seed: seed))
-            w.resize(habitat: habitat, cell: cell, density: 1)
+            w.resize(terrain: terrain, cell: cell, density: 1)
             return w
         }
 
         // Probe: find when a shark's body straddles the shared edge.
-        guard let (i, j) = habitat.neighbours.enumerated().lazy.flatMap({ i, ns in ns.map { (i, $0) } }).first,
-              let door = habitat.doorway(i, j) else { throw CocoaError(.featureUnsupported) }
+        guard let (i, j) = terrain.neighbours.enumerated().lazy.flatMap({ i, ns in ns.map { (i, $0) } }).first,
+              let door = terrain.doorway(i, j) else { throw CocoaError(.featureUnsupported) }
         let probe = makeWorld()
         var hit: (step: Int, x: Double)?
         for step in 1...(400 * 60) {
@@ -27,7 +27,7 @@ enum Crossing {
             for sh in probe.sharks {
                 let ys = (0..<World.sharkNodes).map { sh.nodes[$0 * 2 + 1] }
                 let xs = (0..<World.sharkNodes).map { sh.nodes[$0 * 2] }
-                let a = habitat.rects[i], b = habitat.rects[j]
+                let a = terrain.rects[i], b = terrain.rects[j]
                 let lo = Double(max(a.minX, b.minX)) + 250, hi = Double(min(a.maxX, b.maxX)) - 250
                 if ys.min()! < door.y - 60 && ys.max()! > door.y + 60 && xs.min()! > lo && xs.max()! < hi {
                     hit = (step, (0..<World.sharkNodes).map { sh.nodes[$0 * 2] }.reduce(0, +) / Double(World.sharkNodes))
@@ -49,7 +49,7 @@ enum Crossing {
             if s >= start - 180 { rec.advanceWake() }
         }
 
-        let bounds = habitat.bounds
+        let bounds = terrain.bounds
         let cw = 1200.0, chh = 760.0
         let crop = CGRect(x: min(max(0, hit.x - cw / 2), Double(bounds.width) - cw), y: door.y - chh / 2, width: cw, height: chh)
         let count = Int(seconds * Double(fps))

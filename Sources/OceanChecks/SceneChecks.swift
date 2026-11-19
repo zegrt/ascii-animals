@@ -35,7 +35,7 @@ func sceneChecks() {
     }
 
     let world = World(sharks: [.greathammer, .classic, .mako, .tiger], rng: Rng(seed: 5))
-    world.resize(habitat: Habitat(rects: [userMonitor, userLaptop]), cell: CGSize(width: 13, height: 19), density: 1)
+    world.resize(terrain: Terrain(rects: [userMonitor, userLaptop]), cell: CGSize(width: 13, height: 19), density: 1)
 
     check("packerViewportOffset") {
         let p = packShared(world, viewport: userLaptop)
@@ -49,14 +49,14 @@ func sceneChecks() {
     check("packerCullsToEight") {
         let w = World(sharks: Array(repeating: .classic, count: 8), rng: Rng(seed: 2))
         let r = { (y: Double) in CGRect(x: 0, y: y, width: 900, height: 600) }
-        w.resize(habitat: Habitat(rects: [r(0), r(600)]), cell: CGSize(width: 8, height: 12), density: 1)
+        w.resize(terrain: Terrain(rects: [r(0), r(600)]), cell: CGSize(width: 8, height: 12), density: 1)
         // A viewport over both rects sees all 16 sharks; only 8 may be packed.
         let p = packShared(w, viewport: CGRect(x: 0, y: 0, width: 900, height: 1200))
         try expect(w.sharks.count == 16 && Int(hd(p.u, 3).x) == 8, "packed \(hd(p.u, 3).x) of \(w.sharks.count)")
     }
     check("packerEventsAfterSeq") {
         let w = World(sharks: [], rng: Rng(seed: 3))
-        w.resize(habitat: Habitat(rects: [userMonitor, userLaptop]), cell: CGSize(width: 13, height: 19), density: 1)
+        w.resize(terrain: Terrain(rects: [userMonitor, userLaptop]), cell: CGSize(width: 13, height: 19), density: 1)
         w.splash(1000, 2000) // laptop
         w.splash(100, 100)   // monitor
         let laptop = packShared(w, viewport: userLaptop)
@@ -84,13 +84,13 @@ func sceneChecks() {
         try expect(p.originInGlobal == CGPoint(x: -375, y: -1440), "origin \(p.originInGlobal)")
         let byID = Dictionary(uniqueKeysWithValues: p.viewports.map { ($0.screenID, $0.rect) })
         try expect(byID[3] == userMonitor && byID[1] == userLaptop, "viewports \(byID)")
-        try expect(p.habitat.neighbours.allSatisfy { !$0.isEmpty }, "screens not adjacent")
+        try expect(p.terrain.neighbours.allSatisfy { !$0.isEmpty }, "screens not adjacent")
         try expect(p.cell == GridSpec.cell(forWidth: 2560), "cell \(p.cell)")
     }
     check("separateLayoutTwoPlans") {
         let plans = SceneLayout.plan([laptopGlobal, monitorGlobal], shared: false)
         try expect(plans.count == 2, "plans \(plans.count)")
-        try expect(plans.allSatisfy { $0.viewports.count == 1 && $0.viewports[0].rect.origin == .zero && $0.habitat.rects.count == 1 }, "\(plans)")
+        try expect(plans.allSatisfy { $0.viewports.count == 1 && $0.viewports[0].rect.origin == .zero && $0.terrain.rects.count == 1 }, "\(plans)")
         try expect(plans[0].cell == GridSpec.cell(forWidth: 1800), "laptop keeps its own cell size")
     }
     check("singleScreenLayoutSameInBothModes") {
@@ -104,7 +104,7 @@ func sharedRenderChecks() {
         let renderer = try OceanRenderer(device: device)
         let cell = GridSpec.cell(forWidth: 2560)
         let w = World(sharks: [.greathammer, .classic, .mako, .tiger], rng: Rng(seed: 5))
-        w.resize(habitat: Habitat(rects: [userMonitor, userLaptop]), cell: cell, density: 1)
+        w.resize(terrain: Terrain(rects: [userMonitor, userLaptop]), cell: cell, density: 1)
         // Swim until some shark's body straddles the seam (y = 1440) over the laptop's span.
         var straddler: Shark?
         for _ in 0..<(240 * 60) {

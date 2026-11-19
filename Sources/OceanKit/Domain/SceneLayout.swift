@@ -16,7 +16,7 @@ public struct ScenePlan: Equatable, Sendable {
         public var rect: CGRect
     }
 
-    public var habitat: Habitat
+    public var terrain: Terrain
     public var views: [View]
     /// One cell size for the whole scene, so the grid matches across screens.
     public var cell: CGSize
@@ -33,7 +33,7 @@ public enum SceneLayout {
         guard shared, screens.count > 1 else {
             return screens.map { s in
                 let rect = CGRect(origin: .zero, size: s.frame.size)
-                return ScenePlan(habitat: Habitat(rects: [rect]), views: [.init(screenID: s.id, rect: rect)],
+                return ScenePlan(terrain: Terrain(rects: [rect]), views: [.init(screenID: s.id, rect: rect)],
                                  cell: GridSpec.cell(forWidth: s.frame.width), originInGlobal: s.frame.origin)
             }
         }
@@ -42,7 +42,7 @@ public enum SceneLayout {
             ScenePlan.View(screenID: s.id, rect: s.frame.offsetBy(dx: -origin.x, dy: -origin.y))
         }
         let widest = screens.map(\.frame.width).max()!
-        return [ScenePlan(habitat: Habitat(rects: views.map(\.rect)), views: views,
+        return [ScenePlan(terrain: Terrain(rects: views.map(\.rect)), views: views,
                           cell: GridSpec.cell(forWidth: widest), originInGlobal: origin)]
     }
 }

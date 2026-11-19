@@ -37,7 +37,7 @@ public struct Shark: Sendable {
     public var target: Int?
     public var retargetAt: Double
     public var depth: Double
-    /// Index of the habitat rect (screen) this shark patrols.
+    /// Index of the terrain rect (screen) this shark patrols.
     public var home: Int
     public var migrateAt: Double
     /// While migrating: the middle of the edge it is crossing.
@@ -88,7 +88,7 @@ public final class World {
     /// Events are kept this long so every viewport gets to draw them.
     public static let eventLifetime = 2.0
 
-    public private(set) var habitat = Habitat(rects: [])
+    public private(set) var terrain = Terrain(rects: [])
     public private(set) var width = 0.0
     public private(set) var height = 0.0
     public private(set) var stepCount = 0
@@ -118,16 +118,16 @@ public final class World {
     }
 
     public func resize(width: Double, height: Double, cell: CGSize, density: Double) {
-        resize(habitat: .single(width: width, height: height), cell: cell, density: density)
+        resize(terrain: .single(width: width, height: height), cell: cell, density: density)
     }
 
-    /// `habitat` is in ocean space: its bounding box starts at 0,0.
-    public func resize(habitat: Habitat, cell: CGSize, density: Double) {
+    /// `terrain` is in ocean space: its bounding box starts at 0,0.
+    public func resize(terrain: Terrain, cell: CGSize, density: Double) {
         let first = self.width == 0
-        let reseed = first || fish.isEmpty || density != self.density || habitat.rects.count != self.habitat.rects.count
-        self.habitat = habitat
-        self.width = Double(habitat.bounds.maxX)
-        self.height = Double(habitat.bounds.maxY)
+        let reseed = first || fish.isEmpty || density != self.density || terrain.rects.count != self.terrain.rects.count
+        self.terrain = terrain
+        self.width = Double(terrain.bounds.maxX)
+        self.height = Double(terrain.bounds.maxY)
         self.density = density
         let cw = Double(cell.width), ch = Double(cell.height)
         for (i, sp) in fishSpecies.enumerated() {
@@ -141,12 +141,12 @@ public final class World {
             return
         }
         for i in fish.indices {
-            let q = habitat.nearestInside(SIMD2(fish[i].x, fish[i].y))
+            let q = terrain.nearestInside(SIMD2(fish[i].x, fish[i].y))
             fish[i].x = q.x
             fish[i].y = q.y
         }
-        for s in sharks.indices where !habitat.rects.indices.contains(sharks[s].home) {
-            sharks[s].home = habitat.rectIndex(near: SIMD2(sharks[s].nodes[0], sharks[s].nodes[1]))
+        for s in sharks.indices where !terrain.rects.indices.contains(sharks[s].home) {
+            sharks[s].home = terrain.rectIndex(near: SIMD2(sharks[s].nodes[0], sharks[s].nodes[1]))
             sharks[s].doorway = nil
         }
     }
@@ -200,7 +200,7 @@ public final class World {
     /// Sharks and schools are seeded per screen exactly as world.ts seeds its
     /// single box; with several screens the line-up repeats on each.
     private func seed() {
-        let rects = habitat.rects
+        let rects = terrain.rects
         let perRect = min(specs.count, World.maxSharks / max(1, rects.count))
         var made: [Shark] = []
         for (r, rect) in rects.enumerated() {
@@ -423,8 +423,8 @@ public final class World {
             if relayed > alarm { alarm += (relayed - alarm) * contagion }
             f.alarm = alarm
 
-            // Soft walls: the habitat's real edges (screen edges no other screen continues).
-            let wall = habitat.wallPush(SIMD2(f.x, f.y), margin: 36)
+            // Soft walls: the terrain's real edges (screen edges no other screen continues).
+            let wall = terrain.wallPush(SIMD2(f.x, f.y), margin: 36)
             ax += wall.x
             ay += wall.y
 
@@ -488,8 +488,8 @@ public final class World {
             let L = sh.length
             let hx = sh.nodes[0], hy = sh.nodes[1]
             // Geometry of the screen this shark patrols.
-            if !habitat.rects.indices.contains(sh.home) { sh.home = habitat.rectIndex(near: SIMD2(hx, hy)) }
-            let home = habitat.rects[sh.home]
+            if !terrain.rects.indices.contains(sh.home) { sh.home = terrain.rectIndex(near: SIMD2(hx, hy)) }
+            let home = terrain.rects[sh.home]
             let W = Double(home.width), H = Double(home.height)
             let minSide = min(W, H)
             let cxW = Double(home.midX), cyW = Double(home.midY)
@@ -502,17 +502,17 @@ public final class World {
             dy += sin(sh.heading + sh.wander) * 0.45
 
             // Now and then, wander off to a neighbouring screen through the edge they share.
-            let doors = habitat.neighbours[sh.home]
+            let doors = terrain.neighbours[sh.home]
             if sh.doorway == nil, !doors.isEmpty, t >= sh.migrateAt {
                 let next = doors[rng.int(doors.count)]
-                sh.doorway = habitat.doorway(sh.home, next)
+                sh.doorway = terrain.doorway(sh.home, next)
                 sh.home = next
                 sh.migrateAt = t + rng.range(35, 80)
             }
             if let door = sh.doorway {
                 let to = door - SIMD2(hx, hy)
                 let d = simd_length(to)
-                let arrived = habitat.rectIndex(near: SIMD2(hx, hy)) == sh.home && d > L * 0.25
+                let arrived = terrain.rectIndex(near: SIMD2(hx, hy)) == sh.home && d > L * 0.25
                 if arrived {
                     sh.doorway = nil
                 } else if d > 1e-3 {
@@ -577,7 +577,7 @@ public final class World {
             }
 
             // Turn back once the snout leaves the ocean (screen edges no other screen continues).
-            let over = habitat.signedOutside(SIMD2(hx, hy))
+            let over = terrain.signedOutside(SIMD2(hx, hy))
             if over > -L * 0.05 {
                 let wgt = clamp((over + L * 0.05) / (L * 0.35), 0, 1) * 3.5
                 let toX = cxW - hx, toY = cyW - hy
@@ -635,14 +635,14 @@ public final class World {
 
     private func respawn() {
         let t = time
-        guard !habitat.edges.isEmpty else { return }
+        guard !terrain.edges.isEmpty else { return }
         let due = fish.indices.filter { !fish[$0].alive && fish[$0].respawnAt <= t }
         if due.isEmpty { return }
         if due.count < 6 && t - lastSpawn < 9 { return }
         lastSpawn = t
 
         // A new school swims in from a random real edge, weighted by length.
-        let edges = habitat.edges
+        let edges = terrain.edges
         var pick = rng.unit() * edges.reduce(0) { $0 + $1.length }
         var edge = edges[0]
         for e in edges {
@@ -651,7 +651,7 @@ public final class World {
         }
         let p = edge.a + (edge.b - edge.a) * rng.range(0.15, 0.85) - edge.normal * 20
         let x = p.x, y = p.y
-        let target = habitat.rects[edge.rect]
+        let target = terrain.rects[edge.rect]
         let inward = atan2(Double(target.midY) - y, Double(target.midX) - x) + rng.range(-0.5, 0.5)
         let species = pickSpecies()
         let sp = fishSpecies[species]

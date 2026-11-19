@@ -6,8 +6,8 @@ import simd
 ///
 /// Everything the simulation used to ask of its single W x H box — soft
 /// walls, "has the snout left the frame", where schools enter — it now asks
-/// the Habitat. With one rect every answer equals the old box formula.
-public struct Habitat: Equatable, Sendable {
+/// the Terrain. With one rect every answer equals the old box formula.
+public struct Terrain: Equatable, Sendable {
     /// A piece of the outline that is not shared with another rect: a real wall.
     public struct Edge: Equatable, Sendable {
         public var a: SIMD2<Double>
@@ -28,8 +28,8 @@ public struct Habitat: Equatable, Sendable {
     static let touch = 0.5   // points: edges this close are considered touching
     static let minDoor = 1.0 // shared edges shorter than this don't count
 
-    public static func single(width: Double, height: Double) -> Habitat {
-        Habitat(rects: [CGRect(x: 0, y: 0, width: width, height: height)])
+    public static func single(width: Double, height: Double) -> Terrain {
+        Terrain(rects: [CGRect(x: 0, y: 0, width: width, height: height)])
     }
 
     public init(rects: [CGRect]) {
@@ -62,13 +62,13 @@ public struct Habitat: Equatable, Sendable {
                         opposite = normal.x > 0 ? Double(o.maxX) : Double(o.minX)
                         oLo = Double(o.minY); oHi = Double(o.maxY)
                     }
-                    guard abs(opposite - fixed) < Habitat.touch else { continue }
+                    guard abs(opposite - fixed) < Terrain.touch else { continue }
                     let s = max(lo, oLo), e = min(hi, oHi)
-                    guard e - s > Habitat.minDoor else { continue }
-                    pieces = Habitat.subtract(pieces, s, e)
+                    guard e - s > Terrain.minDoor else { continue }
+                    pieces = Terrain.subtract(pieces, s, e)
                     if !neighbours[i].contains(j) { neighbours[i].append(j) }
                     let mid = (s + e) / 2
-                    doorways[Habitat.key(i, j)] = horizontal ? SIMD2(mid, fixed) : SIMD2(fixed, mid)
+                    doorways[Terrain.key(i, j)] = horizontal ? SIMD2(mid, fixed) : SIMD2(fixed, mid)
                 }
                 for (s, e) in pieces where e - s > 1e-9 {
                     let a = horizontal ? SIMD2(s, fixed) : SIMD2(fixed, s)
@@ -95,7 +95,7 @@ public struct Habitat: Equatable, Sendable {
     }
 
     /// Midpoint of the edge two touching rects share.
-    public func doorway(_ i: Int, _ j: Int) -> SIMD2<Double>? { doorways[Habitat.key(i, j)] }
+    public func doorway(_ i: Int, _ j: Int) -> SIMD2<Double>? { doorways[Terrain.key(i, j)] }
 
     public func contains(_ p: SIMD2<Double>) -> Bool {
         rects.contains { Double($0.minX) <= p.x && p.x <= Double($0.maxX) && Double($0.minY) <= p.y && p.y <= Double($0.maxY) }

@@ -19,7 +19,7 @@ final class OceanScene {
 
     private static func makeWorld(_ plan: ScenePlan, _ s: Settings) -> World {
         let w = World(sharks: s.sharks, rng: Rng(seed: UInt64.random(in: 1...UInt64.max)))
-        w.resize(habitat: plan.habitat, cell: plan.cell, density: s.fishDensity)
+        w.resize(terrain: plan.terrain, cell: plan.cell, density: s.fishDensity)
         return w
     }
 
@@ -29,14 +29,14 @@ final class OceanScene {
     }
 
     func setDensity(_ s: Settings) {
-        world.resize(habitat: plan.habitat, cell: plan.cell, density: s.fishDensity)
+        world.resize(terrain: plan.terrain, cell: plan.cell, density: s.fishDensity)
     }
 
     /// Same screens, new geometry: resize in place so the ocean keeps swimming.
     func update(_ newPlan: ScenePlan, settings: Settings) {
         guard newPlan != plan else { return }
         plan = newPlan
-        world.resize(habitat: plan.habitat, cell: plan.cell, density: settings.fishDensity)
+        world.resize(terrain: plan.terrain, cell: plan.cell, density: settings.fishDensity)
     }
 
     /// Called by every screen's display link; the clock ignores timestamps it
