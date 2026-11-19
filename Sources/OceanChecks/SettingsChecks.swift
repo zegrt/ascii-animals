@@ -10,6 +10,34 @@ func settingsChecks() {
             try expect(u >= 0 && u < 1, "unit out of range: \(u)")
         }
     }
+    check("settingsHabitatDefaultsToOcean") {
+        let d = Settings.defaults
+        try expect(d.habitat == .ocean, "habitat \(d.habitat)")
+        try expect(d.webSpiders == SpiderKind.defaultCast, "spiders \(d.webSpiders)")
+        try expect(d.webFlies && d.webJumper, "flies/jumper default off")
+    }
+    check("settingsFromSharksKeepOcean") {
+        let s = SettingsCodec.decode(Data(#"{"sharks":["mako"],"checkForUpdates":true}"#.utf8))
+        try expect(s.habitat == .ocean, "habitat \(s.habitat)")
+        try expect(s.sharks == [.mako], "sharks \(s.sharks)")
+    }
+    check("settingsHabitatRoundTrips") {
+        var s = Settings.defaults
+        s.habitat = .web; s.webSpiders = [.nephila]; s.webFlies = false
+        let t = SettingsCodec.decode(SettingsCodec.encode(s))
+        try expect(t.habitat == .web && t.webSpiders == [.nephila] && !t.webFlies && t.webJumper, "got \(t)")
+        let u = SettingsCodec.decode(Data(#"{"habitat":"mars"}"#.utf8))
+        try expect(u.habitat == .ocean, "unknown habitat -> \(u.habitat)")
+    }
+    check("settingsUnknownSpiderDropped") {
+        let s = SettingsCodec.decode(Data(#"{"webSpiders":["araneus","tarantula"]}"#.utf8))
+        try expect(s.webSpiders == [.araneus], "got \(s.webSpiders)")
+        var t = Settings.defaults
+        t.webSpiders = Array(repeating: .argiope, count: 9)
+        try expect(t.sanitized().webSpiders.count == 8, "cap")
+        t.webSpiders = []
+        try expect(t.sanitized().webSpiders == SpiderKind.defaultCast, "refill")
+    }
     check("settingsDecodeEmptyIsDefaults") {
         try expect(SettingsCodec.decode(Data("{}".utf8)) == Settings.defaults, "{} is not defaults")
     }

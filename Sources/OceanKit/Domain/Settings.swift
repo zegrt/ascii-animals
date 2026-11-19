@@ -32,9 +32,14 @@ public struct Settings: Codable, Equatable, Sendable {
     /// Install a new version as soon as it's found, then restart.
     public var autoInstallUpdates = true
     public var paused = false
+    public var habitat: HabitatKind = .ocean
+    public var webSpiders: [SpiderKind] = SpiderKind.defaultCast
+    public var webFlies = true
+    public var webJumper = true
 
     public static let defaults = Settings()
     public static let maxSharks = 8
+    public static let maxSpiders = 8
     public static let fpsOptions = [15, 30, 60]
 
     public init() {}
@@ -47,11 +52,13 @@ public struct Settings: Codable, Equatable, Sendable {
         s.fps = Settings.fpsOptions.min { abs($0 - fps) < abs($1 - fps) || (abs($0 - fps) == abs($1 - fps) && $0 > $1) }!
         s.sharks = Array(sharks.prefix(Settings.maxSharks))
         if s.sharks.isEmpty { s.sharks = Settings.defaults.sharks }
+        s.webSpiders = Array(webSpiders.prefix(Settings.maxSpiders))
+        if s.webSpiders.isEmpty { s.webSpiders = SpiderKind.defaultCast }
         return s
     }
 
     private enum K: String, CodingKey {
-        case sharks, fishDensity, speed, appearance, calm, grid, wakeColor, interaction, sharedOcean, fps, lowPowerAnimates, matchSystemWallpaper, pauseShortcut, showMenuBarIcon, checkForUpdates, autoInstallUpdates, paused
+        case sharks, fishDensity, speed, appearance, calm, grid, wakeColor, interaction, sharedOcean, fps, lowPowerAnimates, matchSystemWallpaper, pauseShortcut, showMenuBarIcon, checkForUpdates, autoInstallUpdates, paused, habitat, webSpiders, webFlies, webJumper
     }
 
     public init(from decoder: Decoder) throws {
@@ -63,6 +70,18 @@ public struct Settings: Codable, Equatable, Sendable {
         } else {
             sharks = d.sharks
         }
+        if let raw = (try? c.decodeIfPresent([String].self, forKey: .webSpiders)) ?? nil {
+            webSpiders = raw.compactMap(SpiderKind.init(rawValue:))
+        } else {
+            webSpiders = d.webSpiders
+        }
+        if let raw = (try? c.decodeIfPresent(String.self, forKey: .habitat)) ?? nil {
+            habitat = HabitatKind(rawValue: raw) ?? d.habitat
+        } else {
+            habitat = d.habitat
+        }
+        webFlies = get(.webFlies, d.webFlies)
+        webJumper = get(.webJumper, d.webJumper)
         fishDensity = get(.fishDensity, d.fishDensity)
         speed = get(.speed, d.speed)
         appearance = get(.appearance, d.appearance)
