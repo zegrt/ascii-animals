@@ -7,7 +7,10 @@ private let latestJSON = #"""
  "html_url":"https://github.com/zegrt/ascii-sharks-wallpaper/releases/tag/v2.1",
  "body":"### New in 2.1\n- One ocean across your displays.",
  "assets":[{"name":"notes.txt","browser_download_url":"https://example.com/notes.txt"},
-           {"name":"ASCII-Sharks.dmg","browser_download_url":"https://github.com/zegrt/ascii-sharks-wallpaper/releases/download/v2.1/ASCII-Sharks.dmg"}]}
+           {"name":"ASCII-Sharks.dmg","browser_download_url":"https://github.com/zegrt/ascii-sharks-wallpaper/releases/download/v2.1/ASCII-Sharks.dmg",
+            "digest":"sha256:1111111111111111111111111111111111111111111111111111111111111111"},
+           {"name":"ASCII-Sharks.zip","browser_download_url":"https://github.com/zegrt/ascii-sharks-wallpaper/releases/download/v2.1/ASCII-Sharks.zip",
+            "digest":"sha256:856A8D65D0009087ED86532D96B8547291F32D89C55ECED3EEFF7E7B8216AEE5"}]}
 """#
 
 func appChecks() {
@@ -26,6 +29,61 @@ func appChecks() {
         try expect(r.dmgURL?.lastPathComponent == "ASCII-Sharks.dmg", "dmg \(String(describing: r.dmgURL))")
         try expect(r.pageURL.absoluteString.hasSuffix("/tag/v2.1"), "page")
         try expect(r.notes.contains("One ocean"), "notes")
+        try expect(r.zipURL?.lastPathComponent == "ASCII-Sharks.zip", "zip \(String(describing: r.zipURL))")
+        try expect(r.zipSHA256 == "856a8d65d0009087ed86532d96b8547291f32d89c55eced3eeff7e7b8216aee5", "digest \(String(describing: r.zipSHA256))")
+    }
+    check("feedIgnoresBadDigests") {
+        for bad in [#""digest":null"#, #""digest":"md5:abc""#, #""digest":"sha256:xyz""#, #""digest":"sha256:856a""#] {
+            let json = latestJSON.replacingOccurrences(of: #""digest":"sha256:856A8D65D0009087ED86532D96B8547291F32D89C55ECED3EEFF7E7B8216AEE5""#, with: bad)
+            guard let r = UpdateFeed.parse(Data(json.utf8)) else { throw CheckFailure(detail: "\(bad): no release") }
+            try expect(r.zipSHA256 == nil && r.zipURL != nil, "\(bad) gave \(String(describing: r.zipSHA256))")
+        }
+    }
+    check("feedWithoutZipCantSelfUpdate") {
+        // Releases before 2.3 had only the DMG.
+        let old = #"{"tag_name":"v2.2","html_url":"https://github.com/zegrt/ascii-sharks-wallpaper/releases/tag/v2.2","assets":[{"name":"ASCII-Sharks.dmg","browser_download_url":"https://github.com/zegrt/ascii-sharks-wallpaper/releases/download/v2.2/ASCII-Sharks.dmg"}]}"#
+        guard let r = UpdateFeed.parse(Data(old.utf8)) else { throw CheckFailure(detail: "no release") }
+        try expect(r.zipURL == nil && r.zipSHA256 == nil && r.dmgURL != nil, "old release")
+    }
+    check("selfUpdateOnlyFromAnInstalledCopy") {
+        try expect(SelfUpdate.blocker(bundlePath: "/Applications/ASCII Sharks.app") == nil, "Applications")
+        try expect(SelfUpdate.blocker(bundlePath: "/Users/x/Applications/ASCII Sharks.app") == nil, "~/Applications")
+        try expect(SelfUpdate.blocker(bundlePath: "/private/var/folders/ab/T/AppTranslocation/1234/d/ASCII Sharks.app") != nil, "translocated")
+        try expect(SelfUpdate.blocker(bundlePath: "/Users/x/repo/.build/release") != nil, "bare binary")
+    }
+    check("selfUpdateTrustsOnlyThisRepo") {
+        let repo = "zegrt/ascii-sharks-wallpaper"
+        let ok = URL(string: "https://github.com/zegrt/ascii-sharks-wallpaper/releases/download/v2.3/ASCII-Sharks.dmg")!
+        try expect(SelfUpdate.isTrustedDownload(ok, repoPath: repo), "the real one")
+        for bad in ["http://github.com/zegrt/ascii-sharks-wallpaper/releases/download/v2.3/ASCII-Sharks.dmg",
+                    "https://github.com.evil.example/zegrt/ascii-sharks-wallpaper/releases/download/v2.3/x.dmg",
+                    "https://github.com/someone/ascii-sharks-wallpaper/releases/download/v2.3/x.dmg",
+                    "https://github.com/zegrt/ascii-sharks-wallpaper-fork/releases/download/v2.3/x.dmg",
+                    "https://example.com/zegrt/ascii-sharks-wallpaper/releases/download/v2.3/x.dmg"] {
+            try expect(!SelfUpdate.isTrustedDownload(URL(string: bad)!, repoPath: repo), bad)
+        }
+    }
+    check("autoInstallOnlyWhenEverythingAllows") {
+        func go(checking: Bool = true, auto: Bool = true, installable: Bool = true, failed: String? = nil, busy: Bool = false) -> Bool {
+            UpdatePolicy.shouldAutoInstall(checking: checking, autoInstall: auto, installable: installable,
+                                           tag: "v2.4", failedTag: failed, userBusy: busy)
+        }
+        try expect(go(), "all clear")
+        try expect(go(failed: "v2.3"), "an older failure doesn't block a new release")
+        try expect(!go(checking: false), "checks off")
+        try expect(!go(auto: false), "auto off")
+        try expect(!go(installable: false), "no zip or can't replace itself")
+        try expect(!go(failed: "v2.4"), "already failed once")
+        try expect(!go(busy: true), "user busy")
+    }
+    check("selfUpdateWantsTheExactApp") {
+        let id = "local.ascii-sharks.wallpaper", v = AppVersion("2.3")!
+        try expect(SelfUpdate.candidateProblem(bundleID: id, version: "2.3", expectedID: id, expectedVersion: v) == nil, "match")
+        try expect(SelfUpdate.candidateProblem(bundleID: id, version: "2.3.0", expectedID: id, expectedVersion: v) == nil, "2.3.0")
+        try expect(SelfUpdate.candidateProblem(bundleID: "com.other", version: "2.3", expectedID: id, expectedVersion: v) != nil, "other app")
+        try expect(SelfUpdate.candidateProblem(bundleID: nil, version: "2.3", expectedID: id, expectedVersion: v) != nil, "no id")
+        try expect(SelfUpdate.candidateProblem(bundleID: id, version: "2.2", expectedID: id, expectedVersion: v) != nil, "older")
+        try expect(SelfUpdate.candidateProblem(bundleID: id, version: nil, expectedID: id, expectedVersion: v) != nil, "no version")
     }
     check("feedRejectsDraftsAndJunk") {
         let draft = latestJSON.replacingOccurrences(of: #""draft":false"#, with: #""draft":true"#)

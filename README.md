@@ -117,7 +117,7 @@ Then find the 🐟 in the menu bar for **Pause**, **Sharks**, **Appearance**, **
 
 - **⌃⌥⌘P** pauses and resumes from anywhere.
 - **Opening the app again shows Settings.** That's how you get back to it if you've hidden the menu-bar icon, or if the icon is behind the notch.
-- **Updates.** ASCII Sharks checks once a day for a newer version and tells you when one is ready. To update, quit the old version and drag in the new one.
+- **Updates.** ASCII Sharks checks once a day for a newer version and installs it by itself, restarting in a couple of seconds (it waits while Settings is open). Prefer to choose when? Turn off **Install updates automatically** in Settings and use **Update to …** in the menu, or **Check Now…** in Settings.
 
 ## Uninstall
 
@@ -190,7 +190,6 @@ The design and its review are in [`docs/plans/`](docs/plans).
 - **Spaces:** macOS changes wallpapers one Space at a time and gives apps no way to identify Spaces. So the matching still goes on the Space where the app starts. Wallpapers it doesn't recognise are never touched, and only what it set is restored.
 - **Aerial and dynamic wallpapers:** these come back as whatever image macOS reports for them.
 - **Signing:** the app is signed ad hoc, not by a registered Apple developer. That's why macOS asks you to click Open Anyway the first time you open it.
-- **Updates aren't automatic.** The app tells you when a new version is out, but you install it yourself. Installing updates automatically needs a Developer ID.
 - **On the list:** a screensaver edition.
 
 ## Credits

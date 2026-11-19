@@ -33,7 +33,13 @@ public struct LatestRelease: Equatable, Sendable {
     public var version: AppVersion
     public var tag: String
     public var pageURL: URL
+    /// For people: the drag-to-Applications disk image.
     public var dmgURL: URL?
+    /// For the app updating itself: the zipped app and its SHA-256 as GitHub
+    /// reports it (lowercase hex). A disk image won't do: macOS doesn't let an
+    /// app read a mounted image without asking.
+    public var zipURL: URL?
+    public var zipSHA256: String?
     public var notes: String
     public static func == (a: LatestRelease, b: LatestRelease) -> Bool { a.tag == b.tag && a.version == b.version }
 }
@@ -41,7 +47,7 @@ public struct LatestRelease: Equatable, Sendable {
 public enum UpdateFeed {
     /// GitHub `releases/latest` JSON.
     public static func parse(_ data: Data) -> LatestRelease? {
-        struct Asset: Decodable { let name: String; let browser_download_url: URL }
+        struct Asset: Decodable { let name: String; let browser_download_url: URL; let digest: String? }
         struct Release: Decodable {
             let tag_name: String
             let html_url: URL
@@ -53,8 +59,50 @@ public enum UpdateFeed {
         guard let r = try? JSONDecoder().decode(Release.self, from: data),
               r.draft != true, r.prerelease != true,
               let v = AppVersion(r.tag_name) else { return nil }
-        let dmg = r.assets?.first { $0.name.lowercased().hasSuffix(".dmg") }?.browser_download_url
-        return LatestRelease(version: v, tag: r.tag_name, pageURL: r.html_url, dmgURL: dmg, notes: r.body ?? "")
+        let dmg = r.assets?.first { $0.name.lowercased().hasSuffix(".dmg") }
+        let zip = r.assets?.first { $0.name.lowercased().hasSuffix(".zip") }
+        return LatestRelease(version: v, tag: r.tag_name, pageURL: r.html_url, dmgURL: dmg?.browser_download_url,
+                             zipURL: zip?.browser_download_url, zipSHA256: zip?.digest.flatMap(sha256), notes: r.body ?? "")
+    }
+
+    /// "sha256:<64 hex>" → the hex, lowercased; anything else → nil.
+    static func sha256(_ digest: String) -> String? {
+        let prefix = "sha256:"
+        guard digest.lowercased().hasPrefix(prefix) else { return nil }
+        let hex = digest.dropFirst(prefix.count).lowercased()
+        guard hex.count == 64, hex.allSatisfy({ $0.isHexDigit }) else { return nil }
+        return String(hex)
+    }
+}
+
+/// The rules for installing an update in place. The app does the work; these
+/// are the decisions, kept here so they're checked.
+public enum SelfUpdate {
+    /// Why a copy at `bundlePath` can't replace itself, or nil when it can.
+    /// (Whether its folder is writable is the app's to find out.)
+    public static func blocker(bundlePath: String) -> String? {
+        guard bundlePath.hasSuffix(".app") else { return "This isn't an installed copy of the app." }
+        // macOS runs a quarantined app from a random read-only copy until it's moved.
+        if bundlePath.contains("/AppTranslocation/") {
+            return "macOS is running ASCII Sharks from a temporary copy. Move it into Applications, open it from there, and try again."
+        }
+        return nil
+    }
+
+    /// Only this repo's release downloads, over HTTPS.
+    public static func isTrustedDownload(_ url: URL, repoPath: String) -> Bool {
+        url.scheme == "https" && url.host?.lowercased() == "github.com"
+            && url.path.hasPrefix("/\(repoPath)/releases/download/")
+    }
+
+    /// What's wrong with the app found in the update, or nil when it's the
+    /// expected app at exactly the expected version.
+    public static func candidateProblem(bundleID: String?, version: String?, expectedID: String, expectedVersion: AppVersion) -> String? {
+        guard bundleID == expectedID else { return "The download contains a different app (\(bundleID ?? "no identifier"))." }
+        guard let v = version.flatMap(AppVersion.init), v == expectedVersion else {
+            return "The download is version \(version ?? "unknown"), not \(expectedVersion)."
+        }
+        return nil
     }
 }
 
@@ -64,6 +112,14 @@ public enum UpdatePolicy {
         guard let last = lastCheck else { return true }
         // A last check in the future means the clock moved; check again.
         return last > now || now.timeIntervalSince(last) >= interval
+    }
+
+    /// Whether to install `tag` now without asking: automatic updates are on
+    /// (and checking), the release can be installed from inside the app, it
+    /// hasn't already failed once, and the user isn't busy in the app's windows.
+    public static func shouldAutoInstall(checking: Bool, autoInstall: Bool, installable: Bool,
+                                         tag: String, failedTag: String?, userBusy: Bool) -> Bool {
+        checking && autoInstall && installable && tag != failedTag && !userBusy
     }
 
     /// Only a real version newer than the running one counts; dev builds never nag.

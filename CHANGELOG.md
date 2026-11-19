@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.3
+- **Updates install themselves.** When a new version is out, ASCII Sharks downloads it, checks it (GitHub's checksum, that it's this app at that version, its signature), swaps itself out and restarts. It takes a couple of seconds, with no disk image, no dragging and no Open Anyway. It waits while Settings is open. If any step fails, the version you have stays exactly as it was.
+- **Or update by hand.** Turn off **Install updates automatically** in Settings and the menu offers **Update to …** instead: one click. **Check Now…** in Settings (or **Check for Updates…** in the menu) looks right away.
+- Coming from 2.2.1 or earlier, this one last update is still by hand: download the DMG once more. Every update after that is a click.
+
 ## 2.2.1
 - **The original app icon is back.** 2.2 shipped with a re-rendered icon in which the shark came out vertical. This restores the diagonal shark.
 

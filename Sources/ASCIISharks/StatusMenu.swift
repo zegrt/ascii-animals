@@ -41,7 +41,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     /// The fish, with a small accent dot while an update waits.
     private func refreshIcon() {
         guard let fish = NSImage(systemSymbolName: "fish", accessibilityDescription: "ASCII Sharks") else { return }
-        guard app.updates.available != nil else {
+        guard app.updates.available != nil || app.updates.installing != nil else {
             fish.isTemplate = true
             item.button?.image = fish
             item.button?.toolTip = "ASCII Sharks"
@@ -88,6 +88,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         var notices = false
         if let update = app.updates.available {
             menu.addItem(updateItem(update))
+            notices = true
+        } else if let update = app.updates.installing {
+            let it = NSMenuItem(title: "Installing \(update.version)…", action: nil, keyEquivalent: "")
+            it.isEnabled = false
+            it.image = symbol("arrow.down.circle")
+            subtitle(it, "ASCII Sharks restarts when it's done")
+            menu.addItem(it)
             notices = true
         }
         if app.crashedLastTime && !crashNoticeDismissed {
@@ -170,10 +177,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(quit)
     }
 
-    /// "Update to 2.3 available…": accented, so it's seen without shouting.
+    /// "Update to 2.3": accented, so it's seen without shouting. One click installs and restarts.
     private func updateItem(_ r: LatestRelease) -> NSMenuItem {
-        let it = NSMenuItem(title: "Update to \(r.tag.hasPrefix("v") ? String(r.tag.dropFirst()) : r.tag) available…",
-                            action: #selector(downloadUpdate), keyEquivalent: "")
+        let it = NSMenuItem(title: "Update to \(r.version)", action: #selector(installUpdate), keyEquivalent: "")
         it.target = self
         let font = NSFont.menuFont(ofSize: 0)
         it.attributedTitle = NSAttributedString(string: it.title, attributes: [
@@ -182,7 +188,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         ])
         let config = NSImage.SymbolConfiguration(paletteColors: [.white, .controlAccentColor])
         it.image = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: nil)?.withSymbolConfiguration(config)
-        subtitle(it, "Download the new version from GitHub")
+        subtitle(it, "Installs and restarts in a few seconds")
         it.toolTip = r.notes.isEmpty ? nil : String(r.notes.prefix(400))
         return it
     }
@@ -286,7 +292,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
     @objc private func openAbout() { app.showAbout() }
     @objc private func checkUpdates() { app.updates.checkNow(userInitiated: true) }
-    @objc private func downloadUpdate() { app.updates.download() }
+    @objc private func installUpdate() { app.updates.install() }
     @objc private func welcomeTour() { app.showWelcome() }
     @objc private func reportProblem() { app.reportProblem() }
     @objc private func reportCrash() {

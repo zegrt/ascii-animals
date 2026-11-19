@@ -60,7 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu = StatusMenu(app: self)
         menu?.apply(store.settings)
         hotKey.setEnabled(store.settings.pauseShortcut)
-        updates.start { [weak self] in self?.store.settings.checkForUpdates ?? false }
+        updates.start(enabled: { [weak self] in self?.store.settings.checkForUpdates ?? false },
+                      autoInstall: { [weak self] in self?.store.settings.autoInstallUpdates ?? false })
         OnboardingController.showIfNeeded(app: self)
     }
 

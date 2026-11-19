@@ -42,9 +42,12 @@ func settingsChecks() {
     }
     check("settingsAppFieldsDefaultOn") {
         let d = Settings.defaults
-        try expect(d.pauseShortcut && d.showMenuBarIcon && d.checkForUpdates, "defaults \(d)")
-        let s = SettingsCodec.decode(Data(#"{"pauseShortcut":false,"showMenuBarIcon":false,"checkForUpdates":false}"#.utf8))
-        try expect(!s.pauseShortcut && !s.showMenuBarIcon && !s.checkForUpdates, "not decoded")
+        try expect(d.pauseShortcut && d.showMenuBarIcon && d.checkForUpdates && d.autoInstallUpdates, "defaults \(d)")
+        let s = SettingsCodec.decode(Data(#"{"pauseShortcut":false,"showMenuBarIcon":false,"checkForUpdates":false,"autoInstallUpdates":false}"#.utf8))
+        try expect(!s.pauseShortcut && !s.showMenuBarIcon && !s.checkForUpdates && !s.autoInstallUpdates, "not decoded")
+        // Settings saved before 2.3 have no autoInstallUpdates: it comes on.
+        try expect(SettingsCodec.decode(Data(#"{"checkForUpdates":true}"#.utf8)).autoInstallUpdates, "old settings")
+        try expect(String(decoding: SettingsCodec.encode(d), as: UTF8.self).contains(#""autoInstallUpdates":true"#), "not encoded")
     }
     check("settingsDefaultFps30") { try expect(Settings.defaults.fps == 30, "default fps \(Settings.defaults.fps)") }
     check("settingsCorruptJSONFallsBack") {

@@ -465,6 +465,17 @@ private struct AppSection: View {
                 Text("Check for updates daily")
                 Text("Only asks GitHub for the latest version number. Nothing about you is sent.")
             }
+            Toggle(isOn: model.binding(\.autoInstallUpdates)) {
+                Text("Install updates automatically")
+                Text("A new version installs itself and the ocean is back in a second. It waits while Settings is open.")
+            }
+            .disabled(!model.s.checkForUpdates)
+            LabeledContent {
+                Button("Check Now…") { (NSApp.delegate as? AppDelegate)?.updates.checkNow(userInitiated: true) }
+            } label: {
+                Text("Update manually")
+                Text("Checks GitHub now and offers to install anything newer.")
+            }
         } header: {
             Text("App")
         } footer: {

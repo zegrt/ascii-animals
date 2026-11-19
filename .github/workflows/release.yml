@@ -33,5 +33,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" build/ASCII-Sharks.dmg \
+          gh release create "$GITHUB_REF_NAME" build/ASCII-Sharks.dmg build/ASCII-Sharks.zip \
             --title "ASCII Sharks ${GITHUB_REF_NAME#v}" --notes-file notes.md

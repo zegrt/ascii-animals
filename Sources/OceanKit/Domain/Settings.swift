@@ -29,6 +29,8 @@ public struct Settings: Codable, Equatable, Sendable {
     public var pauseShortcut = true
     public var showMenuBarIcon = true
     public var checkForUpdates = true
+    /// Install a new version as soon as it's found, then restart.
+    public var autoInstallUpdates = true
     public var paused = false
 
     public static let defaults = Settings()
@@ -49,7 +51,7 @@ public struct Settings: Codable, Equatable, Sendable {
     }
 
     private enum K: String, CodingKey {
-        case sharks, fishDensity, speed, appearance, calm, grid, wakeColor, interaction, sharedOcean, fps, lowPowerAnimates, matchSystemWallpaper, pauseShortcut, showMenuBarIcon, checkForUpdates, paused
+        case sharks, fishDensity, speed, appearance, calm, grid, wakeColor, interaction, sharedOcean, fps, lowPowerAnimates, matchSystemWallpaper, pauseShortcut, showMenuBarIcon, checkForUpdates, autoInstallUpdates, paused
     }
 
     public init(from decoder: Decoder) throws {
@@ -75,6 +77,7 @@ public struct Settings: Codable, Equatable, Sendable {
         pauseShortcut = get(.pauseShortcut, d.pauseShortcut)
         showMenuBarIcon = get(.showMenuBarIcon, d.showMenuBarIcon)
         checkForUpdates = get(.checkForUpdates, d.checkForUpdates)
+        autoInstallUpdates = get(.autoInstallUpdates, d.autoInstallUpdates)
         paused = get(.paused, d.paused)
     }
 }
