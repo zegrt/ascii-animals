@@ -89,8 +89,14 @@ struct SettingsView: View {
                 .padding(.bottom, 12)
             Divider()
             Form {
-                SharksSection(model: model)
-                OceanSection(model: model)
+                HabitatSection(model: model)
+                switch model.s.habitat {
+                case .ocean:
+                    SharksSection(model: model)
+                    OceanSection(model: model)
+                case .web:
+                    WebSection(model: model)
+                }
                 LookSection(model: model)
                 BehaviourSection(model: model)
                 AppSection(model: model)
@@ -112,8 +118,8 @@ private struct PreviewHeader: View {
         VStack(alignment: .leading, spacing: 10) {
             ZStack(alignment: .topTrailing) {
                 ZStack {
-                    // The ocean's own background, so an empty card already looks like water.
-                    Rectangle().fill(oceanBackground)
+                    // The habitat's own background, so an empty card already looks like it.
+                    Rectangle().fill(background)
                     if let image = preview.image {
                         Image(decorative: image, scale: 2)
                             .resizable()
@@ -130,7 +136,9 @@ private struct PreviewHeader: View {
                         .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
                 )
                 .animation(.easeInOut(duration: 0.25), value: preview.image.map(ObjectIdentifier.init))
-                .accessibilityLabel("Preview of the ocean with your sharks and look")
+                .accessibilityLabel(model.s.habitat == .web
+                    ? "Preview of the web with your spiders and look"
+                    : "Preview of the ocean with your sharks and look")
 
                 if preview.isRendering {
                     ProgressView()
@@ -158,17 +166,43 @@ private struct PreviewHeader: View {
                           systemImage: model.s.paused ? "play.fill" : "pause.fill")
                 }
                 .controlSize(.small)
-                .help(model.s.paused ? "Start the ocean moving again" : "Hold the ocean still")
+                .help(model.s.paused ? "Start the wallpaper moving again" : "Hold the wallpaper still")
             }
             .font(.callout)
             .lineLimit(1)
         }
     }
 
-    private var oceanBackground: Color {
+    private var background: Color {
         let light = model.s.appearance == .light
             || (model.s.appearance == .system && NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) != .darkAqua)
-        return light ? Color(white: 0.96) : Color(white: 0.02)
+        switch model.s.habitat {
+        case .ocean: return light ? Color(white: 0.96) : Color(white: 0.02)
+        case .web: return light ? Color(red: 247 / 255, green: 246 / 255, blue: 243 / 255) : .black
+        }
+    }
+}
+
+// MARK: - Habitat
+
+private struct HabitatSection: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        Section {
+            LabeledContent("Habitat") {
+                Picker("Habitat", selection: model.binding(\.habitat)) {
+                    ForEach(HabitatKind.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: LookSection.segmentedWidth)
+            }
+            Toggle(isOn: model.binding(\.sharedOcean)) {
+                Text("One habitat across displays")
+                Text("Animals move from one display to the next. Off, each display has its own.")
+            }
+        }
     }
 }
 
@@ -329,22 +363,61 @@ private struct OceanSection: View {
                 }
                 .labelsHidden()
             }
-            LabeledContent("Speed") {
-                Slider(value: $model.speed, in: 0.5...1.5) {
-                    Text("Speed")
-                } minimumValueLabel: {
-                    SliderEnd(text: "Slower", alignment: .trailing)
-                } maximumValueLabel: {
-                    SliderEnd(text: "Faster", alignment: .leading)
-                } onEditingChanged: { editing in
-                    if !editing { model.update { $0.speed = model.speed } }
+            SpeedRow(model: model)
+        }
+    }
+}
+
+/// How fast the habitat runs; both habitats have it.
+private struct SpeedRow: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        LabeledContent("Speed") {
+            Slider(value: $model.speed, in: 0.5...1.5) {
+                Text("Speed")
+            } minimumValueLabel: {
+                SliderEnd(text: "Slower", alignment: .trailing)
+            } maximumValueLabel: {
+                SliderEnd(text: "Faster", alignment: .leading)
+            } onEditingChanged: { editing in
+                if !editing { model.update { $0.speed = model.speed } }
+            }
+            .labelsHidden()
+        }
+    }
+}
+
+// MARK: - Web
+
+private struct WebSection: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        let spiders = model.s.webSpiders
+        Section("Web") {
+            Picker(selection: Binding(
+                get: { Presets.spiderPresets.firstIndex { $0.spiders == spiders } ?? -1 },
+                set: { i in
+                    guard Presets.spiderPresets.indices.contains(i) else { return }
+                    model.update { $0.webSpiders = Presets.spiderPresets[i].spiders }
                 }
-                .labelsHidden()
+            )) {
+                ForEach(Array(Presets.spiderPresets.enumerated()), id: \.offset) { i, p in Text(p.title).tag(i) }
+                if Presets.matching(spiders) == nil { Text("Custom").tag(-1) }
+            } label: {
+                Text("Spiders")
+                Text(Presets.summary(spiders))
             }
-            Toggle(isOn: model.binding(\.sharedOcean)) {
-                Text("One ocean across displays")
-                Text("Sharks swim from one display to the next. Off, each display has its own ocean.")
+            Toggle(isOn: model.binding(\.webFlies)) {
+                Text("Flies")
+                Text("They wander by, and now and then one blunders into a web.")
             }
+            Toggle(isOn: model.binding(\.webJumper)) {
+                Text("Jumping spider")
+                Text("It hunts between the webs. Hold the pointer still and it may pounce.")
+            }
+            SpeedRow(model: model)
         }
     }
 }
@@ -378,14 +451,16 @@ private struct LookSection: View {
                 .frame(width: Self.segmentedWidth)
             }
 
-            LabeledContent("Wake colour") {
-                Picker("Wake colour", selection: model.binding(\.wakeColor)) {
-                    Text("Cyan").tag(WakeColor.cyan)
-                    Text("Accent Colour").tag(WakeColor.accent)
+            if model.s.habitat == .ocean {
+                LabeledContent("Wake colour") {
+                    Picker("Wake colour", selection: model.binding(\.wakeColor)) {
+                        Text("Cyan").tag(WakeColor.cyan)
+                        Text("Accent Colour").tag(WakeColor.accent)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: Self.segmentedWidth)
                 }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .frame(width: Self.segmentedWidth)
             }
 
             Toggle(isOn: model.binding(\.calm)) {
@@ -410,7 +485,9 @@ private struct BehaviourSection: View {
         Section {
             Toggle(isOn: model.binding(\.interaction)) {
                 Text("Play with the pointer")
-                Text("Fish flee the pointer and leave a wake. Clicking bare desktop makes a splash.")
+                Text(model.s.habitat == .web
+                     ? "Moving through a web plucks the silk. Clicking bare desktop drops a fly."
+                     : "Fish flee the pointer and leave a wake. Clicking bare desktop makes a splash.")
             }
             LabeledContent("Frame rate") {
                 Picker("Frame rate", selection: model.binding(\.fps)) {
@@ -421,8 +498,8 @@ private struct BehaviourSection: View {
                 .frame(width: Self.segmentedWidth)
             }
             Toggle(isOn: model.binding(\.lowPowerAnimates)) {
-                Text("Keep swimming in Low Power Mode")
-                Text("Otherwise the ocean holds a still frame to save energy.")
+                Text("Keep moving in Low Power Mode")
+                Text("Otherwise the wallpaper holds a still frame to save energy.")
             }
             Toggle(isOn: model.binding(\.matchSystemWallpaper)) {
                 Text("Match the lock screen")
@@ -431,7 +508,7 @@ private struct BehaviourSection: View {
         } header: {
             Text("Behaviour")
         } footer: {
-            Text("On battery, in Low Power Mode and when the Mac is warm, the ocean slows to \(PowerPolicy.economyFPS) fps. It pauses whenever it's covered, locked or asleep.")
+            Text("On battery, in Low Power Mode and when the Mac is warm, the wallpaper slows to \(PowerPolicy.economyFPS) fps. It pauses whenever it's covered, locked or asleep.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.leading)
@@ -467,7 +544,7 @@ private struct AppSection: View {
             }
             Toggle(isOn: model.binding(\.autoInstallUpdates)) {
                 Text("Install updates automatically")
-                Text("A new version installs itself and the ocean is back in a second. It waits while Settings is open.")
+                Text("A new version installs itself and the wallpaper is back in a second. It waits while Settings is open.")
             }
             .disabled(!model.s.checkForUpdates)
             LabeledContent {

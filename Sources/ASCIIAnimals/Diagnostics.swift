@@ -17,7 +17,9 @@ enum Diagnostics {
         if i.lowPowerMode { power.append("Low Power Mode") }
         if i.thermal != .nominal { power.append("thermal \(i.thermal)") }
         if i.reduceMotion { power.append("Reduce Motion") }
-        let mode = app.startupError.map { "failed to start: \($0)" } ?? app.director.map { "\($0.mode), \($0.screens.count) screen(s), \($0.scenes.count) scene(s)" } ?? "not running"
+        let mode = DiagnosticFacts.mode(habitat: app.store.settings.habitat, run: app.director?.mode,
+                                        screens: app.director?.screens.count ?? 0, scenes: app.director?.scenes.count ?? 0,
+                                        failure: app.startupError)
         return DiagnosticFacts(
             appVersion: "\(AppInfo.version) (\(AppInfo.build))",
             macOS: "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)",

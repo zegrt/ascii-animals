@@ -3,7 +3,7 @@ import Combine
 import Metal
 import OceanKit
 
-/// A small still of the ocean for the top of Settings. It re-renders off the
+/// A small still of the current habitat for the top of Settings. It re-renders off the
 /// main thread, debounced, whenever something that changes the picture changes.
 final class OceanPreview: ObservableObject {
     /// Point size of the rendered ocean, the shape of the card in Settings. It's drawn at a
@@ -103,6 +103,10 @@ final class OceanPreview: ObservableObject {
         l.calm = s.calm
         l.grid = s.grid
         l.wakeColor = s.wakeColor
+        l.habitat = s.habitat
+        l.webSpiders = s.webSpiders
+        l.webFlies = s.webFlies
+        l.webJumper = s.webJumper
         return l
     }
 

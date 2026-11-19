@@ -3,8 +3,8 @@ import Metal
 import OceanKit
 import SwiftUI
 
-/// The immersive first-launch welcome: a full-screen live ocean with a few
-/// typed lines over it, ending in a dissolve to the real desktop ocean.
+/// The immersive first-launch welcome: a full-screen live habitat with a few
+/// typed lines over it, ending in a dissolve to the real desktop one.
 /// Return or a click moves on, Esc leaves at any time.
 enum OnboardingController {
     static let seenKey = "onboarded.v1"
@@ -34,7 +34,8 @@ enum OnboardingController {
     static func statusMenuOpened() { current?.statusMenuOpened() }
 
     /// Debug: render to a PNG (no Screen Recording needed). `--snapshot-onboarding <png>`
-    /// `ASCII_ANIMALS_ONBOARDING_STEP=0…5` picks the step (default 0); `ASCII_ANIMALS_SNAPSHOT_LIGHT=1` the light look.
+    /// `ASCII_ANIMALS_ONBOARDING_STEP=0…5` picks the step (default 0); `ASCII_ANIMALS_SNAPSHOT_LIGHT=1` the light look;
+    /// `ASCII_ANIMALS_SNAPSHOT_HABITAT=web` the Web (default Ocean, as a new user has it).
     static func snapshot(to url: URL) {
         let env = ProcessInfo.processInfo.environment
         let beat = OnboardingBeat(rawValue: Int(env["ASCII_ANIMALS_ONBOARDING_STEP"] ?? "") ?? 0) ?? .hello
@@ -45,11 +46,12 @@ enum OnboardingController {
             let renderer = try OceanRenderer(device: device)
             var s = OceanKit.Settings.defaults
             if env["ASCII_ANIMALS_SNAPSHOT_LIGHT"] != nil { s.appearance = .light }
+            if let h = env["ASCII_ANIMALS_SNAPSHOT_HABITAT"].flatMap(HabitatKind.init(rawValue:)) { s.habitat = h }
             let theme = ThemeParams.make(s, systemIsDark: true, accent: SIMD3(0.2, 0.5, 1))
             let vp = try renderer.makeViewport(pointSize: size, scale: scale)
             let sim = Habitats.make(s, seed: 11)
             sim.layout(terrain: .single(width: size.width, height: size.height), cell: vp.grid.cell, settings: s)
-            // Warm up; on the interactive steps, sweep a pointer and drop a splash in the last seconds.
+            // Warm up; on the interactive steps, sweep a pointer and click (a splash, a fly) in the last seconds.
             let total = 7 * 60
             for i in 0..<total {
                 let t = Double(i - (total - 150)) / 150
@@ -64,7 +66,7 @@ enum OnboardingController {
                 }
             }
             guard let ocean = LiveOceanView.image(of: sim, viewport: vp, theme: theme, renderer: renderer) else {
-                throw RenderError(description: "no ocean frame")
+                throw RenderError(description: "no habitat frame")
             }
 
             let model = OnboardingModel(settings: s, light: theme.light)
@@ -111,36 +113,40 @@ enum OnboardingController {
 enum OnboardingBeat: Int, CaseIterable {
     case hello, pointer, splash, menu, choose, dive
 
-    func title(iconHidden: Bool) -> String {
+    func title(iconHidden: Bool, habitat: HabitatKind) -> String {
+        let web = habitat == .web
         switch self {
-        case .hello: return "Your desktop is now an ocean."
+        case .hello: return web ? "Your desktop is now covered in webs." : "Your desktop is now an ocean."
         case .pointer: return "Move your pointer."
-        case .splash: return "Click for a splash."
+        case .splash: return web ? "Click to drop a fly." : "Click for a splash."
         case .menu: return iconHidden ? "Settings are one launch away." : "Settings live up here."
         case .choose: return "Make it yours."
         case .dive: return "Dive in."
         }
     }
 
-    func subtitle(iconHidden: Bool) -> String {
+    func subtitle(iconHidden: Bool, habitat: HabitatKind) -> String {
+        let web = habitat == .web
         switch self {
-        case .hello: return "Sharks hunt, fish school, and all of it is drawn in text."
-        case .pointer: return "The fish scatter out of its way."
-        case .splash: return "Anywhere in the water."
+        case .hello:
+            return web ? "Orb weavers spin, flies wander, and all of it is drawn in text."
+                       : "Sharks hunt, fish school, and all of it is drawn in text."
+        case .pointer: return web ? "The silk rings, and the spiders turn toward it." : "The fish scatter out of its way."
+        case .splash: return web ? "Anywhere near a web." : "Anywhere in the water."
         case .menu:
             return iconHidden
                 ? "The menu bar icon is hidden. Open ASCII Animals again any time to get Settings."
-                : "Click the fish in the menu bar for line-ups, looks and pause."
-        case .choose: return "Pick a look and a line-up. Both can change later in Settings."
-        case .dive: return "It swims behind your windows from now on."
+                : "Click the fish in the menu bar for habitats, looks and pause."
+        case .choose: return "Pick a habitat, a look, a line-up. All can change in Settings."
+        case .dive: return web ? "It lives behind your windows from now on." : "It swims behind your windows from now on."
         }
     }
 
     /// Shown once the step's little task is done.
-    var doneLine: String {
+    func doneLine(habitat: HabitatKind) -> String {
         switch self {
         case .pointer: return "They noticed."
-        case .splash: return "Splash."
+        case .splash: return habitat == .web ? "Dinner." : "Splash."
         case .menu: return "That's the one."
         default: return ""
         }
@@ -185,6 +191,7 @@ final class OnboardingModel: ObservableObject {
     @Published var iconRect: CGRect?
     @Published var hovered: String?
 
+    var onHabitat: (HabitatKind) -> Void = { _ in }
     var onLook: (OnboardingLook) -> Void = { _ in }
     var onPreset: (Int) -> Void = { _ in }
     var onContinue: () -> Void = {}
@@ -194,8 +201,9 @@ final class OnboardingModel: ObservableObject {
         self.light = light
     }
 
-    var title: String { beat.title(iconHidden: iconHidden) }
-    var subtitle: String { beat.subtitle(iconHidden: iconHidden) }
+    var title: String { beat.title(iconHidden: iconHidden, habitat: settings.habitat) }
+    var subtitle: String { beat.subtitle(iconHidden: iconHidden, habitat: settings.habitat) }
+    var doneLine: String { beat.doneLine(habitat: settings.habitat) }
     var isTyping: Bool { typedTitle < title.count || typedSubtitle < subtitle.count }
 
     func finishTyping() {
@@ -308,6 +316,7 @@ final class OnboardingSession: NSObject {
             model.iconRect = CGRect(x: f.minX - frame.minX, y: frame.maxY - f.maxY, width: f.width, height: f.height)
         }
         model.iconHidden = model.iconRect == nil
+        model.onHabitat = { [weak self] h in self?.pickHabitat(h) }
         model.onLook = { [weak self] l in self?.pickLook(l) }
         model.onPreset = { [weak self] i in self?.pickPreset(i) }
         model.onContinue = { [weak self] in self?.advance() }
@@ -437,9 +446,23 @@ final class OnboardingSession: NSObject {
         withAnimation(.easeInOut(duration: 0.35)) { model.light = theme.light }
     }
 
+    /// The desktop behind dissolves to it too; the welcome's own scene follows here.
+    private func pickHabitat(_ h: HabitatKind) {
+        app.store.update { $0.habitat = h }
+        model.settings = app.store.settings
+        ocean.rebuild(model.settings)
+    }
+
+    /// A line-up of the current habitat: sharks or spiders.
     private func pickPreset(_ i: Int) {
-        guard Presets.all.indices.contains(i) else { return }
-        app.store.update { $0.sharks = Presets.all[i].sharks }
+        switch model.settings.habitat {
+        case .ocean:
+            guard Presets.all.indices.contains(i) else { return }
+            app.store.update { $0.sharks = Presets.all[i].sharks }
+        case .web:
+            guard Presets.spiderPresets.indices.contains(i) else { return }
+            app.store.update { $0.webSpiders = Presets.spiderPresets[i].spiders }
+        }
         model.settings = app.store.settings
         ocean.rebuild(model.settings)
     }
@@ -467,7 +490,7 @@ final class OnboardingSession: NSObject {
         case .leftMouseDown:
             if model.beat == .choose {
                 ocean.pointer(at: p)
-                return // the line-up and look buttons own clicks here
+                return // the habitat, look and line-up buttons own clicks here
             }
             ocean.splash(at: p)
             switch model.beat {
@@ -551,7 +574,7 @@ struct OnboardingView: View {
                     .init(color: Ink.plate(model.light).opacity(0.82), location: 0.5),
                     .init(color: Ink.plate(model.light).opacity(0), location: 1),
                 ]), center: .center, startRadiusFraction: 0, endRadiusFraction: 0.5)
-                    .frame(width: 1240 * unit, height: (model.beat == .choose ? 720 : 560) * unit)
+                    .frame(width: 1240 * unit, height: (model.beat == .choose ? 840 : 560) * unit)
                     .opacity(model.contentVisible ? 1 : 0)
                     .allowsHitTesting(false)
 
@@ -615,7 +638,7 @@ private struct StepContent: View {
                     .opacity(model.isTyping ? 0 : 1)
                     .animation(.easeOut(duration: 0.5), value: model.isTyping)
                 } else {
-                    Text(model.beat.doneLine)
+                    Text(model.doneLine)
                         .font(UIFonts.swiftUI(15 * unit, weight: 500))
                         .kerning(1 * unit)
                         .foregroundStyle(Ink.accent(model.light))
@@ -670,19 +693,37 @@ private struct Choices: View {
     var body: some View {
         let ink = Ink.text(model.light)
         let look = model.look
-        let preset = Presets.matching(model.settings.sharks)
+        let habitat = model.settings.habitat
         VStack(spacing: 22 * unit) {
+            row("HABITAT") {
+                ForEach(HabitatKind.allCases, id: \.self) { h in
+                    Chip(title: h.title, selected: h == habitat, light: model.light, unit: unit, model: model) { model.onHabitat(h) }
+                }
+            }
             row("LOOK") {
                 ForEach(OnboardingLook.allCases, id: \.rawValue) { l in
                     Chip(title: l.title, selected: l == look, light: model.light, unit: unit, model: model) { model.onLook(l) }
                 }
             }
-            row("SHARKS") {
-                ForEach(Array(Presets.all.enumerated()), id: \.offset) { i, p in
-                    Chip(title: p.title, selected: preset?.title == p.title, light: model.light, unit: unit, model: model) { model.onPreset(i) }
+            switch habitat {
+            case .ocean:
+                let preset = Presets.matching(model.settings.sharks)
+                row("SHARKS") {
+                    ForEach(Array(Presets.all.enumerated()), id: \.offset) { i, p in
+                        Chip(title: p.title, selected: preset?.title == p.title, light: model.light, unit: unit, model: model) { model.onPreset(i) }
+                    }
+                }
+            case .web:
+                let preset = Presets.matching(model.settings.webSpiders)
+                row("SPIDERS") {
+                    ForEach(Array(Presets.spiderPresets.enumerated()), id: \.offset) { i, p in
+                        Chip(title: p.title, selected: preset?.title == p.title, light: model.light, unit: unit, model: model) { model.onPreset(i) }
+                    }
                 }
             }
-            Text(model.settings.sharks.map(Presets.title).joined(separator: " · "))
+            Text(habitat == .web
+                 ? Presets.summary(model.settings.webSpiders, separator: " · ")
+                 : model.settings.sharks.map(Presets.title).joined(separator: " · "))
                 .font(UIFonts.swiftUI(13 * unit))
                 .foregroundStyle(ink.opacity(0.5))
                 .padding(.top, 2 * unit)

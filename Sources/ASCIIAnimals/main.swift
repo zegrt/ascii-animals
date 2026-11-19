@@ -144,7 +144,7 @@ let app = NSApplication.shared
 // screenshotted from a terminal without Screen Recording permission).
 if let i = CommandLine.arguments.firstIndex(of: "--snapshot-settings"), i + 1 < CommandLine.arguments.count {
     app.setActivationPolicy(.prohibited)
-    let model = SettingsModel(store: SettingsStore())
+    let model = SettingsModel(store: SettingsStore.snapshot())
     let view = NSHostingView(rootView: SettingsView(model: model))
     view.frame.size = view.fittingSize
     let window = NSWindow(contentRect: view.frame, styleMask: [.titled], backing: .buffered, defer: false)

@@ -110,43 +110,71 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
         let pause = add(menu, s.paused ? "Resume" : "Pause", #selector(togglePause),
                         symbol: s.paused ? "play.fill" : "pause.fill", key: "p")
-        pause.toolTip = s.paused ? "Start the ocean moving again." : "Hold the ocean still. It stays paused until you resume."
+        pause.toolTip = s.paused ? "Start the wallpaper moving again." : "Hold the wallpaper still. It stays paused until you resume."
 
         menu.addItem(.separator())
 
-        let sharks = NSMenu()
-        sharks.addItem(header("Line-Ups"))
-        for (i, p) in Presets.all.enumerated() {
-            let it = add(sharks, p.title, #selector(pickPreset(_:)), state: p.sharks == s.sharks, tag: i)
-            if i < 9 { it.keyEquivalent = "\(i + 1)" }
-            subtitle(it, p.sharks.map(Presets.title).joined(separator: ", "))
+        menu.addItem(header("Habitat"))
+        for (i, h) in HabitatKind.allCases.enumerated() {
+            add(menu, h.title, #selector(pickHabitat(_:)), state: s.habitat == h, tag: i)
         }
-        if Presets.matching(s.sharks) == nil {
-            let custom = add(sharks, "Your Line-Up", nil, state: true)
-            subtitle(custom, s.sharks.map(Presets.title).joined(separator: ", "))
+
+        menu.addItem(.separator())
+
+        switch s.habitat {
+        case .ocean:
+            let sharks = NSMenu()
+            sharks.addItem(header("Line-Ups"))
+            for (i, p) in Presets.all.enumerated() {
+                let it = add(sharks, p.title, #selector(pickPreset(_:)), state: p.sharks == s.sharks, tag: i)
+                if i < 9 { it.keyEquivalent = "\(i + 1)" }
+                subtitle(it, p.sharks.map(Presets.title).joined(separator: ", "))
+            }
+            if Presets.matching(s.sharks) == nil {
+                let custom = add(sharks, "Your Line-Up", nil, state: true)
+                subtitle(custom, s.sharks.map(Presets.title).joined(separator: ", "))
+            }
+            sharks.addItem(.separator())
+            add(sharks, "Edit Line-Up…", #selector(openSettings), symbol: "slider.horizontal.3")
+            submenu(menu, "Sharks", symbol: "water.waves", sharks)
+        case .web:
+            let spiders = NSMenu()
+            spiders.addItem(header("Line-Ups"))
+            for (i, p) in Presets.spiderPresets.enumerated() {
+                let it = add(spiders, p.title, #selector(pickSpiders(_:)), state: p.spiders == s.webSpiders, tag: i)
+                if i < 9 { it.keyEquivalent = "\(i + 1)" }
+                subtitle(it, Presets.summary(p.spiders))
+            }
+            if Presets.matching(s.webSpiders) == nil {
+                let custom = add(spiders, "Your Line-Up", nil, state: true)
+                subtitle(custom, Presets.summary(s.webSpiders))
+            }
+            spiders.addItem(.separator())
+            add(spiders, "Flies", #selector(toggleFlies), state: s.webFlies)
+            add(spiders, "Jumping Spider", #selector(toggleJumper), state: s.webJumper)
+            submenu(menu, "Spiders", symbol: "ant", spiders)
         }
-        sharks.addItem(.separator())
-        add(sharks, "Edit Line-Up…", #selector(openSettings), symbol: "slider.horizontal.3")
-        submenu(menu, "Sharks", symbol: "water.waves", sharks)
 
         let look = NSMenu()
         look.addItem(header("Appearance"))
         for (i, a) in Self.appearances.enumerated() {
             add(look, a.1, #selector(pickAppearance(_:)), symbol: a.2, state: s.appearance == a.0, tag: i)
         }
-        look.addItem(.separator())
-        look.addItem(header("Wake"))
-        add(look, "Cyan", #selector(pickWake(_:)), state: s.wakeColor == .cyan, tag: 0)
-        add(look, "Accent Colour", #selector(pickWake(_:)), state: s.wakeColor == .accent, tag: 1)
+        if s.habitat == .ocean {
+            look.addItem(.separator())
+            look.addItem(header("Wake"))
+            add(look, "Cyan", #selector(pickWake(_:)), state: s.wakeColor == .cyan, tag: 0)
+            add(look, "Accent Colour", #selector(pickWake(_:)), state: s.wakeColor == .accent, tag: 1)
+        }
         look.addItem(.separator())
         add(look, "Calm", #selector(toggleCalm), state: s.calm)
         add(look, "Grid", #selector(toggleGrid), state: s.grid)
         submenu(menu, "Appearance", symbol: "paintpalette", look)
 
-        let shared = add(menu, "One Ocean Across Displays", #selector(toggleSharedOcean),
+        let shared = add(menu, "One Habitat Across Displays", #selector(toggleSharedOcean),
                          symbol: "rectangle.split.2x1", state: s.sharedOcean)
         shared.toolTip = NSScreen.screens.count > 1
-            ? "Sharks swim from one display to the next."
+            ? "Animals move from one display to the next."
             : "Takes effect when you connect another display."
 
         menu.addItem(.separator())
@@ -281,7 +309,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func toggleCalm() { app.store.update { $0.calm.toggle() } }
     @objc private func toggleGrid() { app.store.update { $0.grid.toggle() } }
     @objc private func toggleSharedOcean() { app.store.update { $0.sharedOcean.toggle() } }
+    @objc private func pickHabitat(_ i: NSMenuItem) { app.store.update { $0.habitat = HabitatKind.allCases[i.tag] } }
     @objc private func pickPreset(_ i: NSMenuItem) { app.store.update { $0.sharks = Presets.all[i.tag].sharks } }
+    @objc private func pickSpiders(_ i: NSMenuItem) { app.store.update { $0.webSpiders = Presets.spiderPresets[i.tag].spiders } }
+    @objc private func toggleFlies() { app.store.update { $0.webFlies.toggle() } }
+    @objc private func toggleJumper() { app.store.update { $0.webJumper.toggle() } }
     @objc private func pickAppearance(_ i: NSMenuItem) { app.store.update { $0.appearance = Self.appearances[i.tag].0 } }
     @objc private func pickWake(_ i: NSMenuItem) { app.store.update { $0.wakeColor = i.tag == 0 ? .cyan : .accent } }
     @objc private func openSettings() { app.showSettings() }

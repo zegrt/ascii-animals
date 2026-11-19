@@ -86,6 +86,14 @@ func settingsChecks() {
         try expect(!Settings.defaults.lowPowerAnimates, "default on")
         try expect(SettingsCodec.decode(Data(#"{"lowPowerAnimates":true}"#.utf8)).lowPowerAnimates, "not decoded")
     }
+    check("diagnosticsNameTheHabitat") {
+        let web = DiagnosticFacts.mode(habitat: .web, run: .live(fps: 30), screens: 1, scenes: 1, failure: nil)
+        try expect(web.contains("Web"), "web session: \(web)")
+        let ocean = DiagnosticFacts.mode(habitat: .ocean, run: .still, screens: 2, scenes: 1, failure: nil)
+        try expect(ocean.contains("Ocean") && !ocean.contains("Web"), "ocean session: \(ocean)")
+        let failed = DiagnosticFacts.mode(habitat: .web, run: nil, screens: 0, scenes: 0, failure: "no Metal device")
+        try expect(failed.contains("Web") && failed.contains("no Metal device"), "failed start: \(failed)")
+    }
     check("settingsRoundTrip") {
         var s = Settings.defaults
         s.calm = true; s.appearance = .light; s.sharks = [.nurse, .zebra]

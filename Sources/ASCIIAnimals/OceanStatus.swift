@@ -1,11 +1,11 @@
 import AppKit
 import OceanKit
 
-/// One line saying what the ocean is doing and why, for the menu and Settings.
+/// One line saying what the habitat is doing and why, for the menu and Settings.
 struct OceanStatus: Equatable {
     enum Tone: Equatable { case live, resting, problem }
 
-    /// "Swimming", "Paused", "Couldn't Start".
+    /// "Swimming" (Ocean), "Weaving" (Web), "Paused", "Couldn't Start".
     var title: String
     /// "30 fps", "Low Power Mode", or empty.
     var detail: String
@@ -37,7 +37,7 @@ struct OceanStatus: Equatable {
                 else if inputs.onBattery { detail += " on battery" }
                 else if inputs.thermal == .serious || inputs.thermal == .critical { detail += " while the Mac is warm" }
             }
-            return OceanStatus(title: "Swimming", detail: detail, tone: .live)
+            return OceanStatus(title: running(settings.habitat), detail: detail, tone: .live)
         case .still:
             let why: String
             if inputs.reduceMotion { why = "Reduce Motion" }
@@ -57,10 +57,18 @@ struct OceanStatus: Equatable {
         }
     }
 
-    /// The running app's status. Outside the app (the settings snapshot) it reads as swimming at the chosen rate.
+    /// What a habitat is doing while it runs.
+    static func running(_ h: HabitatKind) -> String {
+        switch h {
+        case .ocean: return "Swimming"
+        case .web: return "Weaving"
+        }
+    }
+
+    /// The running app's status. Outside the app (the settings snapshot) it reads as running at the chosen rate.
     static func current(_ settings: OceanKit.Settings) -> OceanStatus {
         guard let app = NSApp.delegate as? AppDelegate else {
-            return OceanStatus(title: "Swimming", detail: "\(settings.fps) fps", tone: .live)
+            return OceanStatus(title: running(settings.habitat), detail: "\(settings.fps) fps", tone: .live)
         }
         return make(settings: settings, mode: app.director?.mode, inputs: app.signals.inputs,
                     error: app.startupError ?? app.director?.lastError)

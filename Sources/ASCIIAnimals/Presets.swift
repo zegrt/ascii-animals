@@ -1,6 +1,6 @@
 import OceanKit
 
-/// Ready-made shark line-ups, and the names people see for each species.
+/// Ready-made shark and spider line-ups, and the names people see for each species.
 enum Presets {
     struct Preset {
         let title: String
@@ -36,4 +36,43 @@ enum Presets {
 
     /// Relative length of the shark at `index` in a line-up (first is biggest), as the ocean draws it.
     static func relativeSize(at index: Int) -> Double { max(0.3, 1 - Double(index) * 0.1) }
+
+    // MARK: Spiders
+
+    struct SpiderPreset {
+        let title: String
+        let spiders: [SpiderKind]
+    }
+
+    /// The original's cast first (as many webs as there's room for, spiders on six of them), then six of one kind.
+    static let spiderPresets: [SpiderPreset] = [
+        SpiderPreset(title: "Classic Six", spiders: SpiderKind.defaultCast),
+        SpiderPreset(title: "Garden Spiders", spiders: Array(repeating: .araneus, count: 6)),
+        SpiderPreset(title: "Wasp Spiders", spiders: Array(repeating: .argiope, count: 6)),
+        SpiderPreset(title: "Golden Orb Weavers", spiders: Array(repeating: .nephila, count: 6)),
+    ]
+
+    static func matching(_ spiders: [SpiderKind]) -> SpiderPreset? { spiderPresets.first { $0.spiders == spiders } }
+
+    static func title(_ k: SpiderKind) -> String {
+        switch k {
+        case .araneus: return "Garden Spider"
+        case .argiope: return "Wasp Spider"
+        case .nephila: return "Golden Orb Weaver"
+        }
+    }
+
+    /// "2 Garden Spiders, 2 Golden Orb Weavers, 2 Wasp Spiders": each kind once, in the order they first appear.
+    static func summary(_ spiders: [SpiderKind], separator: String = ", ") -> String {
+        var order: [SpiderKind] = []
+        var counts: [SpiderKind: Int] = [:]
+        for k in spiders {
+            if counts[k] == nil { order.append(k) }
+            counts[k, default: 0] += 1
+        }
+        return order.map { k in
+            let n = counts[k] ?? 0
+            return n == 1 ? "1 \(title(k))" : "\(n) \(title(k))s"
+        }.joined(separator: separator)
+    }
 }

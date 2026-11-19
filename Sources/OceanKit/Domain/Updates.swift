@@ -148,6 +148,15 @@ public struct DiagnosticFacts: Sendable {
     }
 }
 
+extension DiagnosticFacts {
+    /// The `mode` line: which habitat, and what it is doing. "Web, live(fps: 30), 1 screen(s), 1 scene(s)".
+    public static func mode(habitat: HabitatKind, run: RunMode?, screens: Int, scenes: Int, failure: String?) -> String {
+        if let failure { return "\(habitat.title), failed to start: \(failure)" }
+        guard let run else { return "\(habitat.title), not running" }
+        return "\(habitat.title), \(run), \(screens) screen(s), \(scenes) scene(s)"
+    }
+}
+
 public enum IssueReport {
     /// Markdown for a GitHub issue. The home folder becomes `~` and the user's
     /// name is removed everywhere, so nothing personal leaves the Mac.
@@ -166,7 +175,7 @@ public enum IssueReport {
             "| Mac | \(d.model) |",
             "| Displays | \(d.displays.joined(separator: "<br>")) |",
             "| Power | \(d.power) |",
-            "| Ocean | \(d.mode) |",
+            "| Habitat | \(d.mode) |",
         ]
         if d.crashedLastTime { lines.append("| Note | Quit unexpectedly last time |") }
         lines += ["", "<details><summary>Settings</summary>", "", "```json", d.settingsJSON, "```", "</details>"]
