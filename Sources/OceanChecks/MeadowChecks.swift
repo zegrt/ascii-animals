@@ -59,10 +59,24 @@ func meadowChecks() {
         let b = calmBreeze()
         let (x, y) = node(20, 12)
         b.write(x, y, vx: 0, vy: -150)
+        // The falloff is the Gaussian exp(-(d / 2.5)²), samples: e⁻¹ of the centre at 2.5 samples, and the right
+        // weight at every node out to 4. A flat write, or one of another radius, fails here.
+        let centre0: Double = simd_length(b.sample(x, y))
+        let sxPt: Double = 4 * Double(meadowCell.width), syPt: Double = 3 * Double(meadowCell.height)
+        let mid: Double = simd_length(b.sample(x + 2.5 * sxPt, y)) / centre0
+        try expectClose(mid, exp(-1.0), tol: 0.03, "2.5 samples out, share of the centre")
+        for d in 1...4 {
+            let dd: Double = Double(d)
+            let want: Double = exp(-(dd * dd) / 6.25)
+            let alongX: Double = simd_length(b.sample(x + dd * sxPt, y)) / centre0
+            let alongY: Double = simd_length(b.sample(x, y - dd * syPt)) / centre0
+            try expectClose(alongX, want, tol: 0.02, "\(d) samples along x, share of the centre")
+            try expectClose(alongY, want, tol: 0.02, "\(d) samples along y, share of the centre")
+        }
         let random = WebRandom(seed: 4)
         for frame in 0..<30 {
             let centre: Double = simd_length(b.sample(x, y))
-            let sx: Double = 6 * 4 * Double(meadowCell.width), sy: Double = 6 * 3 * Double(meadowCell.height)
+            let sx: Double = 6 * sxPt, sy: Double = 6 * syPt
             let away: [(Double, Double)] = [(x + sx, y), (x - sx, y), (x, y + sy), (x, y - sy)]
             for (ax, ay) in away {
                 let far: Double = simd_length(b.sample(ax, ay))
@@ -197,6 +211,77 @@ func meadowChecks() {
     }
     check("meadowlandDeterministic", meadowlandDeterministic)
 
+    func bloomKeepsTheLandsClock() throws {
+        let terrain = Terrain.single(width: 2560, height: 1440)
+        let land = Meadowland(random: WebRandom(seed: 33))
+        land.layout(terrain: terrain, cell: meadowCell)
+        let breeze = Breeze(bounds: terrain.bounds, cell: meadowCell)
+        let random = WebRandom(seed: 34)
+        let dt: Double = 1.0 / 60.0
+        for _ in 0..<60 { breeze.step(dt, random: random); land.step(dt, breeze: breeze) }
+        let t1: Double = land.time
+        guard let first = land.bloom(atX: 800, y: 900, terrain: terrain, time: t1) else {
+            throw CheckFailure(detail: "no bloom at 1 s")
+        }
+        try expectClose(land.flowers[first].bornAt, t1, tol: 1e-12, "first bloom's bornAt")
+        for _ in 0..<(60 * 9) { breeze.step(dt, random: random); land.step(dt, breeze: breeze) }
+        let t10: Double = land.time
+        try expect(land.flowers[first].bloom == 1 && land.flowers[first].grown == 1, "first bloom open by 10 s")
+        // A caller passing another clock: the land keeps its own; the time is only the new flower's bornAt.
+        guard let second = land.bloom(atX: 1600, y: 900, terrain: terrain, time: 0) else {
+            throw CheckFailure(detail: "no bloom at 10 s")
+        }
+        try expectClose(land.time, t10, tol: 1e-12, "the land's clock after bloom(time: 0)")
+        try expectClose(land.flowers[second].bornAt, 0, tol: 1e-12, "second bloom's bornAt")
+        breeze.step(dt, random: random)
+        land.step(dt, breeze: breeze)
+        try expectClose(land.time, t10 + dt, tol: 1e-9, "the land's clock steps on")
+        let f = land.flowers[first]
+        try expect(f.bloom == 1 && f.grown == 1 && f.sparkle == 0, "the first bloom rewound: \(f)")
+    }
+    check("bloomKeepsTheLandsClock", bloomKeepsTheLandsClock)
+
+    func weatherAndLeanScaleWithCell() throws {
+        // Speeds are given at 13-pt cells and scale with cell.width / 13. The same meadow laid out on a smaller
+        // grid (8 × 12 cells, the terrain shrunk with them) gets the same weather at 8/13 the speed, and its
+        // stems lean the same share of their length.
+        let small = CGSize(width: 8, height: 12)
+        let s: Double = 8.0 / 13.0, sy: Double = 12.0 / 19.0
+        let bigT = Terrain.single(width: 2560, height: 1440)
+        let smallT = Terrain.single(width: 2560 * s, height: 1440 * sy)
+        let bigB = Breeze(bounds: bigT.bounds, cell: meadowCell), smallB = Breeze(bounds: smallT.bounds, cell: small)
+        let bigL = Meadowland(random: WebRandom(seed: 41)), smallL = Meadowland(random: WebRandom(seed: 41))
+        bigL.layout(terrain: bigT, cell: meadowCell)
+        smallL.layout(terrain: smallT, cell: small)
+        try expect(bigL.flowers.count == smallL.flowers.count, "layouts differ: \(bigL.flowers.count) vs \(smallL.flowers.count)")
+        let rb = WebRandom(seed: 42), rs = WebRandom(seed: 42)
+        let dt: Double = 1.0 / 60.0
+        var peak: Double = 0
+        var bigLean: Double = 0, smallLean: Double = 0
+        for step in 0..<(60 * 90) {
+            bigB.step(dt, random: rb)
+            smallB.step(dt, random: rs)
+            bigL.step(dt, breeze: bigB)
+            smallL.step(dt, breeze: smallB)
+            guard step % 30 == 0 else { continue }
+            for i in [0, 7, 19, 33, 48] {
+                let bx: Double = Double(i) * 4 * 13, by: Double = 5 * 3 * 19
+                let ws: SIMD2<Double> = smallB.sample(bx * s, by * sy), wb: SIMD2<Double> = bigB.sample(bx, by)
+                peak = max(peak, simd_length(wb))
+                try expectClose(ws.x, wb.x * s, tol: 1e-6 * max(1, abs(wb.x)), "step \(step) column \(i): wind x")
+                try expectClose(ws.y, wb.y * s, tol: 1e-6 * max(1, abs(wb.y)), "step \(step) column \(i): wind y")
+            }
+            for k in 0..<bigL.flowers.count where bigL.flowers[k].kind != .grass {
+                let fb = bigL.flowers[k], fs = smallL.flowers[k]
+                bigLean += abs(fb.tip.x) / (Double(fb.rows) * 19)
+                smallLean += abs(fs.tip.x) / (Double(fs.rows) * 12)
+            }
+        }
+        try expect(peak > 60, "no gust in 90 s: peak \(peak) pt/s")
+        try expectClose(smallLean / bigLean, 1, tol: 0.05, "stems lean a share of their length on 8-pt cells vs 13-pt")
+    }
+    check("weatherAndLeanScaleWithCell", weatherAndLeanScaleWithCell)
+
     butterflyChecks()
 }
 
@@ -277,17 +362,27 @@ private struct FlightLog {
         return run / max(drop, 1e-9)
     }
 
-    /// Mean |normal| over mean |tangential| acceleration of the ground track, from 60 Hz differences.
-    var normalOverTangential: Double {
+    /// Mean |normal| over mean |tangential| acceleration of the per-beat-averaged velocity (clap to clap), so
+    /// the bob and the clap's lurch inside a beat drop out and what is left is how the path turns and speeds up
+    /// from beat to beat.
+    var perBeatNormalOverTangential: Double {
+        let c = clapSteps
+        guard c.count > 2 else { return 0 }
         var an: Double = 0, at: Double = 0
-        for k in 1..<count {
-            let v = SIMD2<Double>(vx[k], vy[k])
+        for i in 2..<c.count {
+            let a = c[i - 2], b = c[i - 1], e = c[i]
+            if glidedIn(a, e) { continue }
+            let t0: Double = clapTime(b) - clapTime(a), t1: Double = clapTime(e) - clapTime(b)
+            guard t0 > 1e-6 && t1 > 1e-6 else { continue }
+            let v0 = SIMD2<Double>(x[b] - x[a], y[b] - y[a]) / t0
+            let v1 = SIMD2<Double>(x[e] - x[b], y[e] - y[b]) / t1
+            let v: SIMD2<Double> = (v0 + v1) / 2
             let speed: Double = simd_length(v)
             guard speed > 1e-6 else { continue }
-            let t: SIMD2<Double> = v / speed
-            let a: SIMD2<Double> = (v - SIMD2<Double>(vx[k - 1], vy[k - 1])) / flightDt
-            at += abs(simd_dot(a, t))
-            an += abs(a.x * t.y - a.y * t.x)
+            let tan: SIMD2<Double> = v / speed
+            let acc: SIMD2<Double> = (v1 - v0) / ((t0 + t1) / 2)
+            at += abs(simd_dot(acc, tan))
+            an += abs(acc.x * tan.y - acc.y * tan.x)
         }
         return an / max(at, 1e-9)
     }
@@ -340,7 +435,9 @@ private func turnMode(_ turns: [Double]) -> (bin: Int, counts: [Int]) {
     var counts = [Int](repeating: 0, count: 36)
     for t in turns {
         let deg: Double = t * 180 / Double.pi
-        counts[Int(floor((deg + 185) / 10)) % 36] += 1
+        let shifted: Double = (deg + 185) / 10
+        let bin: Int = Int(floor(shifted)) % 36
+        counts[bin] += 1
     }
     let best = counts.indices.max { counts[$0] < counts[$1] } ?? 0
     return (best, counts)
@@ -395,8 +492,43 @@ func butterflyChecks() {
             let a = 60, e = log.count - 1   // after a second to settle onto the slope
             let angle: Double = atan2(log.y[e] - log.y[a], abs(log.x[e] - log.x[a]))
             let want: Double = ButterflySpecies.of(kind).glideAngle
-            try expect(abs(angle - want) <= 3 * Double.pi / 180, "\(kind): glides at \(angle * 180 / .pi)°, want \(want * 180 / .pi)°")
+            let angleDeg: Double = angle * 180 / Double.pi, wantDeg: Double = want * 180 / Double.pi
+            try expect(abs(angle - want) <= 3 * Double.pi / 180, "\(kind): glides at \(angleDeg)°, want \(wantDeg)°")
             try expect(b.claps == claps && b.gliding, "\(kind): beat while the stroke was frozen")
+        }
+        // The stroke frozen outside a glide (no beats, gravity on), at one θ after another, the same butterfly
+        // each time. Held anywhere on the upstroke the wings give nothing: every such flight is the same as
+        // one held at θ = π (no lift at all), to the last digit, and without a bound that flight sinks. Held at
+        // mid-downstroke the lift beats gravity and it climbs away from that line. Lift on the upstroke too
+        // would part the upstroke flights from it.
+        for kind in ButterflyKind.allCases {
+            func frozen(_ theta: Double) throws -> [Double] {
+                let random = WebRandom(seed: 51)
+                let b = Butterfly(kind: kind, x: skyStart.x, y: skyStart.y, random: random)
+                b.jinkFactor = 0
+                b.beatFactor = 0   // no beats: θ stays where it is put
+                b.phase = theta
+                let log = flyLog(b, seconds: 1.5, random: random) { b in SIMD2<Double>(b.x + 1e5, b.y) }
+                try expect(b.claps == 0 && !b.gliding && b.phase == theta, "\(kind) θ \(theta): the stroke moved")
+                return log.y
+            }
+            let none: [Double] = try frozen(Double.pi)
+            let sink: Double = none[none.count - 1] - none[30]   // y down: positive is sinking
+            if ButterflySpecies.of(kind).boundAngle == 0 {
+                try expect(sink > 30, "\(kind) with no lift sank only \(sink) pt in 1 s")
+            }
+            for k in 1..<12 {
+                let up: Double = Double.pi + Double(k) * Double.pi / 12
+                let ys: [Double] = try frozen(up)
+                let apart: Double = zip(ys, none).map { abs($0 - $1) }.max() ?? 0
+                try expect(apart < 1e-9, "\(kind) held at θ \(up) (upstroke): \(apart) pt off the no-lift flight")
+            }
+            for k in 2..<11 {
+                let down: Double = Double(k) * Double.pi / 12
+                let ys: [Double] = try frozen(down)
+                let rose: Double = none[none.count - 1] - ys[ys.count - 1]
+                try expect(rose > 30, "\(kind) held at θ \(down) (downstroke): only \(rose) pt above the no-lift flight")
+            }
         }
     }
     check("liftOnlyOnDownstroke", liftOnlyOnDownstroke)
@@ -431,7 +563,8 @@ func butterflyChecks() {
         var checked = 0
         for i in 1..<max(1, c.count) where !log.glidedIn(c[i - 1], c[i]) {
             let a = c[i - 1], e = c[i]
-            try expect(abs(log.bank[a]) > 0.8 * maxBank, "bank \(log.bank[a] * 180 / .pi)° in a hard turn")
+            let bankDeg: Double = log.bank[a] * 180 / Double.pi
+            try expect(abs(log.bank[a]) > 0.8 * maxBank, "bank \(bankDeg)° in a hard turn")
             let ls = (a...e).map { log.left[$0] > 0 }, rs = (a...e).map { log.right[$0] > 0 }
             try expect(ls.contains(true) && ls.contains(false), "left wing kept one face over the beat at step \(a)")
             try expect(rs.contains(true) && rs.contains(false), "right wing kept one face over the beat at step \(a)")
@@ -466,34 +599,167 @@ func butterflyChecks() {
     }
     check("butterfliesStayInside", butterfliesStayInside)
 
-    func freeFlightCoversTheField() throws {
-        let field = Terrain.single(width: 1800, height: 1169)
+    /// Per species, over several seeds and random starts: where the free flight spends its time on a field.
+    func coverage(_ field: Terrain, cell: CGSize, seconds: Double, seeds: ClosedRange<UInt64>,
+                  _ assert: (ButterflyKind, UInt64, FlightLog) throws -> Void) throws {
+        let r = field.rects[0]
         for (i, kind) in ButterflyKind.allCases.enumerated() {
-            let random = WebRandom(seed: 85 + UInt64(i))
-            let b = Butterfly(kind: kind, x: 900, y: 585, random: random)
-            let log = flyLog(b, seconds: 180, terrain: field, random: random)
-            var seen = [Bool](repeating: false, count: 9)
-            for k in 0..<log.count {
-                let cx = Int(clamp(log.x[k] / 600, 0, 2)), cy = Int(clamp(log.y[k] / (1169.0 / 3), 0, 2))
-                seen[cy * 3 + cx] = true
+            for seed in seeds {
+                let random = WebRandom(seed: seed * 31 + UInt64(i))
+                let x0: Double = random.range(Double(r.minX), Double(r.maxX))
+                let y0: Double = random.range(Double(r.minY), Double(r.maxY))
+                let b = Butterfly(kind: kind, x: x0, y: y0, random: random)
+                b.scale = Double(cell.width) / 13
+                let air = Breeze(bounds: field.bounds, cell: cell)
+                air.ambient = false
+                let log = flyLog(b, seconds: seconds, terrain: field, breeze: air, random: random)
+                try assert(kind, seed, log)
             }
-            let visited = seen.filter { $0 }.count
-            let wide: Double = ((log.x.max() ?? 0) - (log.x.min() ?? 0)) / 1800
-            let tall: Double = ((log.y.max() ?? 0) - (log.y.min() ?? 0)) / 1169
-            try expect(visited >= 6, "\(kind) visited \(visited) of 9 cells: \(seen)")
-            try expect(seen[6] || seen[7] || seen[8], "\(kind) never in the bottom third: \(seen)")
+        }
+    }
+
+    /// Which of a 3 × 3 grid over the rect the log visited, and its share of time in each third of the height.
+    func grid(_ log: FlightLog, _ r: CGRect) -> (seen: [Bool], thirds: [Double], wide: Double, tall: Double) {
+        var seen = [Bool](repeating: false, count: 9)
+        var thirds: [Double] = [0, 0, 0]
+        let w: Double = Double(r.width), h: Double = Double(r.height)
+        for k in 0..<log.count {
+            let u: Double = (log.x[k] - Double(r.minX)) / (w / 3), v: Double = (log.y[k] - Double(r.minY)) / (h / 3)
+            let cx = Int(clamp(u, 0, 2)), cy = Int(clamp(v, 0, 2))
+            seen[cy * 3 + cx] = true
+            thirds[cy] += 1 / Double(log.count)
+        }
+        let wide: Double = ((log.x.max() ?? 0) - (log.x.min() ?? 0)) / w
+        let tall: Double = ((log.y.max() ?? 0) - (log.y.min() ?? 0)) / h
+        return (seen, thirds, wide, tall)
+    }
+
+    func freeFlightCoversTheField() throws {
+        // The director's correction: free flight roams the whole field. Eight seeds and random starts per
+        // species, every one of them held to it.
+        let field = Terrain.single(width: 1800, height: 1169)
+        try coverage(field, cell: meadowCell, seconds: 180, seeds: 1...8) { kind, seed, log in
+            let g = grid(log, field.rects[0])
+            let visited = g.seen.filter { $0 }.count
+            try expect(visited >= 6, "\(kind) seed \(seed) visited \(visited) of 9 cells: \(g.seen)")
+            try expect(g.seen[6] || g.seen[7] || g.seen[8], "\(kind) seed \(seed) never in the bottom third: \(g.seen)")
             // Not a band: the track spans most of the field both ways.
-            try expect(wide >= 0.7 && tall >= 0.6, "\(kind) spans \(wide) of the width, \(tall) of the height")
+            try expect(g.wide >= 0.7 && g.tall >= 0.6, "\(kind) seed \(seed) spans \(g.wide) of the width, \(g.tall) of the height")
         }
     }
     check("freeFlightCoversTheField", freeFlightCoversTheField)
 
+    func freeFlightRoamsATinyScreen() throws {
+        // The Settings preview: 340 × 150 pt at its 8-pt cell (GridSpec.cell(forWidth: 340)). Free flight is not
+        // a band through the middle: it spends no more than 70 % of its time in the middle third of the height,
+        // at least 5 % in the top third and 10 % in the bottom one, and still visits 6 of the 9 cells.
+        let field = Terrain.single(width: 340, height: 150)
+        let cell = GridSpec.cell(forWidth: 340)
+        try expect(cell.width == 8, "the preview's cell is \(cell)")
+        try coverage(field, cell: cell, seconds: 300, seeds: 1...5) { kind, seed, log in
+            let g = grid(log, field.rects[0])
+            let visited = g.seen.filter { $0 }.count
+            let t: [Double] = g.thirds
+            try expect(t[1] <= 0.7, "\(kind) seed \(seed): \(t[1]) of the time in the middle third (thirds \(t))")
+            try expect(t[0] >= 0.05 && t[2] >= 0.1, "\(kind) seed \(seed): thirds \(t)")
+            try expect(visited >= 6, "\(kind) seed \(seed) visited \(visited) of 9 cells: \(g.seen)")
+        }
+    }
+    check("freeFlightRoamsATinyScreen", freeFlightRoamsATinyScreen)
+
+    func flowerSeekersReachLowHeads() throws {
+        // A butterfly flying at a flower (.approach) reaches its head right down to the shortest, one-row
+        // flowers: the ground doesn't push it off. Within half a cell of the head, from anywhere above.
+        let field = Terrain.single(width: 1800, height: 1169)
+        var head: SIMD2<Double>? = nil
+        for seed in UInt64(1)...UInt64(20) where head == nil {
+            let land = Meadowland(random: WebRandom(seed: seed))
+            land.layout(terrain: field, cell: meadowCell)
+            if let i = land.flowers.indices.first(where: { land.flowers[$0].kind != .grass && land.flowers[$0].rows == 1 }) {
+                head = land.head(i)
+            }
+        }
+        guard let h = head else { throw CheckFailure(detail: "no one-row flower in 20 layouts") }
+        try expectClose(h.y, 1169 - 19, tol: 1e-9, "a one-row head's height")
+        for kind in ButterflyKind.allCases {
+            for seed in UInt64(1)...UInt64(5) {
+                let random = WebRandom(seed: 200 + seed)
+                let x0: Double = random.range(100, 1700), y0: Double = random.range(100, 700)
+                let b = Butterfly(kind: kind, x: x0, y: y0, random: random)
+                b.state = .approach
+                let log = flyLog(b, seconds: 15, terrain: field, random: random) { _ in h }
+                var closest: Double = .infinity
+                for k in 0..<log.count {
+                    let d: Double = simd_length(SIMD2<Double>(log.x[k], log.y[k]) - h)
+                    closest = min(closest, d)
+                    let p = SIMD2<Double>(log.x[k], log.y[k])
+                    let out: Double = simd_length(p - field.nearestInside(p))
+                    try expect(out <= b.wingspan, "\(kind) seed \(seed): \(out) pt outside at step \(k)")
+                }
+                try expect(closest <= 0.5 * Double(meadowCell.width), "\(kind) seed \(seed): closest \(closest) pt to a one-row head at \(h)")
+            }
+        }
+    }
+    check("flowerSeekersReachLowHeads", flowerSeekersReachLowHeads)
+
+    func badInputStaysFinite() throws {
+        // A non-finite position, target or wind never crashes the breeze or leaves a butterfly non-finite.
+        let bad: [Double] = [.nan, .infinity, -.infinity]
+        let terrain = Terrain.single(width: 1800, height: 1169)
+        let breeze = Breeze(bounds: terrain.bounds, cell: meadowCell)
+        let random = WebRandom(seed: 300)
+        for _ in 0..<600 { breeze.step(flightDt, random: random) }
+        for v in bad {
+            for (x, y) in [(v, 10.0), (10.0, v), (v, v)] {
+                let w: SIMD2<Double> = breeze.sample(x, y)
+                try expect(w.x.isFinite && w.y.isFinite, "sample(\(x), \(y)) = \(w)")
+            }
+        }
+        func finite(_ b: Butterfly) -> Bool {
+            let parts: [Double] = [b.x, b.y, b.vx, b.vy, b.heading, b.phase, b.bank, b.pitch, b.stroke]
+            return parts.allSatisfy { $0.isFinite }
+        }
+        for kind in ButterflyKind.allCases {
+            for v in bad {
+                let targets: [SIMD2<Double>] = [SIMD2<Double>(v, 3), SIMD2<Double>(900, v), SIMD2<Double>(v, v)]
+                for target in targets {
+                    let b = Butterfly(kind: kind, x: 900, y: 500, random: random)
+                    for step in 0..<120 {
+                        b.fly(flightDt, target: step % 2 == 0 ? target : nil, breeze: breeze, terrain: terrain, random: random)
+                        try expect(finite(b), "\(kind) target \(target) step \(step): not finite")
+                    }
+                    try expect(terrain.contains(SIMD2<Double>(b.x, b.y)), "\(kind) target \(target): left at \(b.x), \(b.y)")
+                }
+                // A position poisoned from outside: the next step puts it back where it last was finite.
+                let b = Butterfly(kind: kind, x: 900, y: 500, random: random)
+                for _ in 0..<30 { b.fly(flightDt, target: nil, breeze: breeze, terrain: terrain, random: random) }
+                b.x = v
+                b.y = v
+                for step in 0..<120 {
+                    b.fly(flightDt, target: nil, breeze: breeze, terrain: terrain, random: random)
+                    try expect(finite(b), "\(kind) poisoned with \(v), step \(step): not finite")
+                }
+                try expect(terrain.contains(SIMD2<Double>(b.x, b.y)), "\(kind) poisoned with \(v): at \(b.x), \(b.y)")
+            }
+        }
+    }
+    check("badInputStaysFinite", badInputStaysFinite)
+
     func flightPathsMatchMeasurements() throws {
-        // Cabbage white: turning acceleration about equal to forward acceleration (7.6 vs 8.5 m/s², Jantzen & Eisner 2008).
-        let rw = WebRandom(seed: 90)
-        let white = flyLog(Butterfly(kind: .cabbageWhite, x: skyStart.x, y: skyStart.y, random: rw), seconds: 120, random: rw)
-        let ratio: Double = white.normalOverTangential
-        try expectClose(ratio, 0.9, tol: 0.35, "white a_n / a_t")
+        // Cabbage white: turning acceleration about equal to forward acceleration (7.6 vs 8.5 m/s², Jantzen & Eisner 2008),
+        // on the per-beat-averaged velocity so the bob and the lurch inside a beat don't count. The zig-zag is what
+        // turns it: the same white without jinks falls well short.
+        for seed in UInt64(88)...UInt64(92) {
+            let rw = WebRandom(seed: seed)
+            let white = Butterfly(kind: .cabbageWhite, x: skyStart.x, y: skyStart.y, random: rw)
+            let ratio: Double = flyLog(white, seconds: 120, random: rw).perBeatNormalOverTangential
+            try expectClose(ratio, 0.9, tol: 0.35, "seed \(seed): white a_n / a_t, per beat")
+            let rs = WebRandom(seed: seed)
+            let calm = Butterfly(kind: .cabbageWhite, x: skyStart.x, y: skyStart.y, random: rs)
+            calm.jinkFactor = 0
+            let still: Double = flyLog(calm, seconds: 120, random: rs).perBeatNormalOverTangential
+            try expect(still < 0.55, "seed \(seed): a white without jinks still has a_n / a_t \(still)")
+        }
         // Monarch: flap bouts and glides at 3.6:1 (Gibo).
         let rm = WebRandom(seed: 91)
         let monarch = flyLog(Butterfly(kind: .monarch, x: skyStart.x, y: skyStart.y, random: rm), seconds: 120, random: rm)
