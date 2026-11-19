@@ -65,7 +65,11 @@ func renderChecks() {
     check("stillHasWake") {
         let p = pixels(try still())
         // Wake dots are the cyan theme colour blended over black: blue-green high, red low.
-        let wake = stride(from: 0, to: p.count, by: 4).filter { p[$0 + 2] > 60 && p[$0 + 1] > 50 && Int(p[$0]) * 2 < Int(p[$0 + 2]) }.count
+        var wake = 0
+        for i in stride(from: 0, to: p.count, by: 4) {
+            let r = Int(p[i]), g = Int(p[i + 1]), b = Int(p[i + 2])
+            if b > 60 && g > 50 && r * 2 < b { wake += 1 }
+        }
         try expect(wake > 50, "wake pixels \(wake)")
     }
     check("stillLightBackground") {

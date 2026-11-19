@@ -58,7 +58,7 @@ func terrainChecks() {
     }
     check("terrainEdgesExposedOnly") {
         let h = Terrain(rects: [userMonitor, userLaptop])
-        let perimeter = 2 * (2560 + 1440) + 2 * (1800 + 1169.0)
+        let perimeter: Double = 2.0 * (2560.0 + 1440.0) + 2.0 * (1800.0 + 1169.0)
         let total = h.edges.reduce(0) { $0 + $1.length }
         try expectClose(total, perimeter - 2 * 1800, tol: 1e-6, "exposed length")
     }
