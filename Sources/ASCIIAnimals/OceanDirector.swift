@@ -114,8 +114,8 @@ final class OceanDirector {
         s.viewport.encode(habitat: sim, viewport: s.oceanRect, theme: theme, reveal: reveal, target: drawable.texture, commandBuffer: cb)
         cb.present(drawable)
         let first = !s.presented
-        cb.addScheduledHandler { _ in
-            if first { DispatchQueue.main.async { [weak self] in self?.firstFrame(s) } }
+        cb.addScheduledHandler { [weak self] _ in
+            if first { DispatchQueue.main.async { self?.firstFrame(s) } }
         }
         cb.commit()
         if s.stillPending {

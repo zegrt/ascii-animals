@@ -19,6 +19,7 @@ enum AboutWindow {
         let light = ProcessInfo.processInfo.environment["ASCII_ANIMALS_SNAPSHOT_LIGHT"] != nil
         NSApp.appearance = NSAppearance(named: light ? .aqua : .darkAqua)
         let model = AboutModel()
+        model.habitat = OceanKit.Settings.defaults.habitat
         do {
             guard let device = MTLCreateSystemDefaultDevice() else { throw RenderError(description: "no Metal device") }
             var s = OceanKit.Settings.defaults
@@ -48,6 +49,8 @@ final class AboutModel: ObservableObject {
     @Published var checking = false
     /// The snapshot's stand-in for the live strip.
     @Published var still: CGImage?
+    /// What the strip shows, for its accessibility label.
+    @Published var habitat: HabitatKind = .ocean
     var checkForUpdates: () -> Void = {}
 }
 
@@ -70,8 +73,8 @@ final class AboutController: NSObject, NSWindowDelegate {
     }
 
     func show() {
+        let s = app.store.settings
         if window == nil {
-            let s = app.store.settings
             if let r = app.director?.renderer {
                 ocean = LiveOceanView(renderer: r, settings: s, theme: OceanDirector.currentTheme(s), zoom: AboutView.bannerZoom, seed: 5)
             }
@@ -89,8 +92,11 @@ final class AboutController: NSObject, NSWindowDelegate {
             w.center()
             window = w
         }
+        model.habitat = s.habitat
         if let ocean {
-            ocean.setTheme(OceanDirector.currentTheme(app.store.settings))
+            // The habitat or line-up may have changed since the window was made.
+            ocean.setTheme(OceanDirector.currentTheme(s))
+            ocean.rebuild(s)
             ocean.start()
         }
         model.checking = app.updates.state == .checking
@@ -207,7 +213,9 @@ struct AboutView: View {
         }
         .frame(width: Self.width, height: Self.bannerHeight)
         .clipped()
-        .accessibilityLabel("A live ocean: move the pointer over it, or click for a splash")
+        .accessibilityLabel(model.habitat == .web
+            ? "A live web: move the pointer over it, or click to drop a fly"
+            : "A live ocean: move the pointer over it, or click for a splash")
     }
 }
 
