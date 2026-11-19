@@ -55,9 +55,18 @@ public enum Handover {
         bundleID == animalsBundleID && environment["ASCII_ANIMALS_NO_HANDOVER"] == nil
     }
 
-    /// An app opened while ASCII Animals runs: if it's ASCII Sharks (at login, or out of habit), it is quit.
-    public static func shouldQuit(launched bundleID: String?, enabled: Bool) -> Bool {
-        enabled && bundleID == sharksBundleID
+    /// Apps that appeared in the running list while ASCII Animals runs (KVO on `runningApplications`:
+    /// Sharks is LSUIElement, and macOS posts no did-launch notification for those). If one is ASCII
+    /// Sharks (its login item, or opened by habit) it is quit, unless a quit is already under way.
+    public static func shouldQuit(inserted bundleIDs: [String?], enabled: Bool, quitting: Bool) -> Bool {
+        enabled && !quitting && bundleIDs.contains(sharksBundleID)
+    }
+
+    /// Whether the hand-over may add ASCII Animals as a login item: not from a disk image (read-only
+    /// volume) or a translocated or bare copy, where it would point at the wrong place. An app folder
+    /// the user can't write to (an admin-installed copy) is fine.
+    public static func canAddLoginItem(bundlePath: String, onReadOnlyVolume: Bool) -> Bool {
+        !onReadOnlyVolume && SelfUpdate.blocker(bundlePath: bundlePath) == nil
     }
 
     public static func plan(_ f: HandoverFacts) -> [HandoverStep] {

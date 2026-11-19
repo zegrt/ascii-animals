@@ -187,9 +187,19 @@ func handoverChecks() {
         try expect(Handover.sharksUninstallArguments == ["--uninstall", "--yes"], "Sharks 2.3's scripted uninstall")
     }
     check("handoverQuitsSharksWhenItOpens") {
-        try expect(Handover.shouldQuit(launched: Handover.sharksBundleID, enabled: true), "Sharks opened")
-        try expect(!Handover.shouldQuit(launched: Handover.sharksBundleID, enabled: false), "a dev run touched Sharks")
-        try expect(!Handover.shouldQuit(launched: "com.apple.Safari", enabled: true), "another app")
-        try expect(!Handover.shouldQuit(launched: nil, enabled: true), "no bundle ID")
+        let sharks: String? = Handover.sharksBundleID
+        try expect(Handover.shouldQuit(inserted: [sharks], enabled: true, quitting: false), "Sharks opened")
+        try expect(Handover.shouldQuit(inserted: ["com.apple.Safari", nil, sharks], enabled: true, quitting: false), "among others")
+        try expect(!Handover.shouldQuit(inserted: [sharks], enabled: true, quitting: true), "re-entered a quit under way")
+        try expect(!Handover.shouldQuit(inserted: [sharks], enabled: false, quitting: false), "a dev run touched Sharks")
+        try expect(!Handover.shouldQuit(inserted: ["com.apple.Safari", nil], enabled: true, quitting: false), "another app")
+        try expect(!Handover.shouldQuit(inserted: [], enabled: true, quitting: false), "nothing new")
+    }
+    check("handoverLoginItemOnlyFromAnInstalledCopy") {
+        try expect(Handover.canAddLoginItem(bundlePath: "/Applications/ASCII Animals.app", onReadOnlyVolume: false), "Applications")
+        try expect(Handover.canAddLoginItem(bundlePath: "/Users/x/Applications/ASCII Animals.app", onReadOnlyVolume: false), "~/Applications")
+        try expect(!Handover.canAddLoginItem(bundlePath: "/Volumes/ASCII Animals/ASCII Animals.app", onReadOnlyVolume: true), "disk image")
+        try expect(!Handover.canAddLoginItem(bundlePath: "/private/var/folders/ab/T/AppTranslocation/1234/d/ASCII Animals.app", onReadOnlyVolume: false), "translocated")
+        try expect(!Handover.canAddLoginItem(bundlePath: "/Users/x/repo/.build/release", onReadOnlyVolume: false), "bare binary")
     }
 }

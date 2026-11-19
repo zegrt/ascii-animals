@@ -75,24 +75,28 @@ enum SharksHandover {
 
     // MARK: While running
 
-    private static var watcher: NSObjectProtocol?
+    private static var watcher: NSKeyValueObservation?
     private static var quitting = false
 
     /// From launch on: ASCII Sharks opening (its login item, or out of habit) is asked to quit at once,
-    /// and if it won't, the same alert as at launch.
+    /// and if it won't, the same alert as at launch. KVO on the running list, not the did-launch
+    /// notification, which macOS doesn't post for an LSUIElement app like Sharks.
     static func watch() {
         guard enabled, watcher == nil else { return }
-        watcher = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { n in
-            let launched = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-            guard Handover.shouldQuit(launched: launched?.bundleIdentifier, enabled: true), !quitting else { return }
-            quitting = true
-            Log.write("hand-over: ASCII Sharks opened; asking it to quit")
-            launched?.terminate()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                if !running().isEmpty { quitSharks() }
-                quitting = false
-            }
+        watcher = NSWorkspace.shared.observe(\.runningApplications, options: [.new]) { _, change in
+            let inserted = change.newValue ?? []
+            DispatchQueue.main.async { sharksAppeared(inserted) }
+        }
+    }
+
+    private static func sharksAppeared(_ inserted: [NSRunningApplication]) {
+        guard Handover.shouldQuit(inserted: inserted.map(\.bundleIdentifier), enabled: true, quitting: quitting) else { return }
+        quitting = true
+        Log.write("hand-over: ASCII Sharks opened; asking it to quit")
+        inserted.filter { $0.bundleIdentifier == Handover.sharksBundleID }.forEach { $0.terminate() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            if !running().isEmpty { quitSharks() }
+            quitting = false
         }
     }
 
@@ -108,8 +112,10 @@ enum SharksHandover {
             + " If you keep it, ASCII Animals will close it whenever it opens."
         alert.addButton(withTitle: "Keep It")
         alert.addButton(withTitle: "Move ASCII Sharks to the Trash")
-        // Not from a disk image or a quarantined copy: a login item there would point at the wrong place.
-        let canLogin = SelfUpdater.blocker() == nil
+        // Not from a disk image or a translocated copy: a login item there would point at the wrong place.
+        let bundle = Bundle.main.bundleURL
+        let readOnly = (try? bundle.deletingLastPathComponent().resourceValues(forKeys: [.volumeIsReadOnlyKey]))?.volumeIsReadOnly == true
+        let canLogin = Handover.canAddLoginItem(bundlePath: bundle.path, onReadOnlyVolume: readOnly)
         alert.showsSuppressionButton = canLogin
         alert.suppressionButton?.title = "Open ASCII Animals at login"
         alert.suppressionButton?.state = .on
