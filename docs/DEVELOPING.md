@@ -21,6 +21,8 @@ swift run -c release OceanChecks                       # domain checks + headles
 swift run -c release OceanTool still out.png 1440x900  # --light --calm --sharks mako,tiger --seed 3
 swift run -c release OceanTool frames out/ 1080x675    # a continuous run as PNG frames
 swift run -c release OceanTool bench                   # simulation cost
+swift run -c release OceanTool bench --desk --habitat web  # CPU per second on a two-screen desk, 30 and 15 fps
+swift run -c release OceanTool bench --digest          # fingerprint of the Web's canvases: same digest, same output
 OCEAN_DEBUG=1 .build/out/Products/Release/ASCIISharks  # log power-mode decisions
 ```
 
