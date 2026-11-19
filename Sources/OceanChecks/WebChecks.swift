@@ -623,7 +623,8 @@ func webPainterChecks() {
             try expect(glyphs("x+").contains(c.glyph[i]) || c.block[i] >> 24 != 0, "fly at \(f.x), \(f.y) not drawn")
         }
     }
-    check("webPalettes") {
+    // A named local function, not a closure: CI's compiler type-checks it on its own, in time.
+    func webPalettes() throws {
         let sim = makeSim(seed: 3, rects: [CGRect(x: 0, y: 0, width: 900, height: 600)])
         for _ in 0..<60 { sim.step(OceanClock.step) }
         let vp = CGRect(x: 0, y: 0, width: 900, height: 600), cell = GridSpec.cell(forWidth: 900)
@@ -674,6 +675,7 @@ func webPainterChecks() {
         none.accentRate = 0
         try expect(accented(dark) > 0 && accented(paint(sim, vp, cell: cell, theme: none)) == 0, "accents \(accented(dark)) at rate 1")
     }
+    check("webPalettes", webPalettes)
     check("webLayoutRespectsTerrain") {
         // Ruling on Review Focus 2: on several screens every web's frame points lie on its own screen or off every
         // screen; on one screen the layout is the original's (frames may run off the page) and nothing crashes.
