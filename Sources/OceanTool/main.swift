@@ -133,9 +133,9 @@ case "bench":
                 paintT += p
                 worstPaint = max(worstPaint, p)
             }
-            print(String(format: "web %@  webs %d  weavers %d  flies %d  sim %.1f µs/step (%.2f%% of a core at 60 steps/s)  paint %.3f ms/frame (worst %.3f; clear included)  grid %dx%d",
+            print(String(format: "web %@  webs %d  weavers %d  flies %d  sim %.1f µs/step = %.3f ms per simulated second (%.2f%% of a core at 60 steps/s)  paint %.3f ms/frame (worst %.3f; clear included)  grid %dx%d",
                          light ? "light" : "dark", sim.world.webs.count, sim.world.weavers.count, sim.world.swarm.flies.count,
-                         stepT / Double(frames) / 1000, stepT / Double(frames) * 60 / 1e7, paintT / Double(frames) / 1e6, worstPaint / 1e6,
+                         stepT / Double(frames) / 1000, stepT / Double(frames) * 60 / 1e6, stepT / Double(frames) * 60 / 1e7, paintT / Double(frames) / 1e6, worstPaint / 1e6,
                          grid.cols, grid.rows))
         }
         break
