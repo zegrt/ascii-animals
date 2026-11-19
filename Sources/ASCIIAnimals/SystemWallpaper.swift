@@ -14,12 +14,12 @@ final class SystemWallpaper {
     private var pending: DispatchWorkItem?
     /// Bumped by restoreAll(); a still that finishes rendering after a restore is dropped.
     private var generation = 0
-    private let work = DispatchQueue(label: "ascii-sharks.stills", qos: .utility)
+    private let work = DispatchQueue(label: "ascii-animals.stills", qos: .utility)
 
     init(renderer: OceanRenderer) {
         self.renderer = renderer
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        stillsFolder = support.appendingPathComponent("ASCII Sharks/Stills", isDirectory: true)
+        stillsFolder = support.appendingPathComponent("ASCII Animals/Stills", isDirectory: true)
         try? FileManager.default.createDirectory(at: stillsFolder, withIntermediateDirectories: true)
         if let data = UserDefaults.standard.data(forKey: SystemWallpaper.memoryKey),
            let m = try? JSONDecoder().decode(WallpaperMemory.self, from: data) {

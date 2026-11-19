@@ -15,13 +15,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     init(app: AppDelegate) {
         self.app = app
         super.init()
-        if let image = NSImage(systemSymbolName: "fish", accessibilityDescription: "ASCII Sharks") {
+        if let image = NSImage(systemSymbolName: "fish", accessibilityDescription: "ASCII Animals") {
             image.isTemplate = true
             item.button?.image = image
         } else {
             item.button?.title = "≈"
         }
-        item.button?.toolTip = "ASCII Sharks"
+        item.button?.toolTip = "ASCII Animals"
         let menu = NSMenu()
         menu.delegate = self
         item.menu = menu
@@ -40,11 +40,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     /// The fish, with a small accent dot while an update waits.
     private func refreshIcon() {
-        guard let fish = NSImage(systemSymbolName: "fish", accessibilityDescription: "ASCII Sharks") else { return }
+        guard let fish = NSImage(systemSymbolName: "fish", accessibilityDescription: "ASCII Animals") else { return }
         guard app.updates.available != nil || app.updates.installing != nil else {
             fish.isTemplate = true
             item.button?.image = fish
-            item.button?.toolTip = "ASCII Sharks"
+            item.button?.toolTip = "ASCII Animals"
             return
         }
         let size = fish.size
@@ -69,9 +69,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             return true
         }
         badged.isTemplate = false
-        badged.accessibilityDescription = "ASCII Sharks, update available"
+        badged.accessibilityDescription = "ASCII Animals, update available"
         item.button?.image = badged
-        item.button?.toolTip = "ASCII Sharks — an update is available"
+        item.button?.toolTip = "ASCII Animals — an update is available"
     }
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -93,7 +93,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             let it = NSMenuItem(title: "Installing \(update.version)…", action: nil, keyEquivalent: "")
             it.isEnabled = false
             it.image = symbol("arrow.down.circle")
-            subtitle(it, "ASCII Sharks restarts when it's done")
+            subtitle(it, "ASCII Animals restarts when it's done")
             menu.addItem(it)
             notices = true
         }
@@ -156,7 +156,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         add(menu, "Open at Login", #selector(toggleLogin), state: LoginItem.isEnabled)
         menu.addItem(.separator())
 
-        add(menu, "About ASCII Sharks", #selector(openAbout), symbol: "info.circle")
+        add(menu, "About ASCII Animals", #selector(openAbout), symbol: "info.circle")
         add(menu, app.updates.state == .checking ? "Checking for Updates…" : "Check for Updates…",
             app.updates.state == .checking ? nil : #selector(checkUpdates), symbol: "arrow.triangle.2.circlepath")
         let help = NSMenu()
@@ -168,11 +168,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         add(help, "Copy Diagnostics", #selector(copyDiagnostics), symbol: "doc.on.clipboard")
             .toolTip = "Version, macOS, displays and settings, for pasting into a message."
         help.addItem(.separator())
-        add(help, "Uninstall ASCII Sharks…", #selector(uninstall), symbol: "trash")
+        add(help, "Uninstall ASCII Animals…", #selector(uninstall), symbol: "trash")
             .toolTip = "Puts your wallpaper back and removes the app and everything it saved."
         submenu(menu, "Help", symbol: "questionmark.circle", help)
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit ASCII Sharks", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit ASCII Animals", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quit.image = symbol("power")
         menu.addItem(quit)
     }

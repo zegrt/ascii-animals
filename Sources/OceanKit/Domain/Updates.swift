@@ -84,7 +84,7 @@ public enum SelfUpdate {
         guard bundlePath.hasSuffix(".app") else { return "This isn't an installed copy of the app." }
         // macOS runs a quarantined app from a random read-only copy until it's moved.
         if bundlePath.contains("/AppTranslocation/") {
-            return "macOS is running ASCII Sharks from a temporary copy. Move it into Applications, open it from there, and try again."
+            return "macOS is running ASCII Animals from a temporary copy. Move it into Applications, open it from there, and try again."
         }
         return nil
     }

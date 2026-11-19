@@ -14,9 +14,9 @@ enum AboutWindow {
     }
 
     /// Debug: render to a PNG (no Screen Recording needed). `--snapshot-about <png>`
-    /// `ASCII_SHARKS_SNAPSHOT_LIGHT=1` snapshots the light appearance.
+    /// `ASCII_ANIMALS_SNAPSHOT_LIGHT=1` snapshots the light appearance.
     static func snapshot(to url: URL) {
-        let light = ProcessInfo.processInfo.environment["ASCII_SHARKS_SNAPSHOT_LIGHT"] != nil
+        let light = ProcessInfo.processInfo.environment["ASCII_ANIMALS_SNAPSHOT_LIGHT"] != nil
         NSApp.appearance = NSAppearance(named: light ? .aqua : .darkAqua)
         let model = AboutModel()
         do {
@@ -81,7 +81,7 @@ final class AboutController: NSObject, NSWindowDelegate {
             let w = NSWindow(contentRect: host.frame, styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
             w.titlebarAppearsTransparent = true
             w.titleVisibility = .hidden
-            w.title = "About ASCII Sharks"
+            w.title = "About ASCII Animals"
             w.isMovableByWindowBackground = true
             w.isReleasedWhenClosed = false
             w.delegate = self
@@ -126,7 +126,7 @@ struct AboutView: View {
                     .padding(.top, -58)
                     .accessibilityHidden(true)
 
-                Text("ASCII Sharks")
+                Text("ASCII Animals")
                     .font(.system(size: 20, weight: .semibold))
                     .padding(.top, 10)
                 Text("Version \(AppInfo.version) (\(AppInfo.build))")
@@ -151,7 +151,7 @@ struct AboutView: View {
                 Divider().padding(.horizontal, 28).padding(.vertical, 16)
 
                 VStack(spacing: 5) {
-                    Text(.init("The ocean is [ascii-sharks](\(AppInfo.originalURL.absoluteString)) by [@stackedlol](https://github.com/stackedlol)."))
+                    Text(.init("The Ocean comes from [ascii-sharks](\(AppInfo.originalURL.absoluteString)) by [@stackedlol](https://github.com/stackedlol)."))
                     Text("Set in Geist Mono, under the SIL Open Font License.")
                 }
                 .font(.footnote)

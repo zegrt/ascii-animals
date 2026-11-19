@@ -66,7 +66,7 @@ final class UpdateService: NSObject, UNUserNotificationCenterDelegate {
         if userInitiated { state = .checking }
         var req = URLRequest(url: AppInfo.latestAPI, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        req.setValue("ASCIISharks/\(AppInfo.version)", forHTTPHeaderField: "User-Agent")
+        req.setValue("ASCIIAnimals/\(AppInfo.version)", forHTTPHeaderField: "User-Agent")
         if let etag = defaults.string(forKey: UpdateService.etagKey), defaults.data(forKey: UpdateService.cachedKey) != nil {
             req.setValue(etag, forHTTPHeaderField: "If-None-Match")
         }
@@ -99,15 +99,15 @@ final class UpdateService: NSObject, UNUserNotificationCenterDelegate {
         if installing != nil { return }
         guard let r = UpdateFeed.parse(data), UpdatePolicy.isNewer(r.version, than: AppInfo.version) else {
             state = .upToDate
-            if userInitiated { alert(title: "You're up to date", text: "ASCII Sharks \(AppInfo.version) is the latest version.") }
+            if userInitiated { alert(title: "You're up to date", text: "ASCII Animals \(AppInfo.version) is the latest version.") }
             return
         }
         state = .available(r)
         if userInitiated {
             NSApp.activate(ignoringOtherApps: true)
             let a = NSAlert()
-            a.messageText = "ASCII Sharks \(r.version) is available"
-            a.informativeText = "You have \(AppInfo.version). It installs in a few seconds, then ASCII Sharks restarts."
+            a.messageText = "ASCII Animals \(r.version) is available"
+            a.informativeText = "You have \(AppInfo.version). It installs in a few seconds, then ASCII Animals restarts."
             a.addButton(withTitle: "Install and Restart")
             a.addButton(withTitle: "Later")
             if a.runModal() == .alertFirstButtonReturn { install() }
@@ -163,7 +163,7 @@ final class UpdateService: NSObject, UNUserNotificationCenterDelegate {
         defaults.removeObject(forKey: UpdateService.autoInstalledKey)
         guard canNotify, AppVersion(v) == AppVersion(AppInfo.version) else { return }
         let content = UNMutableNotificationContent()
-        content.title = "ASCII Sharks updated to \(v)"
+        content.title = "ASCII Animals updated to \(v)"
         content.body = "What's new is on GitHub."
         content.userInfo = ["kind": "updated"]
         post(content, id: "updated-\(v)") { _ in }
@@ -172,7 +172,7 @@ final class UpdateService: NSObject, UNUserNotificationCenterDelegate {
     private func offerDownload(_ r: LatestRelease, _ why: String) {
         NSApp.activate(ignoringOtherApps: true)
         let a = NSAlert()
-        a.messageText = "Couldn't install ASCII Sharks \(r.version)"
+        a.messageText = "Couldn't install ASCII Animals \(r.version)"
         a.informativeText = "\(why)\n\nYour current version is untouched. You can download the update and install it by hand."
         a.addButton(withTitle: "Download")
         a.addButton(withTitle: "Cancel")
@@ -182,8 +182,8 @@ final class UpdateService: NSObject, UNUserNotificationCenterDelegate {
     private func notifyOnce(_ r: LatestRelease) {
         guard canNotify, defaults.string(forKey: UpdateService.notifiedKey) != r.tag else { return }
         let content = UNMutableNotificationContent()
-        content.title = "ASCII Sharks \(r.version) is available"
-        content.body = "Click to install it. ASCII Sharks restarts in a few seconds."
+        content.title = "ASCII Animals \(r.version) is available"
+        content.body = "Click to install it. ASCII Animals restarts in a few seconds."
         post(content, id: "update-\(r.tag)") { [weak self] in
             if $0 { self?.defaults.set(r.tag, forKey: UpdateService.notifiedKey) }
         }

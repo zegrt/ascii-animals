@@ -1,4 +1,4 @@
-// ASCII Sharks: a live desktop wallpaper. Composition root.
+// ASCII Animals: a live desktop wallpaper. Composition root.
 import AppKit
 import Metal
 import OceanKit
@@ -156,7 +156,7 @@ if let i = CommandLine.arguments.firstIndex(of: "--snapshot-settings"), i + 1 < 
     exit(0)
 }
 
-// `ASCIISharks --uninstall [--yes]`: scripted removal (Tools/uninstall.sh).
+// `ASCIIAnimals --uninstall [--yes]`: scripted removal (Tools/uninstall.sh).
 // A running copy is asked to quit first so it puts the wallpaper back.
 if CommandLine.arguments.contains("--uninstall") {
     app.setActivationPolicy(.accessory)
@@ -171,7 +171,7 @@ if CommandLine.arguments.contains("--uninstall") {
         let wp = renderer.map { SystemWallpaper(renderer: $0) }
         wp?.restoreAll()
         let problems = Uninstaller.run(app: nil)
-        print(problems.isEmpty ? "ASCII Sharks uninstalled." : "Uninstalled, except: \(problems.joined(separator: "; "))")
+        print(problems.isEmpty ? "ASCII Animals uninstalled." : "Uninstalled, except: \(problems.joined(separator: "; "))")
     }
     exit(0)
 }

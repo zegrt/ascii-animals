@@ -9,9 +9,9 @@ enum AppInfo {
     static let legalName = "XERO WORKS PRIVATE LIMITED"
     static let copyright = "© 2026 XERO WORKS PRIVATE LIMITED"
     static let companyURL = URL(string: "https://xeroworks.org")!
-    static let repoURL = URL(string: "https://github.com/zegrt/ascii-sharks-wallpaper")!
-    static let releasesURL = URL(string: "https://github.com/zegrt/ascii-sharks-wallpaper/releases")!
-    static let issuesURL = URL(string: "https://github.com/zegrt/ascii-sharks-wallpaper/issues/new")!
+    static let repoURL = URL(string: "https://github.com/zegrt/ascii-animals")!
+    static let releasesURL = URL(string: "https://github.com/zegrt/ascii-animals/releases")!
+    static let issuesURL = URL(string: "https://github.com/zegrt/ascii-animals/issues/new")!
     static let originalURL = URL(string: "https://github.com/stackedlol/ascii-sharks")!
-    static let latestAPI = URL(string: "https://api.github.com/repos/zegrt/ascii-sharks-wallpaper/releases/latest")!
+    static let latestAPI = URL(string: "https://api.github.com/repos/zegrt/ascii-animals/releases/latest")!
 }

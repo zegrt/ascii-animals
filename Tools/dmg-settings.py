@@ -1,5 +1,5 @@
 # dmgbuild settings for the drag-to-Applications window.
-# Used by Tools/package.sh:  dmgbuild -s Tools/dmg-settings.py -D app=... "ASCII Sharks" out.dmg
+# Used by Tools/package.sh:  dmgbuild -s Tools/dmg-settings.py -D app=... "ASCII Animals" out.dmg
 import os
 
 app = defines["app"]  # noqa: F821  (provided by dmgbuild)

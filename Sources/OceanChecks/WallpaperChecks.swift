@@ -2,7 +2,7 @@ import Foundation
 import OceanKit
 
 func wallpaperChecks() {
-    let stills = URL(fileURLWithPath: "/tmp/ascii-sharks-check/Stills", isDirectory: true)
+    let stills = URL(fileURLWithPath: "/tmp/ascii-animals-check/Stills", isDirectory: true)
     let ours = stills.appendingPathComponent("still-A-1.png")
     let a = WallpaperEntry(url: URL(fileURLWithPath: "/System/Library/Desktop Pictures/A.heic"), scaling: 3, allowClipping: true, fillColor: [0, 0, 0, 1])
     let b = WallpaperEntry(url: URL(fileURLWithPath: "/Users/me/Pictures/B.jpg"), scaling: nil, allowClipping: nil, fillColor: nil)
@@ -15,7 +15,7 @@ func wallpaperChecks() {
     check("wallpaperSymlinkedStillIsOurs") {
         // /tmp is a symlink to /private/tmp on macOS.
         var m = WallpaperMemory()
-        let viaPrivate = URL(fileURLWithPath: "/private/tmp/ascii-sharks-check/Stills/still-A-2.png")
+        let viaPrivate = URL(fileURLWithPath: "/private/tmp/ascii-animals-check/Stills/still-A-2.png")
         _ = m.decide(screen: "S", current: WallpaperEntry(url: viaPrivate), stillsFolder: stills)
         try expect(m.original(for: "S") == nil, "symlinked still recorded as original")
     }

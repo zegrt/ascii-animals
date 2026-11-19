@@ -13,7 +13,7 @@ enum SelfUpdater {
         init(_ d: String) { description = d }
     }
 
-    static let repoPath = "zegrt/ascii-sharks-wallpaper"
+    static let repoPath = "zegrt/ascii-animals"
     private static let work = DispatchQueue(label: "SelfUpdater")
 
     /// Why this copy can't replace itself, or nil when it can.
@@ -22,11 +22,11 @@ enum SelfUpdater {
         if let why = SelfUpdate.blocker(bundlePath: bundle.path) { return why }
         let folder = bundle.deletingLastPathComponent()
         if (try? folder.resourceValues(forKeys: [.volumeIsReadOnlyKey]))?.volumeIsReadOnly == true {
-            return "ASCII Sharks is running from a disk image. Drag it into Applications, open it from there, and try again."
+            return "ASCII Animals is running from a disk image. Drag it into Applications, open it from there, and try again."
         }
         let fm = FileManager.default
         guard fm.isWritableFile(atPath: folder.path), fm.isWritableFile(atPath: bundle.path) else {
-            return "ASCII Sharks can't replace itself in “\(folder.lastPathComponent)” with your account's permissions."
+            return "ASCII Animals can't replace itself in “\(folder.lastPathComponent)” with your account's permissions."
         }
         return nil
     }
@@ -49,7 +49,7 @@ enum SelfUpdater {
             return finish(.failure(Failure("Couldn't make a folder for the download: \(error.localizedDescription)")))
         }
         var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 60)
-        req.setValue("ASCIISharks/\(AppInfo.version)", forHTTPHeaderField: "User-Agent")
+        req.setValue("ASCIIAnimals/\(AppInfo.version)", forHTTPHeaderField: "User-Agent")
         URLSession.shared.downloadTask(with: req) { file, response, error in
             // `file` is deleted when this returns, so keep it first.
             let zip = temp.appendingPathComponent("update.zip")

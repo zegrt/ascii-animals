@@ -34,17 +34,17 @@ enum OnboardingController {
     static func statusMenuOpened() { current?.statusMenuOpened() }
 
     /// Debug: render to a PNG (no Screen Recording needed). `--snapshot-onboarding <png>`
-    /// `ASCII_SHARKS_ONBOARDING_STEP=0…5` picks the step (default 0); `ASCII_SHARKS_SNAPSHOT_LIGHT=1` the light look.
+    /// `ASCII_ANIMALS_ONBOARDING_STEP=0…5` picks the step (default 0); `ASCII_ANIMALS_SNAPSHOT_LIGHT=1` the light look.
     static func snapshot(to url: URL) {
         let env = ProcessInfo.processInfo.environment
-        let beat = OnboardingBeat(rawValue: Int(env["ASCII_SHARKS_ONBOARDING_STEP"] ?? "") ?? 0) ?? .hello
+        let beat = OnboardingBeat(rawValue: Int(env["ASCII_ANIMALS_ONBOARDING_STEP"] ?? "") ?? 0) ?? .hello
         let size = CGSize(width: 1512, height: 982)
         let scale: CGFloat = 2
         do {
             guard let device = MTLCreateSystemDefaultDevice() else { throw RenderError(description: "no Metal device") }
             let renderer = try OceanRenderer(device: device)
             var s = OceanKit.Settings.defaults
-            if env["ASCII_SHARKS_SNAPSHOT_LIGHT"] != nil { s.appearance = .light }
+            if env["ASCII_ANIMALS_SNAPSHOT_LIGHT"] != nil { s.appearance = .light }
             let theme = ThemeParams.make(s, systemIsDark: true, accent: SIMD3(0.2, 0.5, 1))
             let vp = try renderer.makeViewport(pointSize: size, scale: scale)
             let world = World(sharks: s.sharks, rng: Rng(seed: 11))
@@ -129,7 +129,7 @@ enum OnboardingBeat: Int, CaseIterable {
         case .splash: return "Anywhere in the water."
         case .menu:
             return iconHidden
-                ? "The menu bar icon is hidden. Open ASCII Sharks again any time to get Settings."
+                ? "The menu bar icon is hidden. Open ASCII Animals again any time to get Settings."
                 : "Click the fish in the menu bar for line-ups, looks and pause."
         case .choose: return "Pick a look and a line-up. Both can change later in Settings."
         case .dive: return "It swims behind your windows from now on."
@@ -814,7 +814,7 @@ private struct MenuCallout: View {
                     .fill(accent.opacity(0.9))
                     .frame(width: 5, height: 5)
                     .position(x: rect.midX, y: top + 124)
-                Text("ASCII Sharks")
+                Text("ASCII Animals")
                     .font(UIFonts.swiftUI(12, weight: 500))
                     .kerning(0.5)
                     .foregroundStyle(accent)

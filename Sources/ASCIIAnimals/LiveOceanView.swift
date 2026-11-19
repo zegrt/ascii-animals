@@ -76,7 +76,7 @@ final class LiveOceanView: NSView {
                 viewport = try renderer.makeViewport(pointSize: size, scale: scale)
             }
         } catch {
-            NSLog("ASCII Sharks: UI ocean viewport failed: %@", "\(error)")
+            NSLog("ASCII Animals: UI ocean viewport failed: %@", "\(error)")
             return
         }
         let first = world.width == 0

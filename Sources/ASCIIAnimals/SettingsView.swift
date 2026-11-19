@@ -27,9 +27,9 @@ final class SettingsModel: ObservableObject {
             self.preview.request(self.s)
         }
         // The settings snapshot is captured straight away, so render its preview in line.
-        // ASCII_SHARKS_SNAPSHOT_LIGHT=1 snapshots the light appearance.
+        // ASCII_ANIMALS_SNAPSHOT_LIGHT=1 snapshots the light appearance.
         if CommandLine.arguments.contains("--snapshot-settings") {
-            if ProcessInfo.processInfo.environment["ASCII_SHARKS_SNAPSHOT_LIGHT"] != nil {
+            if ProcessInfo.processInfo.environment["ASCII_ANIMALS_SNAPSHOT_LIGHT"] != nil {
                 NSApp.appearance = NSAppearance(named: .aqua)
             }
             preview.request(s, immediately: true)
@@ -459,7 +459,7 @@ private struct AppSection: View {
             }
             Toggle(isOn: model.binding(\.showMenuBarIcon)) {
                 Text("Show in the menu bar")
-                Text("When it's hidden, open ASCII Sharks again to get back to Settings.")
+                Text("When it's hidden, open ASCII Animals again to get back to Settings.")
             }
             Toggle(isOn: model.binding(\.checkForUpdates)) {
                 Text("Check for updates daily")
@@ -480,7 +480,7 @@ private struct AppSection: View {
             Text("App")
         } footer: {
             HStack(spacing: 6) {
-                Text("ASCII Sharks \(AppInfo.version)").foregroundStyle(.secondary)
+                Text("ASCII Animals \(AppInfo.version)").foregroundStyle(.secondary)
                 Text("·").foregroundStyle(.tertiary)
                 Button("About") { (NSApp.delegate as? AppDelegate)?.showAbout() }
                 Text("·").foregroundStyle(.tertiary)
@@ -507,7 +507,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         if window == nil {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 760),
                              styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-            w.title = "ASCII Sharks Settings"
+            w.title = "ASCII Animals Settings"
             w.isReleasedWhenClosed = false
             w.delegate = self
             let host = NSHostingView(rootView: SettingsView(model: model))
@@ -515,7 +515,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             w.contentView = host
             w.setContentSize(NSSize(width: Self.width, height: min(760, (NSScreen.main?.visibleFrame.height ?? 900) - 80)))
             w.center()
-            w.setFrameAutosaveName("ASCIISharksSettings")
+            w.setFrameAutosaveName("ASCIIAnimalsSettings")
             window = w
         }
         model.setVisible(true)

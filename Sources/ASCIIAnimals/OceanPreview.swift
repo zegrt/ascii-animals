@@ -19,7 +19,7 @@ final class OceanPreview: ObservableObject {
         var accent: SIMD3<Float>
     }
 
-    private let work = DispatchQueue(label: "ascii-sharks.preview", qos: .userInitiated)
+    private let work = DispatchQueue(label: "ascii-animals.preview", qos: .userInitiated)
     private var ownRenderer: OceanRenderer?
     private var pending: DispatchWorkItem?
     private var lastKey: Key?
@@ -86,7 +86,7 @@ final class OceanPreview: ObservableObject {
             return try StillRenderer.render(settings: key.settings, size: Self.renderSize, scale: 1, warmup: 5,
                                             systemIsDark: key.dark, accent: key.accent, seed: 3, renderer: renderer)
         } catch {
-            NSLog("ASCII Sharks preview failed: %@", "\(error)")
+            NSLog("ASCII Animals preview failed: %@", "\(error)")
             return nil
         }
     }

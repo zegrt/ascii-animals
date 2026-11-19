@@ -3,13 +3,13 @@ import OceanKit
 
 /// Shape of GitHub's releases/latest payload (fields we read), from the real v2.1 release.
 private let latestJSON = #"""
-{"tag_name":"v2.1","name":"ASCII Sharks 2.1 — one ocean across your displays","draft":false,"prerelease":false,
- "html_url":"https://github.com/zegrt/ascii-sharks-wallpaper/releases/tag/v2.1",
+{"tag_name":"v2.1","name":"ASCII Animals 2.1 — one ocean across your displays","draft":false,"prerelease":false,
+ "html_url":"https://github.com/zegrt/ascii-animals/releases/tag/v2.1",
  "body":"### New in 2.1\n- One ocean across your displays.",
  "assets":[{"name":"notes.txt","browser_download_url":"https://example.com/notes.txt"},
-           {"name":"ASCII-Sharks.dmg","browser_download_url":"https://github.com/zegrt/ascii-sharks-wallpaper/releases/download/v2.1/ASCII-Sharks.dmg",
+           {"name":"ASCII-Animals.dmg","browser_download_url":"https://github.com/zegrt/ascii-animals/releases/download/v2.1/ASCII-Animals.dmg",
             "digest":"sha256:1111111111111111111111111111111111111111111111111111111111111111"},
-           {"name":"ASCII-Sharks.zip","browser_download_url":"https://github.com/zegrt/ascii-sharks-wallpaper/releases/download/v2.1/ASCII-Sharks.zip",
+           {"name":"ASCII-Animals.zip","browser_download_url":"https://github.com/zegrt/ascii-animals/releases/download/v2.1/ASCII-Animals.zip",
             "digest":"sha256:856A8D65D0009087ED86532D96B8547291F32D89C55ECED3EEFF7E7B8216AEE5"}]}
 """#
 
@@ -26,10 +26,10 @@ func appChecks() {
     check("feedParsesRealPayload") {
         guard let r = UpdateFeed.parse(Data(latestJSON.utf8)) else { throw CheckFailure(detail: "no release") }
         try expect(r.version == AppVersion("2.1")! && r.tag == "v2.1", "version \(r.version)")
-        try expect(r.dmgURL?.lastPathComponent == "ASCII-Sharks.dmg", "dmg \(String(describing: r.dmgURL))")
+        try expect(r.dmgURL?.lastPathComponent == "ASCII-Animals.dmg", "dmg \(String(describing: r.dmgURL))")
         try expect(r.pageURL.absoluteString.hasSuffix("/tag/v2.1"), "page")
         try expect(r.notes.contains("One ocean"), "notes")
-        try expect(r.zipURL?.lastPathComponent == "ASCII-Sharks.zip", "zip \(String(describing: r.zipURL))")
+        try expect(r.zipURL?.lastPathComponent == "ASCII-Animals.zip", "zip \(String(describing: r.zipURL))")
         try expect(r.zipSHA256 == "856a8d65d0009087ed86532d96b8547291f32d89c55eced3eeff7e7b8216aee5", "digest \(String(describing: r.zipSHA256))")
     }
     check("feedIgnoresBadDigests") {
@@ -41,25 +41,26 @@ func appChecks() {
     }
     check("feedWithoutZipCantSelfUpdate") {
         // Releases before 2.3 had only the DMG.
-        let old = #"{"tag_name":"v2.2","html_url":"https://github.com/zegrt/ascii-sharks-wallpaper/releases/tag/v2.2","assets":[{"name":"ASCII-Sharks.dmg","browser_download_url":"https://github.com/zegrt/ascii-sharks-wallpaper/releases/download/v2.2/ASCII-Sharks.dmg"}]}"#
+        let old = #"{"tag_name":"v2.2","html_url":"https://github.com/zegrt/ascii-animals/releases/tag/v2.2","assets":[{"name":"ASCII-Animals.dmg","browser_download_url":"https://github.com/zegrt/ascii-animals/releases/download/v2.2/ASCII-Animals.dmg"}]}"#
         guard let r = UpdateFeed.parse(Data(old.utf8)) else { throw CheckFailure(detail: "no release") }
         try expect(r.zipURL == nil && r.zipSHA256 == nil && r.dmgURL != nil, "old release")
     }
     check("selfUpdateOnlyFromAnInstalledCopy") {
-        try expect(SelfUpdate.blocker(bundlePath: "/Applications/ASCII Sharks.app") == nil, "Applications")
-        try expect(SelfUpdate.blocker(bundlePath: "/Users/x/Applications/ASCII Sharks.app") == nil, "~/Applications")
-        try expect(SelfUpdate.blocker(bundlePath: "/private/var/folders/ab/T/AppTranslocation/1234/d/ASCII Sharks.app") != nil, "translocated")
+        try expect(SelfUpdate.blocker(bundlePath: "/Applications/ASCII Animals.app") == nil, "Applications")
+        try expect(SelfUpdate.blocker(bundlePath: "/Users/x/Applications/ASCII Animals.app") == nil, "~/Applications")
+        try expect(SelfUpdate.blocker(bundlePath: "/private/var/folders/ab/T/AppTranslocation/1234/d/ASCII Animals.app") != nil, "translocated")
         try expect(SelfUpdate.blocker(bundlePath: "/Users/x/repo/.build/release") != nil, "bare binary")
     }
     check("selfUpdateTrustsOnlyThisRepo") {
-        let repo = "zegrt/ascii-sharks-wallpaper"
-        let ok = URL(string: "https://github.com/zegrt/ascii-sharks-wallpaper/releases/download/v2.3/ASCII-Sharks.dmg")!
+        let repo = "zegrt/ascii-animals"
+        let ok = URL(string: "https://github.com/zegrt/ascii-animals/releases/download/v3.0/ASCII-Animals.zip")!
         try expect(SelfUpdate.isTrustedDownload(ok, repoPath: repo), "the real one")
-        for bad in ["http://github.com/zegrt/ascii-sharks-wallpaper/releases/download/v2.3/ASCII-Sharks.dmg",
-                    "https://github.com.evil.example/zegrt/ascii-sharks-wallpaper/releases/download/v2.3/x.dmg",
-                    "https://github.com/someone/ascii-sharks-wallpaper/releases/download/v2.3/x.dmg",
-                    "https://github.com/zegrt/ascii-sharks-wallpaper-fork/releases/download/v2.3/x.dmg",
-                    "https://example.com/zegrt/ascii-sharks-wallpaper/releases/download/v2.3/x.dmg"] {
+        for bad in ["http://github.com/zegrt/ascii-animals/releases/download/v3.0/ASCII-Animals.zip",
+                    "https://github.com.evil.example/zegrt/ascii-animals/releases/download/v3.0/x.zip",
+                    "https://github.com/someone/ascii-animals/releases/download/v3.0/x.zip",
+                    "https://github.com/zegrt/ascii-animals-fork/releases/download/v3.0/x.zip",
+                    "https://example.com/zegrt/ascii-animals/releases/download/v3.0/x.zip",
+                    "https://github.com/zegrt/ascii-sharks-wallpaper/releases/download/v2.3/ASCII-Sharks.zip"] {
             try expect(!SelfUpdate.isTrustedDownload(URL(string: bad)!, repoPath: repo), bad)
         }
     }
@@ -77,7 +78,7 @@ func appChecks() {
         try expect(!go(busy: true), "user busy")
     }
     check("selfUpdateWantsTheExactApp") {
-        let id = "local.ascii-sharks.wallpaper", v = AppVersion("2.3")!
+        let id = "local.ascii-animals.wallpaper", v = AppVersion("2.3")!
         try expect(SelfUpdate.candidateProblem(bundleID: id, version: "2.3", expectedID: id, expectedVersion: v) == nil, "match")
         try expect(SelfUpdate.candidateProblem(bundleID: id, version: "2.3.0", expectedID: id, expectedVersion: v) == nil, "2.3.0")
         try expect(SelfUpdate.candidateProblem(bundleID: "com.other", version: "2.3", expectedID: id, expectedVersion: v) != nil, "other app")
@@ -125,7 +126,7 @@ func reportChecks() {
         try expect(b.lowercased().contains("quit unexpectedly"), "crash not mentioned")
     }
     check("reportScrubsHomeAndName") {
-        let f = facts(log: ["still failed: /Users/jane/Library/Application Support/ASCII Sharks/x.png", "hello from jane's mac"])
+        let f = facts(log: ["still failed: /Users/jane/Library/Application Support/ASCII Animals/x.png", "hello from jane's mac"])
         let b = IssueReport.body(f, homePath: "/Users/jane", userName: "jane")
         try expect(!b.contains("/Users/jane") && !b.lowercased().contains("jane"), "personal data left in: \(b)")
         try expect(b.contains("~/Library/Application Support"), "home not shortened to ~")

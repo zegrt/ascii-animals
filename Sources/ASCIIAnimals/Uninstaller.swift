@@ -1,13 +1,13 @@
 import AppKit
 
-/// Removes ASCII Sharks completely: puts the user's wallpaper back first,
+/// Removes ASCII Animals completely: puts the user's wallpaper back first,
 /// then the login item, files, preferences and the app itself.
 enum Uninstaller {
     static func confirm() -> Bool {
         NSApp.activate(ignoringOtherApps: true)
         let a = NSAlert()
-        a.messageText = "Uninstall ASCII Sharks?"
-        a.informativeText = "Your own wallpaper comes back, and ASCII Sharks removes its settings, saved stills, logs and login item, then moves itself to the Trash."
+        a.messageText = "Uninstall ASCII Animals?"
+        a.informativeText = "Your own wallpaper comes back, and ASCII Animals removes its settings, saved stills, logs and login item, then moves itself to the Trash."
         a.alertStyle = .warning
         a.addButton(withTitle: "Uninstall")
         a.addButton(withTitle: "Cancel")

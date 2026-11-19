@@ -1,13 +1,13 @@
 import Foundation
 
-/// A small rolling log at ~/Library/Logs/ASCII Sharks/ascii-sharks.log
+/// A small rolling log at ~/Library/Logs/ASCII Animals/ascii-animals.log
 /// (512 KB, one backup). It stays on this Mac; Report a Problem includes
 /// its last lines only when the user asks.
 enum Log {
     static let folder = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("Logs/ASCII Sharks", isDirectory: true)
-    static let file = folder.appendingPathComponent("ascii-sharks.log")
-    private static let queue = DispatchQueue(label: "ascii-sharks.log")
+        .appendingPathComponent("Logs/ASCII Animals", isDirectory: true)
+    static let file = folder.appendingPathComponent("ascii-animals.log")
+    private static let queue = DispatchQueue(label: "ascii-animals.log")
     private static let limit = 512 * 1024
     private static let stamp: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -21,7 +21,7 @@ enum Log {
             let fm = FileManager.default
             try? fm.createDirectory(at: folder, withIntermediateDirectories: true)
             if let size = (try? fm.attributesOfItem(atPath: file.path))?[.size] as? Int, size > limit {
-                let backup = folder.appendingPathComponent("ascii-sharks.1.log")
+                let backup = folder.appendingPathComponent("ascii-animals.1.log")
                 try? fm.removeItem(at: backup)
                 try? fm.moveItem(at: file, to: backup)
             }
@@ -47,7 +47,7 @@ enum Log {
 /// Knows whether the last session ended without a clean quit.
 enum CrashMarker {
     static let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("ASCII Sharks", isDirectory: true)
+        .appendingPathComponent("ASCII Animals", isDirectory: true)
     static let file = folder.appendingPathComponent("running")
 
     /// Call at launch: true if the previous run didn't quit cleanly.
