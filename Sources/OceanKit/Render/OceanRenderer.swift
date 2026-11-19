@@ -7,13 +7,15 @@ public struct RenderError: Error, CustomStringConvertible {
     public init(description: String) { self.description = description }
 }
 
-/// Device-wide state: the compiled shaders and the three pipelines.
+/// Device-wide state: the compiled shaders and the pipelines (the Ocean's
+/// three, and the generic canvas compose).
 public final class OceanRenderer {
     public let device: MTLDevice
     public let queue: MTLCommandQueue
     let wakePipe: MTLRenderPipelineState
     let cellsPipe: MTLRenderPipelineState
     let composePipe: MTLRenderPipelineState
+    let canvasPipe: MTLRenderPipelineState
     public static let outputFormat = MTLPixelFormat.bgra8Unorm
 
     public init(device: MTLDevice) throws {
@@ -37,6 +39,7 @@ public final class OceanRenderer {
         wakePipe = try pipe("wake_main", .rg16Float)
         cellsPipe = try pipe("cells_main", .rgba8Unorm)
         composePipe = try pipe("compose_main", OceanRenderer.outputFormat)
+        canvasPipe = try pipe("canvas_main", OceanRenderer.outputFormat)
     }
 
     public func makeViewport(pointSize: CGSize, scale: CGFloat, cell: CGSize? = nil) throws -> ViewportRenderer {
@@ -45,9 +48,18 @@ public final class OceanRenderer {
     }
 }
 
+/// Mirrors `CanvasUniforms` in Shaders.swift.
+struct CanvasUniforms {
+    var grid: SIMD4<Float>       // cols, rows, cell w, cell h (points)
+    var background: SIMD4<Float> // rgb, scale
+    var gridColor: SIMD4<Float>
+    var misc: SIMD4<Float>       // reveal, 0, 0, 0
+}
+
 /// Per-screen GPU state: wake ping-pong, cell classification, glyph atlas,
 /// and a ring of uniform buffers / fish grids so the CPU never writes what
-/// the GPU is still reading.
+/// the GPU is still reading. A `CellPainter` habitat gets a `CellCanvas` and
+/// a ring of cell textures instead, made the first time one draws here.
 public final class ViewportRenderer {
     public private(set) var grid: GridSpec
     public private(set) var pointSize: CGSize
@@ -65,6 +77,9 @@ public final class ViewportRenderer {
     private var cells: MTLTexture!
     private var atlas: MTLTexture!
     private var needsClear = true
+    /// Canvas habitats: the CPU grid and, per ring slot, its upload (block, ink, glyph).
+    private var canvas: CellCanvas?
+    private var canvasTextures: [(block: MTLTexture, ink: MTLTexture, glyph: MTLTexture)] = []
     /// What this viewport has already drawn of its world: steps run through
     /// the wake, and events stamped. A world shared by several screens is
     /// drawn by each at its own pace.
@@ -117,6 +132,8 @@ public final class ViewportRenderer {
         fishBytes = .allocate(capacity: c * rows * 4)
         atlas = try GlyphAtlas.make(device: r.device, cell: grid.cell, scale: scale)
         needsClear = true
+        canvas = nil
+        canvasTextures = []
     }
 
     private func pass(_ cb: MTLCommandBuffer, _ target: MTLTexture, _ pipe: MTLRenderPipelineState, _ label: String,
@@ -142,8 +159,78 @@ public final class ViewportRenderer {
                        target: MTLTexture?, commandBuffer cb: MTLCommandBuffer) {
         if let ocean = habitat as? OceanSim {
             encode(world: ocean.world, viewport: viewport, theme: theme, reveal: reveal, target: target, commandBuffer: cb)
+        } else if let target {
+            if let painter = habitat as? CellPainter {
+                encode(painter: painter, viewport: viewport, theme: theme, reveal: reveal, target: target, commandBuffer: cb)
+            } else {
+                clear(target, cb)
+            }
         }
-        // Task 7: other habitats paint a CellCanvas, drawn by canvas_main.
+    }
+
+    /// Paints `painter`'s part inside `viewport` (nil: this viewport's size at
+    /// the origin) into this viewport's canvas, uploads it, and composes it
+    /// into `target` with canvas_main.
+    private func encode(painter: CellPainter, viewport: CGRect?, theme: ThemeParams, reveal: Float,
+                        target: MTLTexture, commandBuffer cb: MTLCommandBuffer) {
+        let area = viewport ?? CGRect(origin: .zero, size: pointSize)
+        let c: CellCanvas
+        if let existing = canvas {
+            c = existing
+            c.clear()
+        } else {
+            c = CellCanvas(cols: grid.cols, rows: grid.rows)
+            canvas = c
+        }
+        painter.paint(viewport: area, grid: grid, theme: theme, into: c)
+
+        semaphore.wait()
+        let sem = semaphore
+        cb.addCompletedHandler { _ in sem.signal() }
+        ring = (ring + 1) % ViewportRenderer.inFlight
+        if canvasTextures.isEmpty {
+            do {
+                canvasTextures = try (0..<ViewportRenderer.inFlight).map { i in
+                    (try texture(.rgba8Unorm, grid.cols, grid.rows, .shaderRead, "canvas block \(i)"),
+                     try texture(.rgba8Unorm, grid.cols, grid.rows, .shaderRead, "canvas ink \(i)"),
+                     try texture(.r8Uint, grid.cols, grid.rows, .shaderRead, "canvas glyph \(i)"))
+                }
+            } catch {
+                clear(target, cb)
+                return
+            }
+        }
+        let t = canvasTextures[ring]
+        let region = MTLRegionMake2D(0, 0, grid.cols, grid.rows)
+        c.block.withUnsafeBytes { t.block.replace(region: region, mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: grid.cols * 4) }
+        c.ink.withUnsafeBytes { t.ink.replace(region: region, mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: grid.cols * 4) }
+        c.glyph.withUnsafeBytes { t.glyph.replace(region: region, mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: grid.cols) }
+
+        var u = CanvasUniforms(
+            grid: SIMD4(Float(grid.cols), Float(grid.rows), Float(grid.cell.width), Float(grid.cell.height)),
+            background: SIMD4(c.background, Float(scale)),
+            gridColor: c.gridColor,
+            misc: SIMD4(reveal, 0, 0, 0))
+        let atlas = self.atlas
+        pass(cb, target, r.canvasPipe, "canvas compose") { enc in
+            enc.setFragmentBytes(&u, length: MemoryLayout<CanvasUniforms>.stride, index: 0)
+            enc.setFragmentTexture(t.block, index: 0)
+            enc.setFragmentTexture(t.ink, index: 1)
+            enc.setFragmentTexture(t.glyph, index: 2)
+            enc.setFragmentTexture(atlas, index: 3)
+        }
+    }
+
+    /// Black: a habitat with nothing to draw still presents a defined frame.
+    private func clear(_ target: MTLTexture, _ cb: MTLCommandBuffer) {
+        let d = MTLRenderPassDescriptor()
+        d.colorAttachments[0].texture = target
+        d.colorAttachments[0].loadAction = .clear
+        d.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        d.colorAttachments[0].storeAction = .store
+        guard let enc = cb.makeRenderCommandEncoder(descriptor: d) else { return }
+        enc.label = "clear"
+        enc.endEncoding()
     }
 
     /// Packs the part of `world` inside `viewport` (ocean space; nil = all of

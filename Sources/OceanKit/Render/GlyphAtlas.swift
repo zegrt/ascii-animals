@@ -3,10 +3,22 @@ import CoreText
 import Foundation
 import Metal
 
-/// The 17 glyphs the compose shader indexes, rendered once per cell size in
-/// Geist Mono SemiBold into a strip of cell-sized slots (R8 coverage).
+/// The glyphs the compose shaders index, rendered once per cell size in
+/// Geist Mono SemiBold into a strip of cell-sized slots (R8 coverage). The
+/// first 17 are the Ocean's (compose_main indexes them by number); the rest
+/// are for `CellCanvas` habitats. Append only: indices never move.
 public enum GlyphAtlas {
-    public static let glyphs = [":", ";", "t", "%", "S", "X", "8", "#", "@", ".", "'", ",", "`", "o", "-", "*", "·"]
+    public static let glyphs = [":", ";", "t", "%", "S", "X", "8", "#", "@", ".", "'", ",", "`", "o", "-", "*", "·",
+                                "¯", "_", "/", "\\", "|", "+", "x", "O", "°", "v", "0"]
+
+    private static let indices: [Character: UInt8] = {
+        var d: [Character: UInt8] = [:]
+        for (i, g) in glyphs.enumerated() { d[Character(g)] = UInt8(i) }
+        return d
+    }()
+
+    /// `g`'s slot in the atlas, or nil when the atlas lacks it.
+    public static func index(_ g: Character) -> UInt8? { indices[g] }
 
     public struct Bytes {
         public let bytes: [UInt8]

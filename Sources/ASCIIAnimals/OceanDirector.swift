@@ -10,6 +10,8 @@ final class OceanDirector {
     private(set) var screens: [OceanScreen] = []
     private(set) var scenes: [HabitatScene] = []
     private(set) var mode: RunMode = .paused
+    /// A habitat switch dissolving on a live desktop; nil when none is.
+    private var dissolve: DissolveRun?
     private var theme: ThemeParams
     private lazy var pointer = PointerMonitor(
         viewports: { [weak self] in self?.viewports ?? [] },
@@ -46,13 +48,17 @@ final class OceanDirector {
                   screens.map { "\($0.displayID) visible=\($0.visible) presented=\($0.presented) paused=\($0.link?.isPaused ?? true)" }.joined(separator: "; "))
         }
         mode = newMode
+        // Stopped animating mid-switch: finish it at once (Review Focus 1).
+        if dissolve != nil, !Dissolve.shouldAnimate(newMode) { finishSwitch() }
         switch newMode {
         case .live(let fps):
             for s in screens { s.stillPending = false; s.setFrameRate(fps); s.setRunning(true) }
         case .still:
             for s in screens { s.stillPending = true; s.setFrameRate(PowerPolicy.economyFPS); s.setRunning(true) }
         case .paused:
-            for s in screens { s.setRunning(false) }
+            // Do no work, except a still owed to a user pause (see showChangeIfHeld),
+            // drawn once its screen is visible.
+            for s in screens { s.setRunning(s.stillPending) }
         }
         updatePointer()
     }
@@ -74,6 +80,13 @@ final class OceanDirector {
     // MARK: Frames
 
     private func tick(_ s: OceanScreen, _ link: CADisplayLink) {
+        var reveal: Float = 1
+        if var d = dissolve {
+            let f = d.frame(at: link.targetTimestamp)
+            dissolve = f.done ? nil : d
+            if f.swap { rebuildScenes() }
+            reveal = f.reveal
+        }
         let sim = s.scene.sim
         if s.stillPending {
             // Reduce Motion / Low Power: let the ecosystem settle, then hold one frame.
@@ -82,7 +95,7 @@ final class OceanDirector {
             s.scene.advance(to: link.targetTimestamp, speed: store.settings.speed)
         }
         guard let drawable = s.view.metalLayer.nextDrawable(), let cb = renderer.queue.makeCommandBuffer() else { return }
-        s.viewport.encode(habitat: sim, viewport: s.oceanRect, theme: theme, target: drawable.texture, commandBuffer: cb)
+        s.viewport.encode(habitat: sim, viewport: s.oceanRect, theme: theme, reveal: reveal, target: drawable.texture, commandBuffer: cb)
         cb.present(drawable)
         let first = !s.presented
         cb.addScheduledHandler { _ in
@@ -158,20 +171,51 @@ final class OceanDirector {
     // MARK: Settings and theme
 
     func settingsChanged(old: Settings, new: Settings) {
-        if old.sharedOcean != new.sharedOcean {
-            screensChanged(fresh: true)
-        } else if Habitats.needsRebuild(old: old, new: new) {
-            for s in scenes { s.rebuild(new) }
-        } else {
-            for s in scenes { s.sim.update(settings: new) }
-        }
+        // Power inputs first: they settle the mode, which decides how a switch shows.
         if old.paused != new.paused { signals.setUserPaused(new.paused) }
         if old.fps != new.fps { signals.setFPS(new.fps) }
         if old.lowPowerAnimates != new.lowPowerAnimates { signals.setLowPowerAnimates(new.lowPowerAnimates) }
+        if old.sharedOcean != new.sharedOcean {
+            dissolve = nil
+            screensChanged(fresh: true)
+        } else if old.habitat != new.habitat, Dissolve.shouldAnimate(mode) {
+            // Live: dissolve out, rebuild at the swap (with whatever is chosen
+            // by then), dissolve in. See tick.
+            let now = CACurrentMediaTime()
+            if dissolve == nil { dissolve = DissolveRun(start: now) } else { dissolve?.restart(at: now) }
+        } else if Habitats.needsRebuild(old: old, new: new) {
+            // A switch still dissolving out rebuilds at its swap anyway.
+            let swapPending = dissolve.map { !$0.swapped } ?? false
+            if !swapPending { rebuildScenes() }
+        } else {
+            for s in scenes { s.sim.update(settings: new) }
+        }
         refreshTheme()
         if old.interaction != new.interaction { updatePointer() }
-        if case .paused = mode {} else { return }
-        // Paused: still show the change once.
+        showChangeIfHeld()
+    }
+
+    /// Fresh sims for every scene, from the current settings.
+    private func rebuildScenes() {
+        for s in scenes { s.rebuild(store.settings) }
+    }
+
+    /// A switch cut short by a still or a pause: swap now if it hadn't, and
+    /// show the new habitat as a still when the held frame must.
+    private func finishSwitch() {
+        if let d = dissolve, !d.swapped { rebuildScenes() }
+        dissolve = nil
+        if Dissolve.drawsStillNow(mode, userPaused: signals.inputs.userPaused) {
+            for s in screens { s.stillPending = true }
+        }
+    }
+
+    /// Not animating: draw one settled still of a change now when the held
+    /// frame must show it (a Low Power / Reduce Motion still, a user pause).
+    /// A covered or locked desktop just keeps the change; its next visible
+    /// frame shows it.
+    private func showChangeIfHeld() {
+        guard Dissolve.drawsStillNow(mode, userPaused: signals.inputs.userPaused) else { return }
         for s in screens { s.stillPending = true; s.setRunning(true) }
     }
 
@@ -179,8 +223,7 @@ final class OceanDirector {
         let t = OceanDirector.currentTheme(store.settings)
         guard t != theme else { return }
         theme = t
-        if case .live = mode { return }
-        for s in screens { s.stillPending = true; s.setRunning(true) }
+        showChangeIfHeld()
     }
 
     static func currentTheme(_ s: Settings) -> ThemeParams {

@@ -5,8 +5,10 @@
 //   wake_main     cols x rows, rg16Float   wake energy (r) and eat heat (g); runs once per sim step
 //   cells_main    cols x rows, rgba8       which shark part or fish fills each cell
 //   compose_main  full resolution          grid, wake dots, heat, fish, sharks, glyphs
+//   canvas_main   full resolution          any CellCanvas habitat: grid, blocks, glyphs
 //
-// Buffer layout: see FrameLayout in FramePacker.swift.
+// Buffer layout: see FrameLayout in FramePacker.swift (Ocean) and
+// CanvasUniforms in OceanRenderer.swift (canvas).
 
 enum Shaders {
     static let source = #"""
@@ -441,7 +443,7 @@ static float hash2(uint a, uint b) {
 
 // The dissolve between habitats: a cell shows its habitat while
 // revealHash(cell) < reveal (hd6.w), and bare background otherwise, so reveal
-// 0 -> 1 fades the picture in cell by cell. canvas_main (Task 7) uses this
+// 0 -> 1 fades the picture in cell by cell. canvas_main uses this
 // same function, so every habitat dissolves with the same pattern. 24 bits,
 // so it is exact in float and never reaches 1: reveal 1 shows every cell.
 static float revealHash(uint2 c) {
@@ -635,6 +637,54 @@ fragment float4 compose_main(VOut in [[stage_in]],
     }
 
     return finish(col, theme);
+}
+
+// ---------------------------------------------------------------- canvas
+// A CellCanvas habitat. Colours arrive final (no light-theme inversion).
+
+struct CanvasUniforms {
+    float4 grid;       // cols, rows, cell w, cell h (points)
+    float4 background; // rgb, scale
+    float4 gridColor;  // rgb, a (0: no grid)
+    float4 misc;       // reveal, 0, 0, 0
+};
+
+fragment float4 canvas_main(VOut in [[stage_in]],
+                            constant CanvasUniforms& u [[buffer(0)]],
+                            texture2d<float, access::read> block [[texture(0)]],
+                            texture2d<float, access::read> ink [[texture(1)]],
+                            texture2d<uint, access::read> glyphs [[texture(2)]],
+                            texture2d<float, access::read> atlas [[texture(3)]]) {
+    float2 grid = u.grid.xy;
+    float2 cwh = u.grid.zw;
+    float res = u.background.w;
+    float2 px = in.clip.xy;
+    float2 pt = px / res;
+    float2 cellF = min(floor(pt / cwh), grid - float2(1.0));
+    float2 slot = cwh * res;
+    float2 lp = px - cellF * slot;
+    float2 lpt = pt - cellF * cwh;
+    uint2 cu = uint2(cellF);
+
+    float3 col = u.background.rgb;
+    // Hidden by the dissolve: plain background, no grid (as compose_main).
+    if (revealHash(cu) >= u.misc.x) { return float4(col, 1.0); }
+
+    // Grid: one device pixel at the cell's top and left, as compose_main.
+    if (u.gridColor.a > 0.0 && (floor(px.x) == round(cellF.x * slot.x) || floor(px.y) == round(cellF.y * slot.y))) {
+        col = mix(col, u.gridColor.rgb, u.gridColor.a);
+    }
+
+    // Block, inset one point from the top-left grid lines.
+    float4 b = block.read(cu);
+    if (b.a > 0.0 && lpt.x >= 1.0 && lpt.y >= 1.0) { col = mix(col, b.rgb, b.a); }
+
+    uint g = glyphs.read(cu).r;
+    if (g != 255u) {
+        float4 k = ink.read(cu);
+        col = mix(col, k.rgb, glyph(atlas, int(g), lp, slot) * k.a);
+    }
+    return float4(col, 1.0);
 }
 """#
 }
