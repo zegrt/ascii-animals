@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         SharksHandover.run(app: self)
+        SharksHandover.watch()
         crashedLastTime = CrashMarker.launch()
         Log.write("launch \(AppInfo.version) (\(AppInfo.build))\(crashedLastTime ? " after an unclean exit" : "")")
         do {

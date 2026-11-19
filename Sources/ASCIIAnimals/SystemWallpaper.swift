@@ -7,10 +7,14 @@ import OceanKit
 final class SystemWallpaper {
     static let memoryKey = "wallpaperMemory.v1"
     static let keepStills = 3
+    /// The hand-over's copy of ASCII Sharks' wallpaper memory, taken before its uninstaller removes it.
+    static let sharksMemoryCopyKey = "handover.sharksWallpaperMemory"
 
     let stillsFolder: URL
     private let renderer: OceanRenderer
     private var memory: WallpaperMemory
+    /// ASCII Sharks' stills: one left up (Sharks force-quit) is never taken for the user's wallpaper.
+    private let sharks: ForeignStills
     private var pending: DispatchWorkItem?
     /// Bumped by restoreAll(); a still that finishes rendering after a restore is dropped.
     private var generation = 0
@@ -27,6 +31,11 @@ final class SystemWallpaper {
         } else {
             memory = WallpaperMemory()
         }
+        let sharksMemory = (UserDefaults(suiteName: Handover.sharksBundleID)?.data(forKey: Handover.sharksWallpaperKey)
+            ?? UserDefaults.standard.data(forKey: SystemWallpaper.sharksMemoryCopyKey))
+            .flatMap { try? JSONDecoder().decode(WallpaperMemory.self, from: $0) }
+        sharks = ForeignStills(folder: support.appendingPathComponent(Handover.sharksStillsFolder, isDirectory: true),
+                               memory: sharksMemory ?? WallpaperMemory())
     }
 
     /// Debounced: looks changes come in bursts (sliders, appearance switches).
@@ -42,7 +51,7 @@ final class SystemWallpaper {
         for screen in NSScreen.screens {
             let key = SystemWallpaper.key(for: screen)
             guard let current = SystemWallpaper.entry(for: screen) else { continue }
-            guard memory.decide(screen: key, current: current, stillsFolder: stillsFolder) == .apply else { continue }
+            guard memory.decide(screen: key, current: current, stillsFolder: stillsFolder, foreign: sharks) == .apply else { continue }
             save() // the original is on disk before anything changes
             let size = screen.frame.size, scale = screen.backingScaleFactor
             let url = stillsFolder.appendingPathComponent("still-\(key)-\(Int(Date().timeIntervalSince1970 * 1000)).png")
@@ -64,7 +73,7 @@ final class SystemWallpaper {
     private func set(_ url: URL, on screen: NSScreen, key: String, generation gen: Int) {
         // Re-check: a restore may have happened, or the wallpaper changed, while the still rendered.
         guard gen == generation, NSScreen.screens.contains(screen), let current = SystemWallpaper.entry(for: screen),
-              memory.decide(screen: key, current: current, stillsFolder: stillsFolder) == .apply else {
+              memory.decide(screen: key, current: current, stillsFolder: stillsFolder, foreign: sharks) == .apply else {
             try? FileManager.default.removeItem(at: url)
             return
         }
@@ -98,7 +107,7 @@ final class SystemWallpaper {
         for screen in NSScreen.screens {
             let key = SystemWallpaper.key(for: screen)
             guard let current = SystemWallpaper.entry(for: screen),
-                  let target = memory.restoreTarget(screen: key, current: current, stillsFolder: stillsFolder) else { continue }
+                  let target = memory.restoreTarget(screen: key, current: current, stillsFolder: stillsFolder, foreign: sharks) else { continue }
             var options: [NSWorkspace.DesktopImageOptionKey: Any] = [:]
             if let s = target.scaling { options[.imageScaling] = s }
             if let c = target.allowClipping { options[.allowClipping] = c }

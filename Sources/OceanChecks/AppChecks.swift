@@ -144,22 +144,52 @@ func reportChecks() {
 
 func handoverChecks() {
     let url = URL(fileURLWithPath: "/Applications/ASCII Sharks.app")
-    func facts(app: URL? = nil, running: Bool = false, imported: Bool = false, settings: Data? = nil) -> HandoverFacts {
-        HandoverFacts(sharksApp: app, sharksRunning: running, alreadyImported: imported, sharksSettings: settings)
+    func facts(app: URL? = nil, running: Bool = false, offered: Bool = false, imported: Bool = false, settings: Data? = nil,
+               onboarded: Bool = false, own: Bool = false) -> HandoverFacts {
+        HandoverFacts(sharksApp: app, sharksRunning: running, alreadyOffered: offered, alreadyImported: imported,
+                      sharksSettings: settings, sharksOnboarded: onboarded, ownSettings: own)
     }
+    let some = Data("{}".utf8)
     check("handoverNothingWithoutSharks") {
         try expect(Handover.plan(facts()) == [], "expected no steps")
+        try expect(Handover.plan(facts(own: true)) == [], "an Animals user alone: expected no steps")
     }
     check("handoverQuitsFirst") {
-        let p = Handover.plan(facts(app: url, running: true, settings: Data("{}".utf8)))
+        let p = Handover.plan(facts(app: url, running: true, settings: some))
         try expect(p == [.quitSharks, .importSettings, .skipWelcome, .offerTrash(url)], "plan \(p)")
     }
     check("handoverImportsOnce") {
-        let p = Handover.plan(facts(app: url, imported: true, settings: Data("{}".utf8)))
+        let p = Handover.plan(facts(app: url, imported: true, settings: some))
         try expect(p == [.offerTrash(url)], "plan \(p)")
+    }
+    check("handoverOffersOnce") {
+        let p = Handover.plan(facts(app: url, running: true, offered: true, imported: true, settings: some))
+        try expect(p == [.quitSharks], "plan \(p)")
     }
     check("handoverRunningButNotFound") {
         let p = Handover.plan(facts(running: true))
         try expect(p.first == .quitSharks && !p.contains { if case .offerTrash = $0 { return true } else { return false } }, "plan \(p)")
+    }
+    check("handoverSkipsWelcomeForSharksUsers") {
+        // Sharks writes settings.v2 only on a change: installed, or onboarded, is enough.
+        try expect(Handover.plan(facts(app: url)) == [.skipWelcome, .offerTrash(url)], "installed, no settings")
+        try expect(Handover.plan(facts(onboarded: true)) == [.skipWelcome], "onboarded, app gone")
+        try expect(!Handover.plan(facts(app: url, imported: true, onboarded: true)).contains(.skipWelcome), "only once")
+    }
+    check("handoverKeepsAnimalsSettings") {
+        let p = Handover.plan(facts(app: url, settings: some, own: true))
+        try expect(!p.contains(.importSettings) && p.contains(.skipWelcome), "plan \(p)")
+    }
+    check("handoverOnlyTheRealApp") {
+        try expect(Handover.enabled(bundleID: "local.ascii-animals.wallpaper", environment: [:]), "the app")
+        try expect(!Handover.enabled(bundleID: nil, environment: [:]), "a bare binary")
+        try expect(!Handover.enabled(bundleID: "local.ascii-animals.wallpaper", environment: ["ASCII_ANIMALS_NO_HANDOVER": "1"]), "opted out")
+        try expect(Handover.sharksUninstallArguments == ["--uninstall", "--yes"], "Sharks 2.3's scripted uninstall")
+    }
+    check("handoverQuitsSharksWhenItOpens") {
+        try expect(Handover.shouldQuit(launched: Handover.sharksBundleID, enabled: true), "Sharks opened")
+        try expect(!Handover.shouldQuit(launched: Handover.sharksBundleID, enabled: false), "a dev run touched Sharks")
+        try expect(!Handover.shouldQuit(launched: "com.apple.Safari", enabled: true), "another app")
+        try expect(!Handover.shouldQuit(launched: nil, enabled: true), "no bundle ID")
     }
 }

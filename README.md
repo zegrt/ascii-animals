@@ -27,7 +27,7 @@
 2. **Open it.** macOS will stop it the first time, because it isn't from a registered Apple developer. Go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway**. You only do this once.
 3. **That's it.** Sharks are swimming on your desktop, and a little 🐟 sits in your menu bar. Pick the Web there whenever you like.
 
-**Already using ASCII Sharks?** Just install this one. It takes over: it quits ASCII Sharks, keeps your settings, and offers to move ASCII Sharks to the Trash.
+**Already using ASCII Sharks?** Just install this one. It takes over: it quits ASCII Sharks, keeps your settings, and offers to move ASCII Sharks to the Trash, login item and all. If you keep it, ASCII Animals closes it whenever it opens, so the two never run at once.
 
 ## Things to try
 

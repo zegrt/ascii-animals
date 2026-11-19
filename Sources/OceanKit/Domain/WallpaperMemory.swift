@@ -17,6 +17,19 @@ public struct WallpaperEntry: Codable, Equatable, Sendable {
     }
 }
 
+/// Another app's stills: ASCII Sharks', still showing if it was force-quit, and what it remembered was
+/// underneath them. Never the user's own wallpaper.
+public struct ForeignStills: Equatable, Sendable {
+    public var folder: URL
+    public var memory: WallpaperMemory
+    public init(folder: URL, memory: WallpaperMemory = WallpaperMemory()) {
+        self.folder = folder
+        self.memory = memory
+    }
+
+    func contains(_ url: URL) -> Bool { WallpaperMemory.isOurs(url, stillsFolder: folder) }
+}
+
 /// Bookkeeping that keeps the user's own wallpaper safe while the system
 /// wallpaper shows a still of the ocean.
 ///
@@ -54,9 +67,15 @@ public struct WallpaperMemory: Codable, Equatable, Sendable {
         return path
     }
 
-    /// Whether the still may replace `current` on this screen's current Space.
-    public mutating func decide(screen: String, current: WallpaperEntry, stillsFolder: URL) -> Decision {
+    /// Whether the still may replace `current` on this screen's current Space. A foreign still (ASCII
+    /// Sharks') is replaced too, and what it covered, if known, is remembered as the original.
+    public mutating func decide(screen: String, current: WallpaperEntry, stillsFolder: URL,
+                                foreign: ForeignStills? = nil) -> Decision {
         if WallpaperMemory.isOurs(current.url, stillsFolder: stillsFolder) { return .apply }
+        if let foreign, foreign.contains(current.url) {
+            if originals[screen] == nil { originals[screen] = foreign.memory.original(for: screen) }
+            return .apply
+        }
         guard let known = originals[screen] else {
             originals[screen] = current
             return .apply
@@ -64,10 +83,12 @@ public struct WallpaperMemory: Codable, Equatable, Sendable {
         return known.url.standardizedFileURL == current.url.standardizedFileURL ? .apply : .leaveAlone
     }
 
-    /// The wallpaper to put back, if our still is what this screen shows.
-    public func restoreTarget(screen: String, current: WallpaperEntry, stillsFolder: URL) -> WallpaperEntry? {
-        guard WallpaperMemory.isOurs(current.url, stillsFolder: stillsFolder) else { return nil }
-        return originals[screen]
+    /// The wallpaper to put back, if our still (or a foreign one) is what this screen shows.
+    public func restoreTarget(screen: String, current: WallpaperEntry, stillsFolder: URL,
+                              foreign: ForeignStills? = nil) -> WallpaperEntry? {
+        if WallpaperMemory.isOurs(current.url, stillsFolder: stillsFolder) { return originals[screen] }
+        if let foreign, foreign.contains(current.url) { return originals[screen] ?? foreign.memory.original(for: screen) }
+        return nil
     }
 
     public mutating func forget(screen: String) { originals[screen] = nil }
