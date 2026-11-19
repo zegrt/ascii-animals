@@ -9,6 +9,10 @@ enum SharksHandover {
     /// Synchronous; returns once Sharks has quit (or there was nothing to do).
     /// Must run before `AppDelegate.store` is first touched, so the imported settings are what it loads.
     static func run(app: AppDelegate) {
+        // Only the real app takes over: never a bare dev binary (no bundle ID, its own
+        // defaults), and never a test run that opts out with ASCII_ANIMALS_NO_HANDOVER=1.
+        guard Bundle.main.bundleIdentifier == "local.ascii-animals.wallpaper",
+              ProcessInfo.processInfo.environment["ASCII_ANIMALS_NO_HANDOVER"] == nil else { return }
         let me = UserDefaults.standard
         let id = Handover.sharksBundleID
         let installed = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id)
