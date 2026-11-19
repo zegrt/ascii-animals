@@ -25,9 +25,9 @@
 
 1. **[Download ASCII Animals](https://github.com/zegrt/ascii-animals/releases/latest/download/ASCII-Animals.dmg)**, open it, and drag the app into **Applications**.
 2. **Open it.** macOS will stop it the first time, because it isn't from a registered Apple developer. Go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway**. You only do this once.
-3. **That's it.** Sharks are swimming on your desktop, and a little 🐟 sits in your menu bar. Pick the Web there whenever you like.
+3. **That's it.** A short welcome asks: the Ocean or the Web? Your pick lives on your desktop from then on, and a little 🐟 in your menu bar switches it whenever you like.
 
-**Already using ASCII Sharks?** Just install this one. It takes over: it quits ASCII Sharks, keeps your settings, and offers to move ASCII Sharks to the Trash, login item and all. If you keep it, ASCII Animals closes it whenever it opens, so the two never run at once.
+**Already using ASCII Sharks?** Just install this one. It takes over: it quits ASCII Sharks, keeps your settings, offers to move ASCII Sharks to the Trash, login item and all, and shows you the new habitat once. If you keep it, ASCII Animals closes it whenever it opens, so the two never run at once.
 
 ## Things to try
 

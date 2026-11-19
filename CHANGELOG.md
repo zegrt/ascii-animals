@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.1
+- **The welcome starts with the habitat.** It now opens by asking: the Ocean or the Web? The rest of the tour plays in the one you pick, so the Web gets its own tour (ringing silk, dropping a fly) too.
+- **Came from ASCII Sharks? Meet the Web.** The hand-over skipped the welcome, so nothing told you about the Web. Now a single card does, once, with the Web live behind it: **Try the Web** switches to it, **Keep the Ocean** leaves everything as it was.
+
 ## 3.0
 - **ASCII Sharks is now ASCII Animals.** A new app with a new name, because the ocean isn't the only place to watch any more. Pick a **habitat** in the 🐟 menu or in Settings.
 - **The Web, a new habitat.** Spiders spin orb webs across your desktop, flies wander by and blunder into them, and a jumping spider hunts between the webs. It's a faithful port of [ascii-spiders](https://github.com/stackedlol/ascii-spiders) by @stackedlol. Move the pointer through a web and the silk rings; click bare desktop to drop a fly; hold the pointer still near the jumper and it may pounce. Choose your spiders (garden spiders, wasp spiders, golden orb weavers), and turn the flies or the jumper off if you like.
