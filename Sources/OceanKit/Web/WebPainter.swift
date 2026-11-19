@@ -429,13 +429,24 @@ private struct Body {
         let v = -dx * sn + dy * c
         let eu = (u - pu) / pa
         let ev = v / pb
-        let e = boxy ? pow(pow(abs(eu), 3) + pow(abs(ev), 3), 2.0 / 3) : eu * eu + ev * ev
-        if e < 1 { return true }
+        if prosoma(eu, ev, boxy) < 1 { return true }
         let eu2 = (u - au) / aa
         let ev2 = v / ab
         // (As `sample` decides: only e >= 1 misses, so a NaN counts as a hit.)
         return !(eu2 * eu2 + ev2 * ev2 >= 1)
     }
+}
+
+/**
+ * Where (eu, ev) sits against the prosoma, in its own radii: under 1 inside. An ellipse, or for the jumper a
+ * rounded box, (|eu|³ + |ev|³)^(2/3). Callers only ask whether it is under 1 unless it is, so a box sample
+ * clearly outside (|eu| or |ev| at least 1.01, where the powers come to 1.02 or more however pow rounds) is
+ * answered without taking them.
+ */
+@inline(__always) private func prosoma(_ eu: Double, _ ev: Double, _ boxy: Bool) -> Double {
+    guard boxy else { return eu * eu + ev * ev }
+    if abs(eu) >= 1.01 || abs(ev) >= 1.01 { return .infinity }
+    return pow(pow(abs(eu), 3) + pow(abs(ev), 3), 2.0 / 3)
 }
 
 /// What a body sample hit.
@@ -551,6 +562,7 @@ private struct Pass {
         let base = silkAlpha(web)
         let x = web.x.p, y = web.y.p, la = web.la.p, lb = web.lb.p, state = web.state.p, kind = web.kind.p, speed = web.speed.p
         let ox = self.ox, oy = self.oy, cw = self.cw, ch = self.ch
+        if Pass.offGrid(x, y, web.n, ox, oy, cw, ch, cols, rows) { return }
         SILK_ALPHA.withUnsafeBufferPointer { SILK_ALPHA in
             for l in 0..<web.m {
                 // (The "full" stage draws every kind, up to STAB.)
@@ -562,6 +574,27 @@ private struct Pass {
                          base * SILK_ALPHA[kind[l]], kind[l] == MOOR ? 0 : e)
             }
         }
+    }
+
+    /**
+     * Whether every node of a web lies more than a cell off the grid on one side, so that `StrokeAcc.add`
+     * would drop each of its threads before plotting (it drops a thread wholly beyond -1 or C + 1 cells).
+     * Only for sane coordinates (within ±1e7 px, where rounding is far below the cell of margin); a NaN node
+     * is passed over, as its threads draw nothing either. Skipping a web changes no output: a dropped
+     * thread only spends a line number, and line numbers only tell threads apart within a frame.
+     */
+    static func offGrid(_ x: UnsafeMutableBufferPointer<Float>, _ y: UnsafeMutableBufferPointer<Float>, _ n: Int,
+                        _ ox: Double, _ oy: Double, _ cw: Double, _ ch: Double, _ cols: Int, _ rows: Int) -> Bool {
+        guard n > 0, cw > 0, ch > 0 else { return false }
+        var x0 = Float.infinity, x1 = -Float.infinity, y0 = Float.infinity, y1 = -Float.infinity
+        for i in 0..<n {
+            x0 = min(x0, x[i]); x1 = max(x1, x[i])
+            y0 = min(y0, y[i]); y1 = max(y1, y[i])
+        }
+        let lim: Float = 1e7
+        guard x0 >= -lim, x1 <= lim, y0 >= -lim, y1 <= lim else { return false }
+        return (Double(x1) - ox) / cw < -2 || (Double(x0) - ox) / cw > Double(cols) + 2
+            || (Double(y1) - oy) / ch < -2 || (Double(y0) - oy) / ch > Double(rows) + 2
     }
 
     /// A weaver's loose silk: the thread it is laying (or reeling in), and the lines to its parcels.
@@ -784,7 +817,7 @@ private struct Pass {
         // Prosoma: an ellipse, or a rounded box for the jumper.
         var eu = (u - pu) / pa
         var ev = v / pb
-        var e = sp.boxy ? pow(pow(abs(eu), 3) + pow(abs(ev), 3), 2.0 / 3) : eu * eu + ev * ev
+        var e = prosoma(eu, ev, sp.boxy)
         if e < 1 {
             hit.shade = lit(eu / pa, ev / pb, e.squareRoot(), c, sn) * 0.92
             hit.flag = BODY
