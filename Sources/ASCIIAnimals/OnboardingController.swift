@@ -24,15 +24,18 @@ enum OnboardingController {
     static func show(app: AppDelegate) { present(app: app, card: false) }
 
     private static func present(app: AppDelegate, card: Bool) {
-        let d = UserDefaults.standard
-        // The tour opens with the habitat choice, so whoever sees it knows about the Web too.
-        d.set(true, forKey: Handover.webCardKey)
-        if !card { d.set(true, forKey: seenKey) }
         if let current { current.focus(); return }
         // No renderer means no ocean to show; the menu still explains a failed start.
+        // Nothing is marked seen until it reaches the user: a launch that can't show it tries again next time.
         guard let renderer = app.director?.renderer, !NSScreen.screens.isEmpty else { return }
         let session = OnboardingSession(app: app, renderer: renderer, card: card)
         current = session
+        session.onSeen = {
+            let d = UserDefaults.standard
+            // The tour opens with the habitat choice, so whoever sees it knows about the Web too.
+            d.set(true, forKey: Handover.webCardKey)
+            if !card { d.set(true, forKey: seenKey) }
+        }
         session.onFinish = { current = nil }
         session.start()
     }
@@ -289,6 +292,9 @@ final class OnboardingSession: NSObject {
     private let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     private let card: Bool
     var onFinish: (() -> Void)?
+    /// Once, when the user has had the welcome in front of them: in front and key after 3 s, or
+    /// they ended it themselves sooner. Not when it was closed because it never got the focus.
+    var onSeen: (() -> Void)?
 
     /// `card`: the Web card, with the Web live behind it (the desktop stays as it is until "Try the Web").
     init(app: AppDelegate, renderer: OceanRenderer, card: Bool = false) {
@@ -389,8 +395,8 @@ final class OnboardingSession: NSObject {
         })
         // If macOS didn't let the app come forward, keys can't reach the welcome: don't sit on top of everything.
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            guard let self, !self.finishing, !NSApp.isActive || !self.window.isKeyWindow else { return }
-            self.finish(fast: false)
+            guard let self, !self.finishing else { return }
+            if NSApp.isActive, self.window.isKeyWindow { self.markSeen() } else { self.finish(fast: false, seen: false) }
         }
         blinker = Timer.scheduledTimer(withTimeInterval: 0.53, repeats: true) { [weak self] _ in self?.model.cursorOn.toggle() }
         after(reduceMotion ? 0.2 : 0.9) { [weak self] in self?.enter(.habitat) }
@@ -555,9 +561,16 @@ final class OnboardingSession: NSObject {
     // MARK: Leaving
 
     /// The dissolve: the words go first, then the ocean melts into the desktop's own.
-    func finish(fast: Bool) {
+    private func markSeen() {
+        onSeen?()
+        onSeen = nil
+    }
+
+    /// `seen: false` only when the welcome never reached the user, so it comes back next launch.
+    func finish(fast: Bool, seen: Bool = true) {
         guard !finishing else { return }
         finishing = true
+        if seen { markSeen() }
         typer?.invalidate()
         blinker?.invalidate()
         pending?.cancel()
