@@ -7,12 +7,14 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     env:
       # GitHub's macOS runners have no Metal device; the GPU checks run locally.
       OCEAN_SKIP_GPU: "1"
     steps:
       - uses: actions/checkout@v4
+      - name: Toolchain
+        run: swift --version
       - name: Checks
         run: swift run -c release OceanChecks
       - name: Build the universal app

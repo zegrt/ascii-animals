@@ -667,8 +667,8 @@ func webPainterChecks() {
             try expect(compared > 100, "compared \(compared) colours")
         }
         // Accents (dark only) at the original's 6 % of skin cells, scaled by the theme's rate.
-        let accents = Set([(224, 137, 44), (224, 58, 50), (180, 74, 224), (51, 200, 204), (60, 181, 74), (49, 80, 232), (217, 193, 74)]
-            .map { UInt32($0.0) | UInt32($0.1) << 8 | UInt32($0.2) << 16 | 255 << 24 })
+        let accentRGB: [(UInt32, UInt32, UInt32)] = [(224, 137, 44), (224, 58, 50), (180, 74, 224), (51, 200, 204), (60, 181, 74), (49, 80, 232), (217, 193, 74)]
+        let accents: Set<UInt32> = Set(accentRGB.map { (c: (UInt32, UInt32, UInt32)) -> UInt32 in c.0 | c.1 << 8 | c.2 << 16 | 255 << 24 })
         let skin = glyphs(":;t%SX8#@")
         func accented(_ c: CellCanvas) -> Int { (0..<c.ink.count).filter { skin.contains(c.glyph[$0]) && accents.contains(c.ink[$0]) }.count }
         var none = ThemeParams.make(.defaults, systemIsDark: true, accent: .zero)

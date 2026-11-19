@@ -11,11 +11,13 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-15
+    runs-on: macos-26
     env:
       OCEAN_SKIP_GPU: "1"
     steps:
       - uses: actions/checkout@v4
+      - name: Toolchain
+        run: swift --version
       - name: Tag matches the app version
         run: |
           plist=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist)
