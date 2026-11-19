@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.0
+- **ASCII Sharks is now ASCII Animals.** A new app with a new name, because the ocean isn't the only place to watch any more. Pick a **habitat** in the 🐟 menu or in Settings.
+- **The Web, a new habitat.** Spiders spin orb webs across your desktop, flies wander by and blunder into them, and a jumping spider hunts between the webs. It's a faithful port of [ascii-spiders](https://github.com/stackedlol/ascii-spiders) by @stackedlol. Move the pointer through a web and the silk rings; click bare desktop to drop a fly; hold the pointer still near the jumper and it may pounce. Choose your spiders (garden spiders, wasp spiders, golden orb weavers), and turn the flies or the jumper off if you like.
+- **Coming from ASCII Sharks?** Just install ASCII Animals. The first time it opens, it quits ASCII Sharks, brings your settings over, skips the welcome and offers to move ASCII Sharks to the Trash. The two never run at the same time.
+- **The Web costs no more than the Ocean.** On a two-display Mac, the Web used about 9.6% CPU at 30 fps against the Ocean's 12.7%, with the same WindowServer cost.
+- Everything else carries over: Dark, Light and Calm, one habitat across your displays, the matching lock screen, self-updates and the menu. Logs now live in `~/Library/Logs/ASCII Animals`.
+
 ## 2.3
 - **Updates install themselves.** When a new version is out, ASCII Sharks downloads it, checks it (GitHub's checksum, that it's this app at that version, its signature), swaps itself out and restarts. It takes a couple of seconds, with no disk image, no dragging and no Open Anyway. It waits while Settings is open. If any step fails, the version you have stays exactly as it was.
 - **Or update by hand.** Turn off **Install updates automatically** in Settings and the menu offers **Update to …** instead: one click. **Check Now…** in Settings (or **Check for Updates…** in the menu) looks right away.

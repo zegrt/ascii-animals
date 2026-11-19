@@ -1,59 +1,70 @@
-# Developing ASCII Sharks
+# Developing ASCII Animals
 
 ## Build it yourself
 
 The only requirement is Apple's Command Line Tools (`xcode-select --install`). You don't need Xcode.
 
 ```sh
-git clone https://github.com/zegrt/ascii-sharks-wallpaper
-cd ascii-sharks-wallpaper
+git clone https://github.com/zegrt/ascii-animals
+cd ascii-animals
 Tools/build.sh      # runs the checks, builds a universal app
 Tools/install.sh    # copies it to ~/Applications and launches it
 Tools/package.sh    # the DMG (for people) and the zip (for self-updates)
 ```
 
-Push a tag like `v2.4` that matches `Info.plist` and a `CHANGELOG.md` section, and the Release workflow builds and publishes both.
+Push a tag like `v3.1` that matches `Info.plist` and a `CHANGELOG.md` section, and the Release workflow builds and publishes both.
 
 ## Tools
 
 ```sh
 swift run -c release OceanChecks                       # domain checks + headless Metal renders
-swift run -c release OceanTool still out.png 1440x900  # --light --calm --sharks mako,tiger --seed 3
-swift run -c release OceanTool frames out/ 1080x675    # a continuous run as PNG frames
+swift run -c release OceanTool still out.png 1440x900  # --habitat web --light --calm --sharks mako,tiger --seed 3
+swift run -c release OceanTool frames out/ 1080x675    # a continuous run as PNG frames (--habitat web --interact: with the pointer)
 swift run -c release OceanTool bench                   # simulation cost
 swift run -c release OceanTool bench --desk --habitat web  # CPU per second on a two-screen desk, 30 and 15 fps
 swift run -c release OceanTool bench --digest          # fingerprint of the Web's canvases: same digest, same output
-OCEAN_DEBUG=1 .build/out/Products/Release/ASCIISharks  # log power-mode decisions
+OCEAN_DEBUG=1 .build/release/ASCIIAnimals             # log power-mode decisions
 ```
 
 ## How it works
 
+Each **habitat** is a `HabitatSim`: the **Ocean** (`OceanSim`, sharks and boids) or the **Web** (`WebSim`, the port of ascii-spiders). The host drives whichever one is chosen the same way: a fixed 60 Hz step, the pointer and clicks, a layout across your displays, and a settled still for the system wallpaper. Switching habitats dissolves one into the other.
+
 ```mermaid
 flowchart LR
   subgraph CPU["CPU · Swift"]
-    W["World<br/>boids + sharks<br/>fixed 60 Hz step"] --> P["FramePacker<br/>uniforms + fish grid"]
+    O["OceanSim<br/>boids + sharks<br/>fixed 60 Hz step"] --> P["FramePacker<br/>uniforms + fish grid"]
+    W["WebSim<br/>spiders, webs, flies<br/>fixed 60 Hz step"] --> C["WebPainter<br/>CellCanvas"]
   end
   subgraph GPU["GPU · Metal (one frame)"]
     A["wake<br/>cols × rows<br/>ripples + eat flashes"] --> B["cells<br/>which shark part<br/>or fish per cell"]
-    B --> C["compose<br/>full resolution<br/>grid, glyphs, colour"]
+    B --> D["compose<br/>full resolution<br/>grid, glyphs, colour"]
+    E["canvas<br/>full resolution<br/>blocks, glyphs, grid"]
   end
   P --> A
   P --> B
-  C --> D["desktop-level window<br/>below your icons"]
+  C --> E
+  D --> F["desktop-level window<br/>below your icons"]
+  E --> F
 ```
 
 | Layer | Folder | What it does |
 |---|---|---|
-| **Domain** | `Sources/OceanKit/Domain` | The simulation, settings, power policy, pointer routing, frame packing, wallpaper bookkeeping and update rules. Pure Swift with no AppKit, and fully checked. |
-| **Render** | `Sources/OceanKit/Render` | The MSL shaders (compiled at runtime), the Geist Mono glyph atlas and offscreen stills. |
-| **Host** | `Sources/ASCIISharks` | AppKit: windows, display links, system signals, the menu, settings, the system wallpaper and self-updating. |
+| **Domain** | `Sources/OceanKit/Domain` | The habitats' shared protocol (`HabitatSim`), the Ocean's simulation, settings, power policy, pointer routing, frame packing, the hand-over from ASCII Sharks, wallpaper bookkeeping and update rules. Pure Swift with no AppKit, and fully checked. |
+| **Web** | `Sources/OceanKit/Web` | A faithful port of [ascii-spiders](https://github.com/stackedlol/ascii-spiders) (MIT, commit 89a7721): orb webs, weavers, the jumper, flies, and the painter that draws them into a `CellCanvas`. Checked against the original's numbers. |
+| **Render** | `Sources/OceanKit/Render` | The MSL shaders (compiled at runtime), `CellCanvas`, the Geist Mono glyph atlas and offscreen stills. |
+| **Host** | `Sources/ASCIIAnimals` | AppKit: windows, display links, system signals, the menu, settings, the system wallpaper and self-updating. |
 
-The ocean is rendered on a grid of ASCII cells. Each frame:
+The **Ocean** is rendered on a grid of ASCII cells. Each frame:
 1. The **wake** pass diffuses ripples, once per simulation step, so trails don't depend on the frame rate.
 2. The **cells** pass decides what fills each cell: shark body, fin, ridge, eye or markings, or a fish.
 3. The **compose** pass draws the grid, wake dots, eat flashes and the glyphs from a font atlas.
 
-**Updates** come from GitHub's `releases/latest`. The app downloads `ASCII-Sharks.zip` (a mounted DMG can't be read by an app without a permission prompt), checks GitHub's SHA-256, the bundle identifier and version and the code signature, then swaps itself in with one atomic rename and restarts.
+The **Web** is drawn on the CPU, as the original draws its 2D canvas: `WebPainter` fills a `CellCanvas` (a block colour, up to two glyphs and their ink per cell), and one GPU pass, `canvas_main`, composes it at full resolution with the same glyph atlas.
+
+**Web reference tooling.** [`Tools/web-reference/`](../Tools/web-reference) runs the original ascii-spiders under node with the port's seeded random stream, producing the reference numbers `OceanChecks` compares the port against, plus a side-by-side parity page for Chrome. Its README has the steps.
+
+**Updates** come from GitHub's `releases/latest`. The app downloads `ASCII-Animals.zip` (a mounted DMG can't be read by an app without a permission prompt), checks GitHub's SHA-256, the bundle identifier and version and the code signature, then swaps itself in with one atomic rename and restarts.
 
 ## Energy
 

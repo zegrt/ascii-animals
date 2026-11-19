@@ -12,6 +12,8 @@ enum AppInfo {
     static let repoURL = URL(string: "https://github.com/zegrt/ascii-animals")!
     static let releasesURL = URL(string: "https://github.com/zegrt/ascii-animals/releases")!
     static let issuesURL = URL(string: "https://github.com/zegrt/ascii-animals/issues/new")!
-    static let originalURL = URL(string: "https://github.com/stackedlol/ascii-sharks")!
+    /// The originals the habitats come from.
+    static let sharksURL = URL(string: "https://github.com/stackedlol/ascii-sharks")!
+    static let spidersURL = URL(string: "https://github.com/stackedlol/ascii-spiders")!
     static let latestAPI = URL(string: "https://api.github.com/repos/zegrt/ascii-animals/releases/latest")!
 }

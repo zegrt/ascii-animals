@@ -4,7 +4,7 @@ import OceanKit
 import SwiftUI
 
 /// The About window: a strip of live ocean, the icon, the name and version,
-/// who made it, and credit to the original and the font.
+/// who made it, and credit to the originals and the font.
 enum AboutWindow {
     private static var controller: AboutController?
 
@@ -151,7 +151,10 @@ struct AboutView: View {
                 Divider().padding(.horizontal, 28).padding(.vertical, 16)
 
                 VStack(spacing: 5) {
-                    Text(.init("The Ocean comes from [ascii-sharks](\(AppInfo.originalURL.absoluteString)) by [@stackedlol](https://github.com/stackedlol)."))
+                    VStack(spacing: 1) {
+                        Text(.init("The Ocean comes from [ascii-sharks](\(AppInfo.sharksURL.absoluteString)),"))
+                        Text(.init("the Web from [ascii-spiders](\(AppInfo.spidersURL.absoluteString)), both by [@stackedlol](https://github.com/stackedlol)."))
+                    }
                     Text("Set in Geist Mono, under the SIL Open Font License.")
                 }
                 .font(.footnote)
