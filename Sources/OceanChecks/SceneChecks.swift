@@ -17,6 +17,34 @@ private func packShared(_ w: World, viewport: CGRect, after: Int = 0) -> (u: Uns
 private func hd(_ u: UnsafeMutableRawPointer, _ i: Int) -> SIMD4<Float> { u.load(fromByteOffset: i * 16, as: SIMD4<Float>.self) }
 
 func sceneChecks() {
+    check("oceanSimMatchesWorld") {
+        let terrain = Terrain(rects: [userMonitor, userLaptop]), cell = CGSize(width: 13, height: 19)
+        var s = Settings(); s.sharks = [.greathammer, .mako]
+        let sim = OceanSim(settings: s, seed: 11)
+        sim.layout(terrain: terrain, cell: cell, settings: s)
+        let bare = World(sharks: s.sharks, rng: Rng(seed: 11))
+        bare.resize(terrain: terrain, cell: cell, density: s.fishDensity)
+        for _ in 0..<200 { sim.step(OceanClock.step); bare.step(OceanClock.step) }
+        try expect(sim.stepCount == bare.stepCount && sim.time == bare.time, "clock differs")
+        try expect(sim.world.sharks.count == bare.sharks.count && sim.world.fish.count == bare.fish.count, "counts differ")
+        for (a, b) in zip(sim.world.sharks, bare.sharks) { try expect(a.nodes == b.nodes, "shark nodes differ") }
+        for (a, b) in zip(sim.world.fish, bare.fish) { try expect(a.x == b.x && a.y == b.y, "fish differ") }
+    }
+    check("habitatsRebuildRules") {
+        let a = Settings()
+        var b = a; b.sharks = [.classic]
+        try expect(Habitats.needsRebuild(old: a, new: b), "sharks change should rebuild")
+        b = a; b.fishDensity = 1.5
+        try expect(!Habitats.needsRebuild(old: a, new: b), "density change should not rebuild")
+        b = a; b.habitat = .web
+        try expect(Habitats.needsRebuild(old: a, new: b), "habitat change should rebuild")
+        b = a; b.webFlies = !a.webFlies
+        try expect(!Habitats.needsRebuild(old: a, new: b), "web flies on ocean should not rebuild")
+        var w = a; w.habitat = .web
+        var w2 = w; w2.webJumper = !w.webJumper
+        try expect(Habitats.needsRebuild(old: w, new: w2), "web jumper on web should rebuild")
+    }
+
     check("clockIgnoresOlder") {
         var c = OceanClock(); _ = c.advance(to: 10, speed: 1)
         try expect(c.advance(to: 9.5, speed: 1) == 0, "older timestamp stepped")
