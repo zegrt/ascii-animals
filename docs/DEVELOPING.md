@@ -67,6 +67,17 @@ Measured on an M5 Pro MacBook Pro.
 
 Most of a live wallpaper's cost is WindowServer redrawing everything above it on every frame. That's why the frame rate is the main lever, and why the economy rate is 15 fps.
 
+**Ocean and Web, side by side.** Measured with `Tools/energy.sh` on the same Mac with two displays (the built-in Retina plus a 2560×1440 monitor, one shared habitat), 60 s per row after 10 s of settling. WindowServer with no wallpaper app running was 0.4%. Two displays cost more than the single-display table above, so compare rows here with each other.
+
+| | App | WindowServer | Memory |
+|---|---|---|---|
+| Ocean, 30 fps | 12.7% CPU | 22.2% | ~285 MB |
+| **Web, 30 fps** | **9.6% CPU** | 22.1% | ~230 MB (311 peak) |
+| Ocean, 15 fps | 10.3% CPU | 15.6% | ~270 MB |
+| **Web, 15 fps** | **8.3% CPU** | 16.2% | ~297 MB |
+
+Memory here is the app's footprint as `top` reports it; most of it is the displays' frame buffers. `swift run -c release OceanTool bench --desk --habitat web` measures the CPU work per second offscreen on the same layout.
+
 ## Known limits
 
 - **Spaces:** macOS changes wallpapers one Space at a time and gives apps no way to identify Spaces. So the matching still goes on the Space where the app starts. Wallpapers it doesn't recognise are never touched, and only what it set is restored.
