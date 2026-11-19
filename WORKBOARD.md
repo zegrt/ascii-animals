@@ -63,7 +63,7 @@ Director's profile: none
 
 | Id | Task | Size | Files | Branch | Builder | Reviewer | Rounds | State | Brief |
 |---|---|---|---|---|---|---|---|---|---|
-| t1-2 | Breeze, flowers and butterfly flight (plan T1 + T2), with the director's path fix | Content | Sources/OceanKit/Meadow/{Breeze,Flowers,ButterflySpecies,Butterfly}.swift, Sources/OceanChecks/MeadowChecks.swift, Sources/OceanTool/{Paths,main}.swift | meadow-t1-2 | earlier agents (5496bbf, 0cce823) | reviewer-t1-2 (Claude Opus, T3 child thread) | 0 | in review | briefs/t1-2.md |
+| t1-2 | Breeze, flowers and butterfly flight (plan T1 + T2), with the director's path fix | Content | Sources/OceanKit/Meadow/{Breeze,Flowers,ButterflySpecies,Butterfly}.swift, Sources/OceanChecks/MeadowChecks.swift, Sources/OceanTool/{Paths,main}.swift | meadow-t1-2 | builder-t1-2 (Claude Opus, T3 child thread; fix round 1) | reviewer-t1-2 (Claude Opus, T3 child thread) | 1 | building (fix round 1) | briefs/t1-2.md |
 | t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered) | Content | to brief | meadow-t5 | | | 0 | open (waits on t1-2 merged) | |
 | t3 | Meadow world and behaviours (plan T3) | Content | to brief | meadow-t3 | | | 0 | open (waits on t5) | |
 | t4 | Cursor landing, courtship, crossings, monarch life cycle (plan T4) | Content | to brief | meadow-t4 | | | 0 | open (waits on t3) | |
@@ -73,9 +73,21 @@ Director's profile: none
 | t9 | Choosing the Meadow: menu, Settings, welcome (plan T9) | Content | to brief | meadow-t9 | | | 0 | open (waits on t8) | |
 | t10 | Words, watch and release 3.1 (plan T10; outward-facing, the director approves the release) | Content | to brief | meadow-t10 | | | 0 | open (waits on t9) | |
 
+## Review routing
+
+- t1-2, review 61e1f6e (2026-11-20), routed by the manager:
+  - Fix (in the task's Files, this task caused or carries them): 1 (finite guards), 2 (tiny-viewport walls),
+    3 (flower seekers reach the flowers: the plan's foraging needs it, so no director call), 4 (weak checks),
+    5 (coverage check over seeds), 6 (CI-risk expressions), 7 (breeze and lean scale with the cell),
+    8 (bloom keeps the land's clock), 10 (paths default 60 s, as the plan says).
+  - Rewrite t3's brief: 11 (stale flower indices) and 7's second half (the world sets `Butterfly.scale`).
+  - Later, for the director at t5's first still: 9 (tall stems sway at one rate and lean far; the plan allows it).
+  - Earlier Noticed items 1–5 are covered by findings 6, 1, 8, 11 and 4(c).
+  - Before approval: t1-2 must pass CI (Swift 6.3.3), not only local checks.
+
 ## Noticed
 
-- From t1-2 (earlier review of plan T1, 2026-11-19), to route when t1-2's review lands:
+- From t1-2 (earlier review of plan T1, 2026-11-19), routed above on 2026-11-20:
   1. Long mixed-literal expressions at `Breeze.swift:328,329,382,412,421` and `Flowers.swift:646,653` may time out
      on CI's Swift 6.3.3.
   2. `Breeze.sample` can crash on a non-finite position; it needs a finite guard.
