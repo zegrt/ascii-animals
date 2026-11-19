@@ -1,4 +1,5 @@
 import CoreGraphics
+import CryptoKit
 import Foundation
 import ImageIO
 import Metal
@@ -109,6 +110,15 @@ func renderChecks() {
         try expect(n > 200, "too few sparse-cell pixels: \(n)")
         let mean = total / n
         try expect(abs(mean - slotW / 2) < 1.5, "glyph ink centred at \(mean) px, cell centre \(slotW / 2)")
+    }
+    check("oceanStillUnchanged") {
+        // The Ocean's fingerprint, captured before the host refactor (Task 6):
+        // any change to how the Ocean draws shows up here.
+        let img = try StillRenderer.render(settings: .defaults, size: CGSize(width: 800, height: 500), scale: 2, warmup: 6,
+                                           systemIsDark: true, accent: SIMD3(0.2, 0.5, 1), seed: 7)
+        let data = img.dataProvider!.data! as Data
+        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        try expect(hash == "c08e379d5657f7750ffecdb18108081e4a23e50b60b4095cc79a5956f85ef08b", "ocean still hash \(hash)")
     }
     check("stillPNGSize") {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("ocean-check-\(getpid()).png")
