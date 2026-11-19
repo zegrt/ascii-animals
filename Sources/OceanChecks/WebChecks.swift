@@ -223,7 +223,7 @@ func webWorldFeatures(_ w: WebWorld) -> [(String, Double)] {
         f += [("web\(i).laid", Double(web.laid)), ("web\(i).broken", Double(web.broken)), ("web\(i).gen", Double(web.gen)),
               ("web\(i).seed", web.seed), ("web\(i).n", Double(web.n)), ("web\(i).held", Double(web.held)),
               ("web\(i).hubX", Double(web.x[web.hub])), ("web\(i).hubY", Double(web.y[web.hub])),
-              ("web\(i).sumX", sx), ("web\(i).sumY", sy), ("web\(i).prey", Double(web.prey.count))]
+              ("web\(i).sumX", sx), ("web\(i).sumY", sy), ("web\(i).prey", Double(web.prey.count))] as [(String, Double)]
     }
     for (i, v) in w.weavers.enumerated() {
         let sp = v.spider
@@ -233,7 +233,7 @@ func webWorldFeatures(_ w: WebWorld) -> [(String, Double)] {
               ("weaver\(i).wp", Double(v.wp)), ("weaver\(i).catches", Double(v.catches)), ("weaver\(i).age", v.age),
               ("weaver\(i).alert", v.alert), ("weaver\(i).x", sp.x), ("weaver\(i).y", sp.y), ("weaver\(i).h", sp.h),
               ("weaver\(i).hv", sp.hv), ("weaver\(i).dx", sp.dx), ("weaver\(i).dy", sp.dy), ("weaver\(i).still", sp.still),
-              ("weaver\(i).feetX", fx), ("weaver\(i).feetY", fy), ("weaver\(i).planted", planted), ("weaver\(i).links", links)]
+              ("weaver\(i).feetX", fx), ("weaver\(i).feetY", fy), ("weaver\(i).planted", planted), ("weaver\(i).links", links)] as [(String, Double)]
     }
     if let j = w.jumper {
         let sp = j.spider
@@ -241,12 +241,12 @@ func webWorldFeatures(_ w: WebWorld) -> [(String, Double)] {
         for l in sp.legs { fx += l.fx; fy += l.fy }
         f += [("jumper.state", Double(jumperStates.firstIndex(of: j.state)!)), ("jumper.x", sp.x), ("jumper.y", sp.y),
               ("jumper.h", sp.h), ("jumper.scale", sp.scale), ("jumper.drag", j.drag?.life ?? -1),
-              ("jumper.feetX", fx), ("jumper.feetY", fy)]
+              ("jumper.feetX", fx), ("jumper.feetY", fy)] as [(String, Double)]
     }
     f.append(("flies", Double(w.swarm.flies.count)))
     for (i, fl) in w.swarm.flies.enumerated() {
         f += [("fly\(i).mode", Double(flyModes.firstIndex(of: fl.mode)!)), ("fly\(i).x", fl.x), ("fly\(i).y", fl.y),
-              ("fly\(i).h", fl.h), ("fly\(i).v", fl.v)]
+              ("fly\(i).h", fl.h), ("fly\(i).v", fl.v)] as [(String, Double)]
     }
     f.append(("heat", Double(w.heat.count)))
     return f
@@ -630,12 +630,12 @@ func webPainterChecks() {
         var s = Settings.defaults
         let dark = paint(sim, vp, cell: cell)
         try expect(dark.background == .zero, "dark background \(dark.background)")
-        try expect(dark.gridColor == SIMD4(1, 1, 1, 0.055), "dark grid \(dark.gridColor)")
+        try expect(dark.gridColor == SIMD4<Float>(1, 1, 1, 0.055), "dark grid \(dark.gridColor)")
         s.appearance = .light
         let lightTheme = ThemeParams.make(s, systemIsDark: true, accent: .zero)
         let light = paint(sim, vp, cell: cell, theme: lightTheme)
-        try expect(light.background == SIMD3(247, 246, 243) / 255, "paper \(light.background)")
-        try expect(light.gridColor == SIMD4(SIMD3(35, 35, 35) / 255, 0.08), "light grid \(light.gridColor)")
+        try expect(light.background == SIMD3<Float>(247, 246, 243) / 255, "paper \(light.background)")
+        try expect(light.gridColor == SIMD4<Float>(SIMD3<Float>(35, 35, 35) / 255, 0.08), "light grid \(light.gridColor)")
         s.grid = false
         try expect(paint(sim, vp, cell: cell, theme: ThemeParams.make(s, systemIsDark: true, accent: .zero)).gridColor.w == 0, "grid off")
         // Calm: dark multiplies ink and block by the brightness; light mixes them toward the paper.
@@ -656,9 +656,9 @@ func webPainterChecks() {
             for i in 0..<normal.ink.count where normal.glyph[i] != CellCanvas.noGlyph {
                 for (a, b) in [(rgba(normal.ink[i]), rgba(calm.ink[i])), (rgba(normal.block[i]), rgba(calm.block[i]))] where a.w > 0 {
                     let paper = SIMD3<Float>(247, 246, 243)
-                    let want = isLight ? SIMD3(a.x, a.y, a.z) + (paper - SIMD3(a.x, a.y, a.z)) * (1 - theme.brightness)
-                                       : SIMD3(a.x, a.y, a.z) * theme.brightness
-                    let d = SIMD3(b.x, b.y, b.z) - want
+                    let rgb = SIMD3<Float>(a.x, a.y, a.z)
+                    let want: SIMD3<Float> = isLight ? rgb + (paper - rgb) * (1 - theme.brightness) : rgb * theme.brightness
+                    let d: SIMD3<Float> = SIMD3<Float>(b.x, b.y, b.z) - want
                     try expect(max(abs(d.x), abs(d.y), abs(d.z)) <= 1.01 && a.w == b.w, "calm \(isLight ? "light" : "dark") cell \(i): \(a) -> \(b), want \(want)")
                     compared += 1
                 }
