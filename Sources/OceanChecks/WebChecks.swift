@@ -195,4 +195,278 @@ func webChecks() {
             try expectSummary("\(label) jolted", w, want[3], tol: 1e-4)
         }
     }
+    webWorldChecks()
+}
+
+// ── Task 9: spiders, weavers, the jumper, flies and the wall ──
+
+/// The demo page's wall at the built-in display's size, 13 × 19 cells.
+private func makeWorld(seed: UInt64, spiders: [SpiderKind] = SpiderKind.defaultCast, flies: Bool = true, jumper: Bool = true,
+                       rects: [CGRect] = [CGRect(x: 0, y: 0, width: 1800, height: 1169)], settled: Bool = false) -> WebWorld {
+    let w = WebWorld(spiders: spiders, flies: flies, jumper: jumper, random: WebRandom(seed: seed))
+    w.layout(terrain: Terrain(rects: rects), cell: CGSize(width: 13, height: 19), settled: settled)
+    return w
+}
+
+private let weaverStates: [WeaverState] = [.build, .idle, .hunt, .wrap, .carry, .return, .eat, .move]
+private let jumperStates: [JumperState] = [.pause, .burst, .crouch, .jump]
+private let flyModes: [FlyMode] = [.fly, .rest, .stuck, .wrapped, .held, .gone]
+
+/// The same numbers world-ref.mjs prints, in the same order.
+func webWorldFeatures(_ w: WebWorld) -> [(String, Double)] {
+    var f: [(String, Double)] = [("time", w.time)]
+    for (i, web) in w.webs.enumerated() {
+        var sx = 0.0, sy = 0.0
+        for n in 0..<web.n { sx += Double(web.x[n]); sy += Double(web.y[n]) }
+        f += [("web\(i).laid", Double(web.laid)), ("web\(i).broken", Double(web.broken)), ("web\(i).gen", Double(web.gen)),
+              ("web\(i).seed", web.seed), ("web\(i).n", Double(web.n)), ("web\(i).held", Double(web.held)),
+              ("web\(i).hubX", Double(web.x[web.hub])), ("web\(i).hubY", Double(web.y[web.hub])),
+              ("web\(i).sumX", sx), ("web\(i).sumY", sy), ("web\(i).prey", Double(web.prey.count))]
+    }
+    for (i, v) in w.weavers.enumerated() {
+        let sp = v.spider
+        var fx = 0.0, fy = 0.0, planted = 0.0, links = 0.0
+        for l in sp.legs { fx += l.fx; fy += l.fy; planted += l.planted ? 1 : 0; links += Double(l.link) }
+        f += [("weaver\(i).state", Double(weaverStates.firstIndex(of: v.state)!)), ("weaver\(i).step", Double(v.step)),
+              ("weaver\(i).wp", Double(v.wp)), ("weaver\(i).catches", Double(v.catches)), ("weaver\(i).age", v.age),
+              ("weaver\(i).alert", v.alert), ("weaver\(i).x", sp.x), ("weaver\(i).y", sp.y), ("weaver\(i).h", sp.h),
+              ("weaver\(i).hv", sp.hv), ("weaver\(i).dx", sp.dx), ("weaver\(i).dy", sp.dy), ("weaver\(i).still", sp.still),
+              ("weaver\(i).feetX", fx), ("weaver\(i).feetY", fy), ("weaver\(i).planted", planted), ("weaver\(i).links", links)]
+    }
+    if let j = w.jumper {
+        let sp = j.spider
+        var fx = 0.0, fy = 0.0
+        for l in sp.legs { fx += l.fx; fy += l.fy }
+        f += [("jumper.state", Double(jumperStates.firstIndex(of: j.state)!)), ("jumper.x", sp.x), ("jumper.y", sp.y),
+              ("jumper.h", sp.h), ("jumper.scale", sp.scale), ("jumper.drag", j.drag?.life ?? -1),
+              ("jumper.feetX", fx), ("jumper.feetY", fy)]
+    }
+    f.append(("flies", Double(w.swarm.flies.count)))
+    for (i, fl) in w.swarm.flies.enumerated() {
+        f += [("fly\(i).mode", Double(flyModes.firstIndex(of: fl.mode)!)), ("fly\(i).x", fl.x), ("fly\(i).y", fl.y),
+              ("fly\(i).h", fl.h), ("fly\(i).v", fl.v)]
+    }
+    f.append(("heat", Double(w.heat.count)))
+    return f
+}
+
+/// world-ref.mjs's script: a pass through the near web, a fly dropped on its spiral and one into the air, then the
+/// pointer held still 300 px from the jumper,
+/// then from 40 s the first hunted fly torn free. Calls `each(step)` after every step.
+func runWebScript(_ w: WebWorld, steps: Int, _ each: (Int) -> Void) {
+    let W = w.width
+    var aim = Vec(x: 0, y: 0)
+    var cut = false
+    let near = { w.weavers[w.weavers.count - 1] }
+    for s in 1...steps {
+        if s >= 60 && s < 120 && !w.weavers.isEmpty {
+            let web = near().web
+            let k = Double(s - 60) / 60
+            w.pointerMoved(x: Double(web.x[web.hub]) + web.outer * (0.6 - 1.2 * k), y: Double(web.y[web.hub]) + 7)
+        }
+        if s == 120 { w.pointerLeft() }
+        if s == 180 && !w.weavers.isEmpty {
+            let web = near().web
+            for l in 0..<web.m where web.isLaid(l) && web.kind[l] == SPIRAL {
+                let p = web.pos(l, 0.5)
+                w.release(x: p.x, y: p.y)
+                break
+            }
+        }
+        if s == 200 { w.release(x: W * 0.5, y: 12) }
+        if s >= 300 && s < 1500 && w.jumper != nil {
+            if s == 300, let sp = w.jumper?.spider {
+                aim = Vec(x: min(W - 20, max(20, sp.x + (sp.x < W / 2 ? 300 : -300))), y: sp.y)
+            }
+            w.pointerMoved(x: aim.x, y: aim.y)
+        }
+        if s == 1500 { w.pointerLeft() }
+        if s >= 2400 && !cut, let v = w.weavers.first(where: { $0.state == .hunt && $0.prey != nil }) {
+            // The first fly hunted from then on tears free (its thread cut), so its spider turns back: "return".
+            v.web.cut(v.prey!.link, true)
+            cut = true
+        }
+        w.step(1.0 / 60)
+        each(s)
+    }
+}
+
+private func step(_ w: WebWorld, _ seconds: Double, until done: () -> Bool = { false }) {
+    for _ in 0..<Int(seconds * 60) {
+        w.step(1.0 / 60)
+        if done() { return }
+    }
+}
+
+/// The capture-spiral thread nearest the hub: where a dropped fly sticks closest to the spider.
+private func innerSpiral(_ web: OrbWeb) -> Int? {
+    let hx = Double(web.x[web.hub]), hy = Double(web.y[web.hub])
+    return (0..<web.m).filter { web.isLaid($0) && web.kind[$0] == SPIRAL }
+        .min { let a = web.pos($0, 0.5), b = web.pos($1, 0.5); return hypot(a.x - hx, a.y - hy) < hypot(b.x - hx, b.y - hy) }
+}
+
+func webWorldChecks() {
+    // The brief says "release a fly at the hub", but release only sticks a fly to capture spiral within 0.9 of a
+    // cell (flies.ts), and the hub is ringed by hub and radial silk: there it just flies off. So it is dropped on
+    // the spiral thread nearest the hub.
+    check("weaverLifeCycle") {
+        let w = makeWorld(seed: 3, spiders: [.araneus], flies: false, jumper: false)
+        let v = w.weavers[0]
+        try expect(v.state == .idle, "starts \(v.state)")
+        guard let l = innerSpiral(v.web) else { throw CheckFailure(detail: "no capture spiral") }
+        let p = v.web.pos(l, 0.5)
+        let fly = w.release(x: p.x, y: p.y)
+        try expect(fly.mode == .stuck && fly.web === v.web, "the fly didn't stick to the web: \(fly.mode)")
+        var seen = Set<WeaverState>()
+        let eaten: Set<FlyMode> = [.wrapped, .held, .gone]
+        step(w, 30) {
+            seen.insert(v.state)
+            return eaten.contains(fly.mode) && seen.isSuperset(of: [.hunt, .wrap, .carry])
+        }
+        try expect(seen.isSuperset(of: [.hunt, .wrap, .carry]), "states seen \(seen)")
+        try expect(eaten.contains(fly.mode), "fly ended \(fly.mode)")
+    }
+    check("weaverFeelsAPluck") {
+        let w = makeWorld(seed: 3, spiders: [.araneus], flies: false, jumper: false)
+        let v = w.weavers[0], web = v.web
+        step(w, 1)
+        let hx = Double(web.x[web.hub]), hy = Double(web.y[web.hub])
+        let h0 = v.spider.h
+        try expect(v.state == .idle && abs(angleDiff(h0, .pi / 2)) < 0.05, "not hanging head-down: \(v.state) \(h0)")
+        // The pointer sweeps down through the silk to the right of the hub, for half a second.
+        for s in 0..<30 {
+            w.pointerMoved(x: hx + web.outer * 0.5, y: hy - web.outer * 0.4 + web.outer * 0.8 * Double(s) / 29)
+            w.step(1.0 / 60)
+        }
+        try expect(v.alert > 0.3 && abs(v.alertDir) < 0.8, "alert \(v.alert) from \(v.alertDir)")
+        // Head-down is +pi/2; a tug from the right (angle ~0) swings it toward 0.
+        try expect(v.spider.h < h0 - 0.1, "heading \(h0) -> \(v.spider.h)")
+        try expect(v.spider.reach != nil, "no foreleg raised toward the tug")
+    }
+    check("jumperPounces") {
+        let w = makeWorld(seed: 3, flies: false)
+        guard let j = w.jumper else { throw CheckFailure(detail: "no jumper") }
+        let sp = j.spider
+        let p = Vec(x: sp.x + (sp.x < w.width / 2 ? 300 : -300), y: sp.y)
+        var jumped = false
+        for _ in 0..<600 {
+            w.pointerMoved(x: p.x, y: p.y)
+            w.step(1.0 / 60)
+            if j.state == .jump { jumped = true; break }
+        }
+        try expect(jumped, "no pounce in 10 s; ended \(j.state) at \(hypot(sp.x - p.x, sp.y - p.y)) px")
+        step(w, 2) { j.state != .jump }
+        try expect(hypot(sp.x - p.x, sp.y - p.y) < sp.B * 0.5, "landed \(hypot(sp.x - p.x, sp.y - p.y)) px from the pointer")
+    }
+    check("legsStayOnSilk") {
+        for kind in SpiderKind.allCases {
+            let w = makeWorld(seed: 3, spiders: [kind], flies: false, jumper: false)
+            let v = w.weavers[0]
+            let cell = max(w.cw, w.ch)
+            var planted = 0
+            for _ in 0..<(20 * 60) {
+                w.step(1.0 / 60)
+                try expect(v.state == .idle, "\(kind) left idle: \(v.state)")
+                for (i, leg) in v.spider.legs.enumerated() where leg.planted {
+                    planted += 1
+                    try expect(v.web.snap(leg.fx, leg.fy, cell) != nil, "\(kind) foot \(i) off the silk at t=\(w.time)")
+                }
+            }
+            try expect(planted > 20 * 60 * 6, "\(kind): feet mostly in the air (\(planted))")
+        }
+    }
+    check("flyFromEmptyClick") {
+        let w = makeWorld(seed: 3, flies: false)
+        try expect(w.swarm.flies.isEmpty, "flies off, yet \(w.swarm.flies.count)")
+        var spot: Vec? = nil
+        search: for gy in stride(from: 40.0, to: w.height - 40, by: 40) {
+            for gx in stride(from: 40.0, to: w.width - 40, by: 40) where w.webs.allSatisfy({ $0.snap(gx, gy, 80) == nil }) {
+                spot = Vec(x: gx, y: gy)
+                break search
+            }
+        }
+        guard let spot else { throw CheckFailure(detail: "no empty spot") }
+        try expect(w.pointerDown(x: -5, y: spot.y) == nil, "a click off the terrain dropped a fly")
+        guard let f = w.pointerDown(x: spot.x, y: spot.y) else { throw CheckFailure(detail: "no fly") }
+        try expect(w.swarm.flies.count == 1 && f.mode == .fly && f.x == spot.x && f.y == spot.y, "\(f.mode) at \(f.x), \(f.y)")
+        w.step(1.0 / 60)
+        try expect(f.mode == .fly && hypot(f.x - spot.x, f.y - spot.y) < w.cw, "\(f.mode), \(hypot(f.x - spot.x, f.y - spot.y)) px away")
+    }
+    check("webWorldDeterministic") {
+        let a = makeWorld(seed: 5), b = makeWorld(seed: 5)
+        runWebScript(a, steps: 1800) { _ in }
+        runWebScript(b, steps: 1800) { _ in }
+        let fa = webWorldFeatures(a), fb = webWorldFeatures(b)
+        try expect(fa.count == fb.count, "feature counts differ")
+        for (x, y) in zip(fa, fb) { try expect(x.0 == y.0 && x.1 == y.1, "\(x.0): \(x.1) vs \(y.1)") }
+        try expect(a.random.unit() == b.random.unit(), "random streams differ")
+    }
+    // The original world.ts run on the same random stream (scratchpad port9/world-ref.mjs, values in
+    // WebWorldReference.swift), with the scripted pointer, two clicks and a torn-free fly: the demo page's wall at
+    // 1800 x 1169 for ten simulated minutes (every weaver, jumper and fly state), and a small screen with a roster
+    // longer than it has room for, laid out settled. Every number agrees to ~1e-13 and the stream ends at the same
+    // draw. (The original is patched as the port is: no nav-bar gap, and the move glide's hang fixed.)
+    check("webWorldMatchesOriginal") {
+        for run in webWorldReference {
+            let w = WebWorld(spiders: run.spiders ?? SpiderKind.defaultCast, flies: true, jumper: true, random: WebRandom(seed: run.seed))
+            w.layout(terrain: .single(width: run.width, height: run.height), cell: CGSize(width: run.cw, height: run.ch), settled: run.settled)
+            var weavers = Set<WeaverState>(), jumpers = Set<JumperState>(), flies = Set<FlyMode>()
+            var got: [Int: [(String, Double)]] = [:]
+            let wanted = Set(run.checkpoints.map(\.step))
+            runWebScript(w, steps: run.checkpoints.map(\.step).max()!) { s in
+                for v in w.weavers { weavers.insert(v.state) }
+                if let j = w.jumper { jumpers.insert(j.state) }
+                for f in w.swarm.flies { flies.insert(f.mode) }
+                if wanted.contains(s) { got[s] = webWorldFeatures(w) }
+            }
+            for ref in run.checkpoints {
+                let f = got[ref.step]!
+                try expect(f.map(\.0) == ref.labels, "\(run.name) step \(ref.step): \(f.count) features, original \(ref.labels.count)")
+                for (i, (label, v)) in f.enumerated() {
+                    let want = ref.values[i]
+                    try expect(abs(v - want) <= 1e-9 * max(1, abs(want)), "\(run.name) step \(ref.step) \(label): \(v), original \(want)")
+                }
+            }
+            try expect(w.random.unit() == run.next, "\(run.name): the random stream drifted from the original's")
+            if run.name == "demo" {
+                try expect(weavers.count == 8 && jumpers.count == 4 && flies.count == 6,
+                           "not every state was exercised: \(weavers) \(jumpers) \(flies)")
+            }
+        }
+    }
+    // Two screens, the monitor-above-laptop desk: webs drawn on one screen with the whole frame on it, the jumper and
+    // the flies kept to the screens (flies up to 20 px off, as the original lets them off the page), and a relayout
+    // onto one screen.
+    check("webWorldOnSeveralScreens") {
+        let rects = [CGRect(x: 0, y: 0, width: 2560, height: 1440), CGRect(x: 375, y: 1440, width: 1800, height: 1169)]
+        let w = makeWorld(seed: 9, rects: rects)
+        let t = Terrain(rects: rects)
+        try expect(w.webs.count >= 3 && !w.weavers.isEmpty, "\(w.webs.count) webs")
+        func framesFit() throws {
+            for web in w.webs {
+                let r = rects[t.rectIndex(near: SIMD2(web.cx, web.cy))]
+                try expect(r.contains(CGPoint(x: web.cx, y: web.cy)), "hub \(web.cx), \(web.cy) on no screen")
+                for l in 0..<web.m where web.kind[l] == FRAME {
+                    for n in [web.la[l], web.lb[l]] where web.pin[n] != 0 {
+                        let p = CGPoint(x: Double(web.x[n]), y: Double(web.y[n]))
+                        try expect(r.insetBy(dx: -1, dy: -1).contains(p), "frame corner \(p) off its screen \(r)")
+                    }
+                }
+            }
+        }
+        try framesFit()
+        var lost: String? = nil
+        runWebScript(w, steps: 3600) { s in
+            if let sp = w.jumper?.spider, !t.contains(SIMD2(sp.x, sp.y)) { lost = lost ?? "jumper off the screens at \(sp.x), \(sp.y), step \(s)" }
+            for f in w.swarm.flies where f.mode == .fly && !rects.contains(where: { $0.insetBy(dx: -20.5, dy: -20.5).contains(CGPoint(x: f.x, y: f.y)) }) {
+                lost = lost ?? "fly lost at \(f.x), \(f.y), step \(s)"
+            }
+        }
+        try expect(lost == nil, lost ?? "")
+        try framesFit()
+        for v in w.weavers { try expect(v.spider.x.isFinite && v.spider.y.isFinite, "weaver not finite") }
+        w.layout(terrain: .single(width: 1800, height: 1169), cell: CGSize(width: 13, height: 19), settled: false)
+        step(w, 5)
+        try expect(w.webs.count >= 3 && w.weavers.allSatisfy { $0.spider.x.isFinite }, "relayout onto one screen")
+    }
 }

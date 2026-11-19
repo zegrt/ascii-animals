@@ -112,8 +112,8 @@ public final class OrbWeb {
     public var held = -1
     /// Bumped each rebuild, so prey stuck to an old web can tell.
     public var gen = 0
-    /// Flies stuck to this web. (Typed `[Fly]` once flies.ts is ported.)
-    public var prey: [AnyObject] = []
+    /// Flies stuck to this web.
+    public var prey: [Fly] = []
     /// `Math.random()` for this web: the world's shared stream.
     public let random: WebRandom
 
@@ -665,6 +665,6 @@ public final class OrbWeb {
 }
 
 /// JavaScript's Array.prototype.sort is stable; Swift's sort makes no such promise, so ties keep their order.
-private func stableSorted<E>(_ a: [E], by less: (E, E) -> Bool) -> [E] {
+func stableSorted<E>(_ a: [E], by less: (E, E) -> Bool) -> [E] {
     a.indices.sorted { i, j in less(a[i], a[j]) || (!less(a[j], a[i]) && i < j) }.map { a[$0] }
 }
