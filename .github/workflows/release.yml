@@ -16,8 +16,11 @@ jobs:
       OCEAN_SKIP_GPU: "1"
     steps:
       - uses: actions/checkout@v4
-      - name: Toolchain
-        run: swift --version
+      - name: Toolchain (the newest Xcode on the runner, as the app is developed with)
+        run: |
+          ls -d /Applications/Xcode*.app
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
+          swift --version
       - name: Tag matches the app version
         run: |
           plist=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist)
