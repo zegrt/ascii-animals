@@ -43,7 +43,12 @@ enum SharksHandover {
             alert.messageText = "ASCII Sharks is still running"
             alert.informativeText = "Quit it from its 🐟 menu, then click Continue."
             alert.addButton(withTitle: "Continue")
-            alert.runModal()
+            alert.addButton(withTitle: "Quit ASCII Animals")
+            if alert.runModal() == .alertSecondButtonReturn {
+                // A way out for someone who can't quit Sharks; never run alongside it.
+                NSApp.terminate(nil)
+                exit(0)
+            }
             running().forEach { $0.terminate() }
             for _ in 0..<20 where !running().isEmpty { Thread.sleep(forTimeInterval: 0.1) }
         }
@@ -55,16 +60,24 @@ enum SharksHandover {
         let alert = NSAlert()
         alert.messageText = "ASCII Animals takes over from ASCII Sharks"
         alert.informativeText = "Your settings came with you. You don't need ASCII Sharks any more, and having both installed is just clutter."
-        let trashButton = alert.addButton(withTitle: "Move ASCII Sharks to the Trash")
-        let keepButton = alert.addButton(withTitle: "Keep It")
-        // Never make the destructive choice the one a stray Return picks.
-        trashButton.keyEquivalent = ""
-        keepButton.keyEquivalent = "\r"
+        alert.addButton(withTitle: "Keep It")
+        alert.addButton(withTitle: "Move ASCII Sharks to the Trash")
         alert.showsSuppressionButton = true
         alert.suppressionButton?.title = "Open ASCII Animals at login"
         alert.suppressionButton?.state = .on
-        let trash = alert.runModal() == .alertFirstButtonReturn
-        if alert.suppressionButton?.state == .on { try? LoginItem.set(true) }
-        if trash { try? FileManager.default.trashItem(at: url, resultingItemURL: nil) }
+        let trash = alert.runModal() == .alertSecondButtonReturn
+        if alert.suppressionButton?.state == .on {
+            do { try LoginItem.set(true) } catch { Log.write("hand-over: could not add login item: \(error)") }
+        }
+        guard trash else { return }
+        do {
+            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+        } catch {
+            Log.write("hand-over: could not trash ASCII Sharks: \(error)")
+            let failed = NSAlert()
+            failed.messageText = "ASCII Sharks couldn't be moved to the Trash"
+            failed.informativeText = "You can drag it there from Applications."
+            failed.runModal()
+        }
     }
 }
