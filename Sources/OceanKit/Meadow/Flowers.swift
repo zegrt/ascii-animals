@@ -74,7 +74,7 @@ public struct Flower: Equatable, Sendable {
 /// The flowers along the bottom of every screen rect, swaying in the breeze (research §4).
 public final class Meadowland {
     public private(set) var flowers: [Flower] = []
-    /// Sim time, s. Follows the caller's clock: `bloom(…time:)` sets it, `step` advances it.
+    /// Sim time, s: the land's own clock, advanced only by `step`.
     public private(set) var time: Double = 0
     public private(set) var cell = CGSize(width: 13, height: 19)
 
@@ -223,9 +223,9 @@ public final class Meadowland {
     }
 
     /// A click: a flower grows from the ground band of the rect under it, in that column. Its kind leans
-    /// towards what already grows nearby. Nil when the click is outside every rect.
+    /// towards what already grows nearby. Nil when the click is outside every rect. `time` is only the new
+    /// flower's `bornAt`; the land keeps its own clock.
     public func bloom(atX x: Double, y: Double, terrain: Terrain, time: Double) -> Int? {
-        self.time = time
         let p = SIMD2<Double>(x, y)
         guard x.isFinite && y.isFinite && !terrain.rects.isEmpty && terrain.contains(p) else { return nil }
         let ri = terrain.rectIndex(near: p)
