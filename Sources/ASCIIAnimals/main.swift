@@ -5,7 +5,8 @@ import OceanKit
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let store = SettingsStore()
+    /// Lazy: the hand-over imports ASCII Sharks' settings first, then the store loads them.
+    lazy var store = SettingsStore()
     let signals = SystemSignals()
     var director: OceanDirector?
     var wallpaper: SystemWallpaper?
@@ -27,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
+        SharksHandover.run(app: self)
         crashedLastTime = CrashMarker.launch()
         Log.write("launch \(AppInfo.version) (\(AppInfo.build))\(crashedLastTime ? " after an unclean exit" : "")")
         do {

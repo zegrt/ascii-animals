@@ -141,3 +141,25 @@ func reportChecks() {
         try expect(q.first { $0.name == "body" }?.value?.contains("2.2 (4)") == true, "facts dropped instead of log lines")
     }
 }
+
+func handoverChecks() {
+    let url = URL(fileURLWithPath: "/Applications/ASCII Sharks.app")
+    func facts(app: URL? = nil, running: Bool = false, imported: Bool = false, settings: Data? = nil) -> HandoverFacts {
+        HandoverFacts(sharksApp: app, sharksRunning: running, alreadyImported: imported, sharksSettings: settings)
+    }
+    check("handoverNothingWithoutSharks") {
+        try expect(Handover.plan(facts()) == [], "expected no steps")
+    }
+    check("handoverQuitsFirst") {
+        let p = Handover.plan(facts(app: url, running: true, settings: Data("{}".utf8)))
+        try expect(p == [.quitSharks, .importSettings, .skipWelcome, .offerTrash(url)], "plan \(p)")
+    }
+    check("handoverImportsOnce") {
+        let p = Handover.plan(facts(app: url, imported: true, settings: Data("{}".utf8)))
+        try expect(p == [.offerTrash(url)], "plan \(p)")
+    }
+    check("handoverRunningButNotFound") {
+        let p = Handover.plan(facts(running: true))
+        try expect(p.first == .quitSharks && !p.contains { if case .offerTrash = $0 { return true } else { return false } }, "plan \(p)")
+    }
+}
