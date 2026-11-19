@@ -7,6 +7,10 @@
 //     --interact (Web): the parity script (WebScript.swift): the pointer drawn through the near web, a click
 //     dropping a fly on it, the pointer held still near the jumper.
 //   OceanTool bench [--habitat ocean|web]
+//   OceanTool bench --desk [--habitat ocean|web] [--separate] [--laptop WxH] [--density D] [--seconds S]
+//     CPU per second on the owner's desk (Bench.swift): both viewports drawn as the app draws them, at 30 and 15 fps.
+//   OceanTool bench --digest [--separate] [--laptop WxH] [--frames N]
+//     A fingerprint of every Web canvas over a scripted run on the desk: unchanged digest, unchanged output.
 // A Web still is the original's ?still=1 (settled), unless --live: then the live wall after the warm-up.
 import CoreGraphics
 import Foundation
@@ -106,6 +110,20 @@ case "iconset":
 case "bench":
     var s = Settings.defaults
     habitatOptions(&s)
+    let separate = flag("--separate")
+    let laptopDims = (option("--laptop") ?? "1800x1169").split(separator: "x").compactMap { Double($0) }
+    guard laptopDims.count == 2 else { fail("bad --laptop size") }
+    let laptop = CGSize(width: laptopDims[0], height: laptopDims[1])
+    if let d = option("--density"), let v = Double(d) { s.fishDensity = v }
+    if flag("--desk") {
+        try Bench.run(s.sanitized(), laptop: laptop, separate: separate, seconds: Double(option("--seconds") ?? "20") ?? 20)
+        break
+    }
+    if flag("--digest") {
+        s.habitat = .web
+        Bench.digest(s, laptop: laptop, separate: separate, frames: Int(option("--frames") ?? "900") ?? 900)
+        break
+    }
     if s.habitat == .web {
         // Simulation per step and painting per frame (one 1800 x 1169 screen, its cell canvas), the demo wall.
         let size = CGSize(width: 1800, height: 1169)
