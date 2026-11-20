@@ -63,7 +63,7 @@ Director's profile: none
 
 | Id | Task | Size | Files | Branch | Builder | Reviewer | Rounds | State | Brief |
 |---|---|---|---|---|---|---|---|---|---|
-| t1-2 | Breeze, flowers and butterfly flight (plan T1 + T2), with the director's path fix | Content | Sources/OceanKit/Meadow/{Breeze,Flowers,ButterflySpecies,Butterfly}.swift, Sources/OceanChecks/MeadowChecks.swift, Sources/OceanTool/{Paths,main}.swift | meadow-t1-2 | builder-t1-2 (Claude Opus, T3 child thread; fix round 1) | reviewer-t1-2 (Claude Opus, T3 child thread) | 1 | building (fix round 1) | briefs/t1-2.md |
+| t1-2 | Breeze, flowers and butterfly flight (plan T1 + T2), with the director's path fix | Content | Sources/OceanKit/Meadow/{Breeze,Flowers,ButterflySpecies,Butterfly}.swift, Sources/OceanChecks/MeadowChecks.swift, Sources/OceanTool/{Paths,main}.swift | meadow-t1-2 | builder-t1-2 (Claude Opus, T3 child thread; fix round 1) | reviewer-t1-2 (Claude Opus, T3 child thread) | 1 | in review (re-check of fix round 1, meadow-t1-2 @ 1e11a1b) | briefs/t1-2.md |
 | t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered) | Content | to brief | meadow-t5 | | | 0 | open (waits on t1-2 merged) | |
 | t3 | Meadow world and behaviours (plan T3) | Content | to brief | meadow-t3 | | | 0 | open (waits on t5) | |
 | t4 | Cursor landing, courtship, crossings, monarch life cycle (plan T4) | Content | to brief | meadow-t4 | | | 0 | open (waits on t3) | |
@@ -83,6 +83,9 @@ Director's profile: none
   - Rewrite t3's brief: 11 (stale flower indices) and 7's second half (the world sets `Butterfly.scale`).
   - Later, for the director at t5's first still: 9 (tall stems sway at one rate and lean far; the plan allows it).
   - Earlier Noticed items 1–5 are covered by findings 6, 1, 8, 11 and 4(c).
+  - Fix round 1 reported 2026-11-20 (1e11a1b, done with concerns): CI not yet run; a new per-beat speed surge for
+    the white (0.45) to meet the strengthened 4(b); the morpho exempt from the frozen-wings sink part of 4(a). The
+    re-check judges both.
   - Before approval: t1-2 must pass CI (Swift 6.3.3), not only local checks.
 
 ## Noticed
