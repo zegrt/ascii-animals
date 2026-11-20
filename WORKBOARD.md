@@ -45,6 +45,9 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-20: "no viual detail i meant about this: yeah figure all all the small devil in the edtails type stuff from
+  those scnees to this one can sfeel like the same family". Applies: the family-details round is about the LOOK
+  (visual details); motion and behaviour notes from the research are kept for later, not acted on now.
 - 2026-11-20, on the sketch: "yeah figure all all the small devil in the edtails type stuff from those scnees to this
   one can sfeel like the same family", then "aslo the artefact foesnt work / not just visual detail / just local
   host bro why artefact". Applies: new (the sketch is served on localhost, not as a published page; a researcher
