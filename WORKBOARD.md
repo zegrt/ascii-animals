@@ -45,6 +45,15 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-20: "aslo we are missing some of that random gplyh color noise thing that the other animals bodies had,
+  first figure out what that is? its not a erro ir issue". Applies: task.change (s1 is building: it goes into the
+  sketch's next round). What it is (manager, from Shaders.swift and WebPainter.swift): the hide shimmer. Each body
+  cell has a key hashed from its body-local position, so its glyph rides with the body; interior glyphs come from
+  a density ramp by shade with a ±1 random step; every cell re-rolls a random number about 2.4 times a second on its
+  own staggered phase; on a roll about 9 % of cells show their glyph in one of seven accent colours (orange, red,
+  purple, cyan, green, blue, gold), about 4 % in white, the rest in dark ink; edge cells use light glyphs with 7 %
+  accents; the sharks add a ±3 % brightness flicker per cell at 6 Hz. Accents are off on paper and scaled down in
+  Calm. The Meadow painter has the body-anchored glyphs but none of the coloured re-rolling flecks.
 - 2026-11-20: "take a step back". Applies: decide.escalate (p2a held; the manager reviews the whole approach with the
   director before more building).
 - 2026-11-20, on the p1 prototype: "also it doenst move like a butterfly anomore". Applies: new (p1 used a quick
