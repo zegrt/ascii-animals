@@ -45,6 +45,9 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-20: "can we work on stuff in parallel?". Applies: new (alongside mp, work that shares no files with it:
+  d1, the design of the Meadow in the app — presets, Settings, menu, status word, what's-new, welcome — as a
+  proposal with pictures for the director, so m8 and t9 build from an approved design).
 - 2026-11-20: "why are stuff taking so long?", then to the manager's list of process tweaks: "no first take a step
   back / exercise absrtact thnking". Applies: decide.escalate (the manager re-thinks the port's shape and brings it
   to the director before more is started; m1's running fix round may finish; nothing new starts).
@@ -259,6 +262,7 @@ Director's profile: none
 | m7 | Pointer and clicks | Content | to brief (port plan m7) | meadow-m7 | | Codex | 0 | open (waits on m6) | superseded by mp (one translation pass, 2026-11-20)
 | mp | One translation pass: the rest of the sketch (flight, butterflies, behaviours, pointer, painter) into the family's shape, runnable in OceanTool, films next to the sketch, within Web's CPU | Content (large; judged by eye, one review) | Sources/OceanKit/Meadow/* (new files; additions to MeadowTuning; m1's files only where the world needs hooks), Sources/OceanChecks/Meadow*.swift, Sources/OceanChecks/main.swift, Sources/OceanTool/{Meadow*,main,Bench}.swift, Sources/OceanKit/Domain/{HabitatKind,HabitatSim}.swift and the minimal `.meadow` switch cases in Sources/ASCIIAnimals (not offered in the app) | meadow-mp (from meadow-m1 after its fix round 2, with meadow-m3 merged in) | builder-mp (Claude Opus, T3 child thread) | Codex | 0 | building | briefs/mp.md |
 | m8 | The Meadow habitat, its presets and settings, OceanTool | Content | to brief (port plan m8) | meadow-m8 | | Codex | 0 | open (waits on m7) | |
+| d1 | The Meadow in the app, designed: presets, Settings, menu, status word, what's-new (not full screen), welcome; mock-up pictures for the director | Design (proposal only; nothing built) | docs/plans/2026-11-20-meadow-in-the-app.md, docs/plans/media/d1/* | design-d1 (from main) | builder-d1 (Claude Opus, T3 child thread) | none (the director approves it) | 0 | building | briefs/d1.md |
 
 ## Review routing
 
