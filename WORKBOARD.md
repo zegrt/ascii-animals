@@ -135,6 +135,11 @@ Director's profile: none
   Look development (p2) comes before the plan is rewritten: first motion and wingbeat speed (p2a), then the
   butterfly sheets, then the flowers ("ok", the director). t3 and t5w stay held until the plan is rewritten.
 
+- 2026-11-20: Make the Meadow's original first: a live web sketch with sliders the director plays with; port it to
+  the app once the director says it's right ("ok", the director, to the proposal; earlier "uhhh" to the long
+  version). Look development: no reviews or checks while exploring; the team process resumes for the Swift port.
+  The manager delegates the sketch to a builder (team.manager: the manager does not build) and publishes it.
+
 ## Tasks
 
 | Id | Task | Size | Files | Branch | Builder | Reviewer | Rounds | State | Brief |
@@ -144,6 +149,7 @@ Director's profile: none
 | t5v | A 30 s film of the butterflies flying, for the director to judge the motion | Content (small) | OceanTool/MeadowFrames.swift (new), OceanTool/main.swift | meadow-t5v (from meadow-t5r) | builder-t5v (Claude Opus, T3 child thread) | Codex | 0 | reviewed (review-t5v @ 94d9d2b); its 4 tool fixes moved into t3 (which rewrites meadow-frames) | briefs/t5v.md |
 | p1 | Throwaway prototype film of the Meadow seen from above, with depth | Prototype (never merged, no review) | new OceanTool files, OceanTool/main.swift | proto-top-down (from meadow-t5v) | builder-p1 (Claude Opus, T3 child thread) | none | 0 | built (proto-top-down @ de1f728); director's notes in Corrections | briefs/p1.md |
 | p2a | Look development 1: butterfly motion from above (the measured flight turned on its side) and wingbeat speed | Design (look development; approved; reviewed later in the plan's tasks) | new Meadow/OceanTool files, OceanTool/main.swift, additive Butterfly/ButterflySpecies | look-top-down (from proto-top-down) | builder-p2a (Claude Opus, T3 child thread) | later | 0 | held (the director: "take a step back"); notes only at look-top-down @ adc632f, no code changed | briefs/p2a.md |
+| s1 | The Meadow sketch: a live web original with sliders (published for the director) | Design (look development; approved; no review) | Tools/meadow-sketch/meadow.html (new) | meadow-sketch (from main) | builder-s1 (Claude Opus, T3 child thread) | none | 0 | building | briefs/s1.md |
 | t5w | A new wingbeat (both wings together), wing shading and detail, and butterflies that turn to face where they fly, learning from the director's reference | Content | Meadow/MeadowPainter.swift, Meadow/Butterfly.swift (drawn heading, open), OceanChecks/MeadowChecks.swift | meadow-t5w (from meadow-t3) | | Codex | 0 | held (the view changed; replaced by look development) | briefs/t5w.md |
 | t3 | Meadow world and behaviours (plan T3), with the director's film verdict | Content | Meadow/{MeadowWorld,Behaviour}.swift (new), OceanChecks/MeadowChecks.swift, Meadow/MeadowPainter.swift (convenience paint, breeze trail), Meadow/Breeze.swift (pointer field), Meadow/{Butterfly,ButterflySpecies}.swift (roaming, spacing, stays), OceanTool/{MeadowStill,MeadowFrames,main}.swift | meadow-t3 (from meadow-t5v) | builder-t3 (Claude Opus, T3 child thread) | Codex | 0 | held (2026-11-20: the view may change to top-down); WIP saved at meadow-t3 @ 11394be (does not build yet; checks written, world not started) | briefs/t3.md |
 | t4 | Cursor landing, courtship, crossings, monarch life cycle (plan T4) | Content | to brief | meadow-t4 | | | 0 | open (waits on t3) | |
