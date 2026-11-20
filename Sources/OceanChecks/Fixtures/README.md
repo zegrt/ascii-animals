@@ -24,3 +24,14 @@ port copies), never edited by hand. The checks in `MeadowChecks.swift` replay th
   rot]…]]`; a kind row `[id, kind, R, rot, seed, n, f0, reach, leaves, florets]`; an air row `[x, y, wind.x, wind.y,
   ax, ay, px, py, g]`. Re-recorded in m1's fix round 1 at 4e1b869: the rows the earlier probe (at f20b833) had are
   unchanged; the geometry and the kinds are new.
+- `meadow-stir-probe-1600x913.json`: m1 fix round 2's probe of the sketch's pointer stir at 4e1b869. A copy of the
+  sketch with `meadow-stir-probe.js.txt` appended before `</body>`, and one hook added before its `if (FIXTURE)` line
+  (`window.__run = () => { paused = false; };`), opened in headless Chrome (`--headless=old`, a fresh profile, window
+  1600 x 1000, viewport 1600 x 913) with `?seed=4242&debug=1&freeze=1&panel=0`, and the JSON it writes read with
+  `--dump-dom`. `freeze=1` keeps the frame loop from running and `__run` lifts the pause, so the probe steps by hand
+  (`step(1/60)`) while the sketch's own `pointermove` and `pointerleave` handlers take the moves. It empties the
+  butterflies, then runs six scenarios, each from a still field: `rate60`, `rate30`, `rate120` (one path, moves at 60,
+  30 and 120 Hz), `fast` (150 pt a step, past the speed clamp), `reentry` (a leave after a step, back far off) and
+  `slow` (Slow motion 0.4). Each scenario is its list of ops (`['m', x, y]` a move, `['l']` a leave, `['s']` a step,
+  `['t', v]` the Slow motion setting, `['snap']`) and, at each snap, the stir field's non-zero samples
+  `[index, PFX, PFY]`, rounded to 6 decimals. `meadowStirMatchesTheSketch` replays the ops and compares every sample.

@@ -71,6 +71,9 @@ public struct Flower: Equatable, Sendable {
     public var touchedAt = MeadowTuning.Clicks.neverTouched
     /// The screen it belongs to (`Terrain.rects` index): the one its patch was planted on, or the one clicked.
     public var screen = 0
+    /// Where it was reached from: its patch's centre when planted, its own centre when clicked (`Flowers.mayStand`).
+    public var rootX = 0.0
+    public var rootY = 0.0
     /// `flowerSize · S` it was made at (a replant rescales it to the current one).
     public var sizeK: Double
     /// How far its drawing reaches from the centre (pt).
@@ -93,7 +96,8 @@ public struct PollenSpark: Equatable, Sendable {
     public var max: Double
 }
 
-/// What a click did.
+/// What a click did. `sparks` is how many sparks the click let off; the buffer may have kept fewer
+/// (`Clicks.sparkBuffer`).
 public enum FlowerClick: Equatable, Sendable {
     /// Off the meadow, or not a number: nothing.
     case ignored
@@ -124,8 +128,8 @@ public final class Flowers {
     public private(set) var lastId = 0
     /// Patches the last planting laid out.
     public private(set) var patches = 0
-    /// Pollen sparks let off by clicks, not yet taken: at most `Clicks.sparkBuffer`; the world takes them every step
-    /// (`takeSparks`), and a click's sparks beyond the buffer are not kept.
+    /// Pollen sparks let off by clicks, not yet taken: at most `Clicks.sparkBuffer`; a spark past it is dropped. The
+    /// world takes them every step (`takeSparks`).
     public private(set) var sparks: [PollenSpark] = []
 
     /// A touch on a bloom: any butterfly feeding on flower `id` takes off away from (x, y) (the sketch's
@@ -238,6 +242,8 @@ public final class Flowers {
                        petals: petals, f0: f0, leaves: leaves, florets: florets, clicked: !grown,
                        sizeK: tuning.flowerSize * unit, reach: 0)
         f.reach = reach(of: f)
+        f.rootX = x
+        f.rootY = y
         return f
     }
 
@@ -247,13 +253,15 @@ public final class Flowers {
         return longest + MeadowTuning.Flowers.reachCells * cw
     }
 
-    /// Whether a bloom of screen `i` (`terrain.rects[i]`) may stand at (x, y). The sketch: up to 10 pt past the
-    /// window's edge on either axis (html:839). The port: on screen `i`, or up to 10 pt past it across its real
-    /// edges only. On each axis where the point is past the screen, the side it is past must be a real edge (no
-    /// screen beside it) level with the point, so a bloom never reaches across an edge two screens share, nor round
-    /// the end of one; and never onto another screen or into a gap between screens (a point inside the terrain's
-    /// bounds that no screen holds). With one screen this is the sketch's test.
-    public func mayStand(_ x: Double, _ y: Double, screen i: Int) -> Bool {
+    /// Whether a bloom of screen `i` (`terrain.rects[i]`), reached from `from` (its patch's centre), may stand at
+    /// (x, y). The sketch: up to 10 pt past the window's edge on either axis (html:839). The port: on screen `i`, or
+    /// up to 10 pt past it across its real edges only. Past the screen, the point must be on no other screen and not in
+    /// a gap between screens (a point inside the terrain's bounds that no screen holds); on each axis where it is past,
+    /// the side it is past must be a real edge (no screen beside it) level with it; and the segment from `from` to it
+    /// must touch no other screen (each taken `Terrain.touch` larger, as the terrain judges edges), so the way out
+    /// never crosses an edge two screens share, offset or not, nor passes a seam's end. Without `from`, or with one
+    /// off screen `i`, the segment starts at screen `i`'s nearest point. With one screen this is the sketch's test.
+    public func mayStand(_ x: Double, _ y: Double, screen i: Int, from: SIMD2<Double>? = nil) -> Bool {
         guard x.isFinite && y.isFinite, i >= 0 && i < terrain.rects.count else { return false }
         let r = terrain.rects[i]
         let s = MeadowTuning.Flowers.edgeSlack
@@ -270,7 +278,39 @@ public final class Flowers {
         if x > maxX && !realEdge(i, SIMD2(-1, 0), at: qy) { return false }
         if y < minY && !realEdge(i, SIMD2(0, 1), at: qx) { return false }
         if y > maxY && !realEdge(i, SIMD2(0, -1), at: qx) { return false }
+        var start = SIMD2(qx, qy)
+        if let c = from, c.x.isFinite && c.y.isFinite && c.x >= minX && c.x <= maxX && c.y >= minY && c.y <= maxY {
+            start = c
+        }
+        let end = SIMD2(x, y)
+        let t: Double = Terrain.touch
+        for (j, o) in terrain.rects.enumerated() where j != i {
+            if Flowers.segment(start, end, touchesMinX: Double(o.minX) - t, minY: Double(o.minY) - t,
+                               maxX: Double(o.maxX) + t, maxY: Double(o.maxY) + t) { return false }
+        }
         return true
+    }
+
+    /// Whether the segment a → b touches the closed box (Liang–Barsky clipping).
+    static func segment(_ a: SIMD2<Double>, _ b: SIMD2<Double>, touchesMinX minX: Double, minY: Double,
+                        maxX: Double, maxY: Double) -> Bool {
+        var t0 = 0.0, t1 = 1.0
+        // Each side: p · t ≤ q along the segment.
+        func clip(_ p: Double, _ q: Double) -> Bool {
+            if p == 0 { return q >= 0 }
+            let t: Double = q / p
+            if p < 0 {
+                if t > t1 { return false }
+                t0 = max(t0, t)
+            } else {
+                if t < t0 { return false }
+                t1 = min(t1, t)
+            }
+            return true
+        }
+        let dx: Double = b.x - a.x
+        let dy: Double = b.y - a.y
+        return clip(-dx, a.x - minX) && clip(dx, maxX - a.x) && clip(-dy, a.y - minY) && clip(dy, maxY - a.y) && t0 <= t1
     }
 
     /// Whether screen `i`'s side facing away from `normal` (the terrain's inward normal) is a real edge at `v` along
@@ -334,9 +374,11 @@ public final class Flowers {
                         let rr: Double = spread * rng.unit().squareRoot()
                         let x: Double = best.x + cos(a) * rr
                         let y: Double = best.y + sin(a) * rr
-                        if !mayStand(x, y, screen: ri) { continue }
+                        if !mayStand(x, y, screen: ri, from: best) { continue }
                         var cand = make(kind, x: x, y: y, grown: true, rng: rng)
                         cand.screen = ri
+                        cand.rootX = best.x
+                        cand.rootY = best.y
                         if !overlapsAny(cand) { all.append(cand); break }
                     }
                 }
@@ -596,7 +638,7 @@ public final class Flowers {
             let displaced = old.contains(p) && !onNow
             // Judged by the screen that holds it now, else the one it was planted for (screens may come, go or reorder).
             let k = screen(at: f.x, f.y) ?? f.screen
-            let stands = k >= 0 && k < count ? mayStand(f.x, f.y, screen: k) : mayStand(f.x, f.y)
+            let stands = k >= 0 && k < count ? mayStand(f.x, f.y, screen: k, from: SIMD2(f.rootX, f.rootY)) : mayStand(f.x, f.y)
             if displaced || (f.clicked && !onNow) || (!f.clicked && !stands) { close(index: i) }
         }
         // The screen each flower is on now (screens may have come, gone or moved).

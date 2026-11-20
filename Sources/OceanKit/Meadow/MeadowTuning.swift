@@ -130,45 +130,15 @@ public struct MeadowTuning: Equatable, Sendable {
         public static let limit = 260.0
         /// Each step stirs along the way the pointer went since the last step, at its speed as you moved it
         /// (`d / (dt / timeScale)`, each axis clamped to ±1500 pt/s), with an impulse of 60 · dt × that speed,
-        /// split into one stir per 48 · S pt of the way (html:1987–1996).
+        /// split into one stir per 48 · S pt of the way (html:1987–1996). Only the pointer's latest position counts:
+        /// at 30 Hz input every other step's way is empty and the next one twice as long, as in the sketch. The port
+        /// stirs one way the sketch drops: the way the pointer went between the last step and leaving
+        /// (`Breeze.pointerLeft`).
         public static let speedLimit = 1500.0
         public static let impulseRate = 60.0
-        /// The sketch's `stirStep` splits a way into at most this many stirs (the port's guard on a broken way;
-        /// a real step's way is a few grid spacings).
+        /// The port's guard: a way is split into at most this many stirs (a real step's way is a few grid
+        /// spacings; only a broken jump comes near it).
         public static let maxStirs = 100_000.0
-
-        // The port's rule for the pointer's path (`PointerPlayback.played`; the sketch's re-check, finding 7, and
-        // m1's review, finding 1). The sketch stirs, each step, the way from where the pointer was at the last step
-        // to where it is now, so the air depends on when events arrive: at 30 Hz its steps alternate empty and
-        // doubled, and two steps' worth arriving together loses way at the speed clamp. The port plays the path back
-        // from each event's own time and place instead: step n is due at path time `inputClock − pathLag` and stirs
-        // the way from the stir point to the path's place then, as the sketch's stroke. A step whose place isn't
-        // known yet (no sample at or after its time has arrived) waits, and is played, in order, as soon as one
-        // arrives, its impulse decayed by `exp(−1.6 · dt)` for each step it waited: the field is linear, so the air
-        // is then what it would have been had the samples been on time. Nothing is dropped or squashed: not late
-        // samples, not pairs or bursts, not a way still playing out when the pointer leaves and comes back.
-
-        /// How far behind the events the path is played, s: the smallest round lag with which the same path gives
-        /// the same air within 5 % at 15, 30, 60 and 120 Hz, delivered regularly, in pairs and jittered, at every step
-        /// (`meadowStirSameAtEveryInputRate`, measured in m1's fix round 1). The worst case, 15 Hz in pairs, needs the
-        /// path more than 8 steps behind (0.133 s: the newer of a pair arrives a step late, the older a sample later,
-        /// and a step's place needs the sample after it); at exactly 8 steps it misses by 9.9 %, at 7 by 20.5 %. The
-        /// sketch stirs at once, so this is 0.14 s more than the sketch's response to the pointer.
-        public static let pathLag = 0.14
-        /// The largest lag `Breeze.setPlayback` takes, s.
-        public static let lagLimit = 0.5
-        /// A step waits at most this many steps for its samples (about 1 s), then is played as if the pointer had
-        /// stopped at the last sample: input that late has decayed to a fifth anyway.
-        public static let waitSteps = 64.0
-        /// An event's time may be at most this far ahead of the input clock, s (the host's frame runs ahead of the
-        /// steps by under a frame); a later one is taken as this far ahead.
-        public static let aheadLimit = 0.25
-        /// Two samples further apart than this, s, are taken as the pointer resting, then moving over the last
-        /// `longestMove` before the later one (a mouse reports only when it moves, at 15 Hz or faster).
-        public static let longestMove = 0.1
-        /// `syncInputClock` follows the family clock: a frame counts at most this much real time, s
-        /// (`OceanClock.advance`'s stall clamp).
-        public static let frameLimit = 0.1
         /// Downwash (`wash`, html:1625–1633): outward from the butterfly, weight `1 − d / radius`, clamped to ±200.
         public static let washLimit = 200.0
         /// Under a butterfly with z < 0.35 on each downstroke: `520 · S · downwash · (1 − z / 0.35) · sinθ · dt`
@@ -348,7 +318,9 @@ public struct MeadowTuning: Equatable, Sendable {
         public static let bloomLifeLow = 1.2
         public static let bloomLifeHigh = 2.2
         /// The sparks wait in a buffer of this many for the world's dust (`Flowers.takeSparks`, which the world calls
-        /// every step); beyond it a click's sparks are not kept (the port's; 30 clicks a step fit).
+        /// every step). The port's: a spark past it is dropped (its random numbers are still drawn, so the input stream
+        /// keeps the sketch's order). Between two takes it holds 16 new blooms' sparks (16 each) or 32 touches' (8
+        /// each); 30 new blooms in one step ask for 480 and keep 256.
         public static let sparkBuffer = 256
         /// Over the limit, the oldest clicked flower closes and fades over `FADE_S` = 2 s (html:886).
         public static let fadeTime = 2.0

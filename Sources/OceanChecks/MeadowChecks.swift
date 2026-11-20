@@ -16,11 +16,9 @@ private struct MeadowRig {
     let sim: MeadowRandom
     let input: MeadowRandom
 
-    init(_ terrain: Terrain, cell: Double, seed: Int32, tuning: MeadowTuning = .director, plant: Bool = true,
-         sketchPointer: Bool = false) {
+    init(_ terrain: Terrain, cell: Double, seed: Int32, tuning: MeadowTuning = .director, plant: Bool = true) {
         let size = CGSize(width: cell, height: (cell * 1.45).rounded())
         breeze = Breeze(terrain: terrain, cell: size, tuning: tuning)
-        if sketchPointer { breeze.setPlayback(.sketch) }
         flowers = Flowers(terrain: terrain, cell: size, breeze: breeze, tuning: tuning)
         let streams = MeadowRandom.pair(seed: seed)
         sim = streams.sim
@@ -78,14 +76,23 @@ private func num(_ v: Any?) -> Double {
     return .nan
 }
 
+/// An integer field: a JSON number that is a whole number a Double holds exactly (|v| ≤ 2⁵³), else nil (missing, not
+/// a number, fractional or out of range), so a broken fixture fails a check with a diagnostic instead of trapping in
+/// `Int(_:)`.
+private func integer(_ v: Any?) -> Int? {
+    let d = num(v)
+    guard d.isFinite && d == d.rounded() && abs(d) <= 9_007_199_254_740_992 else { return nil }
+    return Int(d)
+}
+
 /// A sketch flower row `[id, kind, x, y, R, rot, seed, n, f0, leaves, florets, ox, oy, age, clicked, fade]` against
 /// a Swift flower.
 private func expectFlower(_ row: [Any], _ f: Flower, _ at: String, tol: Double) throws {
-    let id = Int(num(row[0]))
+    guard let id = integer(row[0]) else { throw CheckFailure(detail: "\(at): a flower row's id \(row.first ?? "none") isn't an integer") }
     try expect(f.id == id, "\(at): id \(f.id) vs \(id)")
     try expect(f.kind.name == (row[1] as? String ?? ""), "\(at) id \(id): kind \(f.kind.name) vs \(row[1])")
-    try expect(f.seed == Int(num(row[6])) && f.petals == Int(num(row[7])), "\(at) id \(id): seed/petals")
-    try expect(f.leaves.count == Int(num(row[9])) && f.florets.count == Int(num(row[10])), "\(at) id \(id): leaves/florets")
+    try expect(f.seed == integer(row[6]) && f.petals == integer(row[7]), "\(at) id \(id): seed/petals")
+    try expect(f.leaves.count == integer(row[9]) && f.florets.count == integer(row[10]), "\(at) id \(id): leaves/florets")
     try expect(f.clicked == (num(row[14]) == 1), "\(at) id \(id): clicked")
     let pairs: [(String, Double, Double, Double)] = [
         ("x", f.x, num(row[2]), 1e-5), ("y", f.y, num(row[3]), 1e-5), ("R", f.radius, num(row[4]), 1e-5),
@@ -118,7 +125,7 @@ private func expectGeometry(_ leaves: [Any], _ florets: [Any], _ f: Flower, _ at
     for (row, l) in zip(leaves, f.leaves) {
         let v = row as? [Any] ?? []
         try expect(v.count == 4 && abs(l.angle - num(v[0])) <= 1e-5 && abs(l.length - num(v[1])) <= 1e-5
-                   && abs(l.width - num(v[2])) <= 1e-5 && l.kind == Int(num(v[3])), "\(at) id \(f.id): leaf \(l) vs \(v)")
+                   && abs(l.width - num(v[2])) <= 1e-5 && l.kind == integer(v[3]), "\(at) id \(f.id): leaf \(l) vs \(v)")
     }
     for (row, u) in zip(florets, f.florets) {
         let v = row as? [Any] ?? []
@@ -131,7 +138,7 @@ private func expectGeometry(_ leaves: [Any], _ florets: [Any], _ f: Flower, _ at
 private func expectGeometry(_ rows: [[Any]], _ flowers: [Flower], _ at: String) throws {
     try expect(rows.count == flowers.count, "\(at): \(rows.count) geometry rows for \(flowers.count) flowers")
     for (row, f) in zip(rows, flowers) {
-        try expect(row.count == 3 && Int(num(row[0])) == f.id, "\(at): geometry row for \(row.first ?? "none"), flower \(f.id)")
+        try expect(row.count == 3 && integer(row[0]) == f.id, "\(at): geometry row for \(row.first ?? "none"), flower \(f.id)")
         try expectGeometry(row[1] as? [Any] ?? [], row[2] as? [Any] ?? [], f, at)
     }
 }
@@ -141,7 +148,7 @@ private func replayProbe(_ name: String) throws {
     guard let d = fixture(name) else { throw CheckFailure(detail: "fixture \(name).json missing") }
     let W = num(d["W"]), H = num(d["H"]), S = num(d["S"])
     let terrain = Terrain.single(width: W, height: H)
-    let rig = MeadowRig(terrain, cell: S * 13, seed: 4242, sketchPointer: true)
+    let rig = MeadowRig(terrain, cell: S * 13, seed: 4242)
     let planted = d["planted"] as? [[Any]] ?? []
     try expect(!planted.isEmpty && planted.count == rig.flowers.all.count,
                "planted \(rig.flowers.all.count) vs the sketch's \(planted.count)")
@@ -182,7 +189,7 @@ private func replayProbe(_ name: String) throws {
     try expect(after.count == rig.flowers.all.count, "after the clicks \(rig.flowers.all.count) vs \(after.count)")
     for (row, f) in zip(after, rig.flowers.all) { try expectFlower(row, f, "clicks", tol: 1e-4) }
     try expectGeometry(clicks["geometry"] as? [[Any]] ?? [], rig.flowers.all, "clicks")
-    try expect(rig.flowers.sparks.count == Int(num(clicks["dust"])),
+    try expect(rig.flowers.sparks.count == integer(clicks["dust"]),
                "pollen sparks \(rig.flowers.sparks.count) vs the sketch's dust \(num(clicks["dust"]))")
 
     rig.step(120)
@@ -200,8 +207,8 @@ private func replayProbe(_ name: String) throws {
     for (row, kind) in zip(kinds, FlowerKind.allCases) {
         let f = rig.flowers.make(kind, x: 100, y: 100, grown: true, rng: kindStream)
         let at = "kind \(kind.name)"
-        try expect(row.count == 10 && Int(num(row[0])) == f.id && (row[1] as? String) == kind.name, "\(at): id \(f.id) vs \(row.first ?? "none")")
-        try expect(f.seed == Int(num(row[4])) && f.petals == Int(num(row[5])), "\(at): seed \(f.seed), petals \(f.petals), R \(f.radius) vs \(row.prefix(8))")
+        try expect(row.count == 10 && integer(row[0]) == f.id && (row[1] as? String) == kind.name, "\(at): id \(f.id) vs \(row.first ?? "none")")
+        try expect(f.seed == integer(row[4]) && f.petals == integer(row[5]), "\(at): seed \(f.seed), petals \(f.petals), R \(f.radius) vs \(row.prefix(8))")
         let pairs: [(String, Double, Double)] = [("R", f.radius, num(row[2])), ("rot", f.turn, num(row[3])),
                                                  ("f0", f.f0, num(row[6])), ("reach", f.reach, num(row[7]))]
         for (n, got, want) in pairs { try expect(abs(got - want) <= 1e-5, "\(at): \(n) \(got) vs \(want)") }
@@ -209,7 +216,7 @@ private func replayProbe(_ name: String) throws {
     }
 }
 
-// ── the pointer at different input rates ──
+// ── the pointer ──
 
 /// A gesture over 2 s: a sweep across with a swing, 300–900 pt/s.
 private func gesture(_ t: Double) -> SIMD2<Double> {
@@ -218,142 +225,104 @@ private func gesture(_ t: Double) -> SIMD2<Double> {
     return SIMD2(x, y)
 }
 
-/// The review's straight sweep: 540 pt/s across the middle.
-private func sweep(_ t: Double) -> SIMD2<Double> {
-    let x: Double = 300 + 540 * t
-    return SIMD2(x, 500)
+/// A slower gesture: a loop at 150–450 pt/s.
+private func loop(_ t: Double) -> SIMD2<Double> {
+    let x: Double = 800 + 260 * sin(1.2 * t)
+    let y: Double = 500 + 200 * sin(1.7 * t)
+    return SIMD2(x, y)
 }
 
-/// One pointer sample: taken at `t` (s) at `p`, delivered before step `step` (the first possible being
-/// `ceil(60 t) + 1`), or a leave (`p` nil) delivered then.
-private struct PointerSample {
-    var step: Int
-    var t: Double
-    var p: SIMD2<Double>?
+/// One thing the host tells the breeze before a step: the pointer at a place, or gone.
+private enum PointerInput {
+    case move(Double, Double)
+    case leave
 }
 
-/// The step before which a sample taken at `t` can first be delivered.
-private func firstStep(_ t: Double) -> Int { Int((t * 60 - 1e-9).rounded(.up)) + 1 }
-
-/// How a rate's samples arrive.
-private enum Delivery: CaseIterable {
-    /// Each as soon as it can be.
-    case regular
-    /// Two at a time: each with the one after it (the older arrives a sample interval late).
-    case paired
-    /// Each 0–3 steps late (in order), by a fixed hash.
-    case jittered
-
-    var name: String { String(describing: self) }
-}
-
-/// A path's samples at `rate` Hz for `seconds`, delivered as `delivery` says.
-private func samples(_ path: (Double) -> SIMD2<Double>, rate: Double, seconds: Double = 2,
-                     delivery: Delivery) -> [PointerSample] {
-    var out: [PointerSample] = []
-    var e = 0
-    while Double(e) / rate <= seconds + 1e-9 {
-        let t: Double = Double(e) / rate
-        out.append(PointerSample(step: firstStep(t), t: t, p: path(t)))
-        e += 1
-    }
-    switch delivery {
-    case .regular:
-        break
-    case .paired:
-        for i in stride(from: 0, to: out.count - 1, by: 2) { out[i].step = out[i + 1].step }
-    case .jittered:
-        var last = 0
-        for i in out.indices {
-            let late = Int(MeadowMath.hash3(Double(i), 5, 7) * 4)
-            last = max(last, out[i].step + late)
-            out[i].step = last
-        }
-    }
-    return out
-}
-
-/// The pointer's stir field (px, py on a 25 × 15 grid of points) after every step for `steps` steps, the samples fed
-/// as they arrive, with their own times (or as old as their arrival when `stamped` is off).
-private func stirTrace(_ feed: [PointerSample], playback: PointerPlayback, stamped: Bool = true,
-                       steps: Int = 180) -> [[Double]] {
+/// The pointer's stir field (px, py on a 25 × 15 grid of points) after each of `steps` steps, `events(k)` delivered
+/// before step k (1-based).
+private func stirTrace(steps: Int = 180, speed: Double = 1, _ events: (Int) -> [PointerInput]) -> [[Double]] {
     let breeze = Breeze(terrain: Terrain.single(width: 1600, height: 1000), cell: CGSize(width: 13, height: 19))
-    breeze.setPlayback(playback)
     var out: [[Double]] = []
     out.reserveCapacity(steps)
-    var next = 0
     for k in 1...steps {
-        while next < feed.count && feed[next].step <= k {
-            let s = feed[next]
-            if let p = s.p {
-                breeze.pointerMoved(x: p.x, y: p.y, at: stamped ? s.t : nil)
-            } else {
-                breeze.pointerLeft()
+        for e in events(k) {
+            switch e {
+            case .move(let x, let y): breeze.pointerMoved(x: x, y: y)
+            case .leave: breeze.pointerLeft()
             }
-            next += 1
         }
-        breeze.step(meadowStep)
-        var field: [Double] = []
-        field.reserveCapacity(750)
-        var y = 150.0
-        while y <= 850 {
-            var x = 200.0
-            while x <= 1400 {
-                let a = breeze.sample(x, y)
-                field.append(a.pointerX)
-                field.append(a.pointerY)
-                x += 50
-            }
-            y += 50
-        }
-        out.append(field)
+        breeze.step(meadowStep, speed: speed)
+        out.append(stirGrid(breeze))
     }
     return out
 }
 
-/// The largest relative difference (L2 over the grid) between two traces: at every step (`every` 1) or every
-/// `every` steps, wherever the reference has air.
-private func worstDifference(_ a: [[Double]], _ ref: [[Double]], every: Int = 1) -> Double {
-    var worst = 0.0
-    for t in stride(from: every - 1, to: min(a.count, ref.count), by: every) {
-        var dd = 0.0, rr = 0.0
-        for i in ref[t].indices {
-            let d: Double = a[t][i] - ref[t][i]
-            dd += d * d
-            rr += ref[t][i] * ref[t][i]
+/// The pointer's stir (px, py) on a 25 × 15 grid of points over 1600 × 1000.
+private func stirGrid(_ breeze: Breeze) -> [Double] {
+    var field: [Double] = []
+    field.reserveCapacity(750)
+    var y = 150.0
+    while y <= 850 {
+        var x = 200.0
+        while x <= 1400 {
+            let a = breeze.sample(x, y)
+            field.append(a.pointerX)
+            field.append(a.pointerY)
+            x += 50
         }
-        if rr > 1 { worst = max(worst, (dd / rr).squareRoot()) }
+        y += 50
     }
+    return field
+}
+
+/// A path's moves at `rate` Hz, regularly: sample e is taken at e / rate s and delivered before the first step at or
+/// after it (step k starts at (k − 1) / 60 s), for `seconds`.
+private func regular(_ path: @escaping (Double) -> SIMD2<Double>, rate: Double, seconds: Double = 2)
+    -> (Int) -> [PointerInput] {
+    return { k in
+        var out: [PointerInput] = []
+        // Taken in ((k − 2) / 60, (k − 1) / 60]; the first step takes the sample at 0.
+        let from = Double(k - 2) / 60, to = Double(k - 1) / 60
+        var e = max(0, Int((from * rate + 1e-6).rounded(.down)))
+        while Double(e) / rate <= to + 1e-9 && Double(e) / rate <= seconds + 1e-9 {
+            let t: Double = Double(e) / rate
+            if k == 1 || t > from + 1e-9 { let p = path(t); out.append(.move(p.x, p.y)) }
+            e += 1
+        }
+        return out
+    }
+}
+
+/// The relative difference (L2 over the grid) between two fields; 0 where the reference is still.
+private func difference(_ a: [Double], _ ref: [Double]) -> Double {
+    var dd = 0.0, rr = 0.0
+    for i in ref.indices {
+        let d: Double = a[i] - ref[i]
+        dd += d * d
+        rr += ref[i] * ref[i]
+    }
+    return rr > 1 ? (dd / rr).squareRoot() : 0
+}
+
+/// The largest difference between two traces at the steps `at` says (0-based step indices).
+private func worstDifference(_ a: [[Double]], _ ref: [[Double]], at: (Int) -> Bool = { _ in true }) -> Double {
+    var worst = 0.0
+    for t in 0..<min(a.count, ref.count) where at(t) { worst = max(worst, difference(a[t], ref[t])) }
     return worst
 }
 
-/// The input-rate matrix at a lag: every rate and delivery of both paths against the same path at 60 Hz delivered
-/// regularly, measured at every step. Returns each case's worst difference.
-private func inputMatrix(lag: Double) -> [(String, Double)] {
-    let play = PointerPlayback.played(lag: lag)
-    var out: [(String, Double)] = []
-    let paths: [(String, (Double) -> SIMD2<Double>)] = [("gesture", gesture), ("sweep", sweep)]
-    for (name, path) in paths {
-        let ref = stirTrace(samples(path, rate: 60, delivery: .regular), playback: play)
-        for rate in [15.0, 30, 60, 120] {
-            for d in Delivery.allCases where !(rate == 60 && d == .regular) {
-                let v = stirTrace(samples(path, rate: rate, delivery: d), playback: play)
-                out.append(("\(name) \(Int(rate)) Hz \(d.name)", worstDifference(v, ref)))
-            }
-        }
-    }
-    return out
-}
+/// A percentage for the record.
+private func pct(_ v: Double) -> String { String(format: "%.1f %%", v * 100) }
 
 func meadowChecks() {
     check("meadowMathMatchesSketch", meadowMathMatchesSketch)
     check("meadowReplaysTheSketchProbe", meadowReplaysTheSketchProbe)
     check("meadowSameSeedSameMeadow", meadowSameSeedSameMeadow)
     check("meadowStirHalfLifeAndLocal", meadowStirHalfLifeAndLocal)
+    check("meadowStirMatchesTheSketch", meadowStirMatchesTheSketch)
     check("meadowStirSameAtEveryInputRate", meadowStirSameAtEveryInputRate)
     check("meadowStirAcrossReentry", meadowStirAcrossReentry)
-    check("meadowStirLateBeyondTheLag", meadowStirLateBeyondTheLag)
-    check("meadowStirThroughTheHostClock", meadowStirThroughTheHostClock)
+    check("meadowStirFiniteAndBounded", meadowStirFiniteAndBounded)
     check("meadowDownwashOnlyUnderLowButterflies", meadowDownwashOnlyUnderLowButterflies)
     check("meadowWindPeaksAtTheSketchSpeed", meadowWindPeaksAtTheSketchSpeed)
     check("meadowNoFlowerInAGap", meadowNoFlowerInAGap)
@@ -449,211 +418,216 @@ private func meadowStirHalfLifeAndLocal() throws {
     try expect(rig.breeze.sample(800 + 2 * rig.breeze.spacing, 500).pointerX > 0, "stir didn't spread at all")
 }
 
-private func meadowStirSameAtEveryInputRate() throws {
-    let lag = MeadowTuning.Stir.pathLag
-    let play = PointerPlayback.played(lag: lag)
-    // The matrix at the port's lag: 15, 30, 60 and 120 Hz, regular, paired and jittered, two paths, every step.
-    let matrix = inputMatrix(lag: lag)
-    let worst = matrix.max { $0.1 < $1.1 } ?? ("none", 0)
-    print("  at the lag \(String(format: "%.3f", lag)) s, worst of \(matrix.count) cases \(pct(worst.1)) (\(worst.0))")
-    for (k, v) in matrix { try expect(v <= 0.05, "\(k): the air differs by \(pct(v)) (limit 5 %)") }
-    // Bursts beyond pairs: 60 Hz in fours, 120 Hz in sixes (each a twentieth of a second or more late).
-    let ref = stirTrace(samples(gesture, rate: 60, delivery: .regular), playback: play)
-    func burst(_ rate: Double, _ n: Int) -> [PointerSample] {
-        var f = samples(gesture, rate: rate, delivery: .regular)
-        for g in stride(from: 0, to: f.count, by: n) {
-            let last = min(f.count, g + n) - 1
-            for i in g...last { f[i].step = f[last].step }
+/// The sketch's own `stirStep`, through its own pointer handlers, for the same per-step positions (the stir probe,
+/// Fixtures/README.md): 60, 30 and 120 Hz moves, a fast way past the speed clamp, a leave and re-entry, and Slow
+/// motion 0.4. Every sample of the field is compared at every snapshot.
+private func meadowStirMatchesTheSketch() throws {
+    let name = "meadow-stir-probe-1600x913"
+    guard let d = fixture(name) else { throw CheckFailure(detail: "fixture \(name).json missing") }
+    let W = num(d["W"]), H = num(d["H"]), S = num(d["S"])
+    let scenarios = d["scenarios"] as? [String: Any] ?? [:]
+    let names = ["rate60", "rate30", "rate120", "fast", "reentry", "slow"]
+    try expect(Set(scenarios.keys) == Set(names), "the probe's scenarios \(scenarios.keys.sorted()), want \(names)")
+    guard let columns = integer(d["columns"]), let length = integer(d["length"]) else {
+        throw CheckFailure(detail: "the probe's grid size isn't an integer: \(d["columns"] ?? "none"), \(d["length"] ?? "none")")
+    }
+    var worst = 0.0, snaps = 0, ops = 0
+    for scenario in names {
+        let sc = scenarios[scenario] as? [String: Any] ?? [:]
+        let breeze = Breeze(terrain: Terrain.single(width: W, height: H), cell: CGSize(width: 13 * S, height: 19 * S))
+        try expect(breeze.columns == columns && breeze.columns * breeze.rows == length,
+                   "grid \(breeze.columns) × \(breeze.rows) vs the sketch's \(columns) columns, \(length) samples")
+        let shots = sc["snaps"] as? [[Any]] ?? []
+        let list = sc["ops"] as? [[Any]] ?? []
+        try expect(!list.isEmpty && !shots.isEmpty, "\(scenario): no ops or no snapshots")
+        var speed = 1.0
+        var next = 0
+        for op in list {
+            switch op.first as? String ?? "" {
+            case "m":
+                try expect(op.count == 3, "\(scenario): a move \(op)")
+                breeze.pointerMoved(x: num(op[1]), y: num(op[2]))
+            case "l": breeze.pointerLeft()
+            case "s": breeze.step(meadowStep, speed: speed)
+            case "t":
+                try expect(op.count == 2, "\(scenario): a speed \(op)")
+                speed = num(op[1])
+            case "snap":
+                try expect(next < shots.count, "\(scenario): more snapshots than the sketch's \(shots.count)")
+                var want = [SIMD2<Double>](repeating: SIMD2(0, 0), count: length)
+                for c in shots[next] {
+                    let v = c as? [Any] ?? []
+                    guard v.count == 3, let i = integer(v[0]), i >= 0 && i < length else {
+                        throw CheckFailure(detail: "\(scenario) snapshot \(next): a bad row \(v)")
+                    }
+                    want[i] = SIMD2(num(v[1]), num(v[2]))
+                }
+                for i in 0..<length {
+                    let got = breeze.stirSample(i % columns, i / columns)
+                    let e: Double = max(abs(got.x - want[i].x), abs(got.y - want[i].y))
+                    worst = max(worst, e)
+                    try expect(e <= 1e-4, "\(scenario) snapshot \(next) sample \(i): \(got) vs the sketch's \(want[i])")
+                }
+                next += 1
+            default:
+                throw CheckFailure(detail: "\(scenario): an unknown op \(op)")
+            }
+            ops += 1
         }
-        return f
+        try expect(next == shots.count, "\(scenario): \(next) snapshots vs the sketch's \(shots.count)")
+        snaps += next
     }
-    let fours = worstDifference(stirTrace(burst(60, 4), playback: play), ref)
-    let sixes = worstDifference(stirTrace(burst(120, 6), playback: play), ref)
-    print("  bursts: 60 Hz in fours \(pct(fours)), 120 Hz in sixes \(pct(sixes))")
-    try expect(fours <= 0.05 && sixes <= 0.05, "bursts differ: fours \(pct(fours)), sixes \(pct(sixes))")
-    // Every rate keeps the whole way: the total stirred at 30 Hz in pairs is the 60 Hz total.
-    let sum = { (t: [[Double]]) -> Double in t.reduce(0) { $0 + $1.reduce(0) { $0 + abs($1) } } }
-    let pairs30 = stirTrace(samples(gesture, rate: 30, delivery: .paired), playback: play)
-    try expect(abs(sum(pairs30) / sum(ref) - 1) < 0.01, "30 Hz in pairs lost air: \(sum(pairs30) / sum(ref))")
-    // The lag is the smallest that passes: a step less fails the matrix (15 Hz pairs need more than 8 steps).
-    var sweep: [String] = []
-    for k in [5.0, 6, 7, 8] {
-        let w = inputMatrix(lag: k / 60).map(\.1).max() ?? 0
-        sweep.append("\(Int(k))/60 s \(pct(w))")
-        if k == 8 { try expect(w > 0.05, "a lag of 8/60 s passes too (\(pct(w))): the lag isn't the smallest") }
-    }
-    try expect(lag > 8.0 / 60 && lag < 9.0 / 60, "the lag \(lag) isn't within a step above the 8/60 s that fails")
-    print("  smaller lags, worst case: " + sweep.joined(separator: ", "))
-    // For the record (not held): the sketch's own rule, and samples taken as old as their arrival.
-    let s60 = stirTrace(samples(gesture, rate: 60, delivery: .regular), playback: .sketch)
-    let s30 = worstDifference(stirTrace(samples(gesture, rate: 30, delivery: .regular), playback: .sketch), s60, every: 15)
-    let s15 = worstDifference(stirTrace(samples(gesture, rate: 15, delivery: .regular), playback: .sketch), s60, every: 15)
-    let unstamped = worstDifference(stirTrace(samples(gesture, rate: 15, delivery: .paired), playback: play, stamped: false), ref)
-    print("  (the sketch's rule, every 0.25 s: 30 Hz \(pct(s30)), 15 Hz \(pct(s15)); unstamped 15 Hz pairs \(pct(unstamped)))")
+    print(String(format: "  the sketch's stirStep: %d scenarios, %d snapshots, %d ops; worst %.1e pt/s", names.count,
+                 snaps, ops, worst))
 }
 
-/// A percentage for the record.
-private func pct(_ v: Double) -> String { String(format: "%.1f %%", v * 100) }
+/// Regular input at 30, 60 and 120 Hz against 60 Hz (the sketch's claim for `stirStep`, html:1983–1986, measured on
+/// its rule as ported). Only the latest position counts, so 120 Hz input stirs as 60 Hz does. 30 Hz reports every
+/// other step; in between the sketch stirs nothing, so it is compared on the steps after a report. There the sketch's
+/// rule holds 5 % on the slower loop (150–450 pt/s) once the stroke is under way (from 0.25 s); the first strokes and
+/// the faster gesture (300–900 pt/s) are printed for the record, not held (m1 fix round 2's report).
+private func meadowStirSameAtEveryInputRate() throws {
+    let paths: [(String, (Double) -> SIMD2<Double>, Bool)] = [("loop", loop, true), ("gesture", gesture, false)]
+    for (name, path, held) in paths {
+        let ref = stirTrace(regular(path, rate: 60))
+        let at120 = worstDifference(stirTrace(regular(path, rate: 120)), ref)
+        let trace30 = stirTrace(regular(path, rate: 30))
+        let underWay = worstDifference(trace30, ref, at: { $0 % 2 == 0 && $0 >= 15 })
+        let first = worstDifference(trace30, ref, at: { $0 % 2 == 0 && $0 < 15 })
+        let between = worstDifference(trace30, ref, at: { $0 % 2 == 1 && $0 >= 15 })
+        print("  \(name): 120 Hz \(pct(at120)); 30 Hz \(pct(underWay)) under way, \(pct(first)) in the first 0.25 s, "
+              + "\(pct(between)) on the steps between reports under way\(held ? "" : " (not held)")")
+        try expect(at120 <= 0.05, "\(name): 120 Hz differs from 60 Hz by \(pct(at120))")
+        if held { try expect(underWay <= 0.05, "\(name): 30 Hz differs from 60 Hz by \(pct(underWay))") }
+    }
+}
 
-/// The pointer leaves and comes back before its way has played out: the way before it left is all stirred, nothing
-/// along the jump, and every rate and delivery gives the same air.
+/// Leaving and coming back: no way is lost (the way since the last step before leaving is stirred by the next step,
+/// even when the pointer left, or left and came back, within that step), and nothing is stirred along the jump.
 private func meadowStirAcrossReentry() throws {
-    let play = PointerPlayback.played(lag: MeadowTuning.Stir.pathLag)
-    func way(_ rate: Double, _ d: Delivery) -> [PointerSample] {
-        let a = samples({ t in SIMD2(300 + 750 * t, 300 + 90 * sin(6 * t)) }, rate: rate, seconds: 0.4, delivery: d)
-        let leaveAt: Double = 0.4 + 1e-6
-        // Back 0.05 s later, far off: well inside the lag, so the first way is still playing out.
-        var b = samples({ t in SIMD2(1200 + 300 * t, 800 - 150 * t + 60 * sin(7 * t)) }, rate: rate, seconds: 0.8,
-                        delivery: d)
-        for i in b.indices {
-            b[i].t += 0.45
-            b[i].step = max(b[i].step + firstStep(0.45) - 1, firstStep(leaveAt))
-        }
-        let last = a.map(\.step).max() ?? 0
-        return a + [PointerSample(step: max(last, firstStep(leaveAt)), t: leaveAt, p: nil)] + b
+    // The first way, (300, 300) to (580, 400) over 20 steps; the second from (1250, 800), away from it.
+    func a(_ k: Int) -> PointerInput { .move(300 + 14 * Double(k), 300 + 5 * Double(k)) }
+    func b(_ k: Int) -> PointerInput { .move(1250 + 8 * Double(k), 800 + 3 * Double(k)) }
+    func first(_ k: Int) -> [PointerInput] { k <= 20 ? [a(k)] : (k == 21 ? [.leave] : []) }
+    func second(from e: Int) -> (Int) -> [PointerInput] { { k in k >= e && k < e + 30 ? [b(k - e)] : [] } }
+    // Each case against the two ways stirred apart (the first left after a step, as the sketch's leave).
+    func afterAStep(_ k: Int) -> [PointerInput] { first(k) + second(from: 31)(k) }
+    func withItsLastMove(_ k: Int) -> [PointerInput] {
+        if k == 20 { return [a(20), .leave] }
+        return k == 21 ? [] : first(k) + second(from: 31)(k)
     }
-    let ref = stirTrace(way(60, .regular), playback: play, steps: 120)
-    var worst = 0.0, name = ""
-    for rate in [15.0, 30, 60, 120] {
-        for d in Delivery.allCases where !(rate == 60 && d == .regular) {
-            let v = worstDifference(stirTrace(way(rate, d), playback: play, steps: 120), ref)
-            if v > worst { worst = v; name = "\(Int(rate)) Hz \(d.name)" }
-        }
+    func backWithinAStep(_ k: Int) -> [PointerInput] {
+        if k == 20 { return [a(20), .leave, b(0)] }
+        return k == 21 ? [b(1)] : first(k) + second(from: 20)(k)
     }
-    print("  across a re-entry: worst \(pct(worst)) (\(name))")
-    try expect(worst <= 0.05, "across a re-entry the air differs by \(pct(worst)) (\(name))")
-    // The way before it left is all stirred: the end of the first way has air after the re-entry.
+    // Each case (and the step the second way comes in) against the two ways stirred apart, the first left after a
+    // step, as the sketch's leave.
+    let cases: [(String, (Int) -> [PointerInput], Int)] = [
+        ("left after a step, back 10 steps later", afterAStep, 31),
+        ("left with its last move, back 10 steps later", withItsLastMove, 31),
+        ("left and back within one step", backWithinAStep, 20),
+    ]
+    let onlyFirst = stirTrace(steps: 90, first)
+    // Along the jump from (580, 400) to (1250, 800), out of reach of both ways.
+    let jump: [(Double, Double)] = [(803, 533), (915, 600), (1027, 667)]
+    for (name, events, entry) in cases {
+        let onlySecond = stirTrace(steps: 90, second(from: entry))
+        let both = stirTrace(steps: 90, events)
+        var worst = 0.0
+        for t in 0..<90 {
+            let sum: [Double] = zip(onlyFirst[t], onlySecond[t]).map { $0 + $1 }
+            worst = max(worst, difference(both[t], sum))
+        }
+        try expect(worst <= 1e-6, "\(name): the air differs from the two ways apart by \(worst)")
+        try expectNoJumpAir(events, jump, name)
+    }
+    // Left, back and left again within one step: the first way's end is stirred then (a step early), the second's
+    // by the step; both ways all there.
+    func twice(_ k: Int) -> [PointerInput] { k == 20 ? [a(20), .leave, b(0), b(1), .leave] : first(k) }
+    func twiceApart(_ k: Int) -> [PointerInput] { k == 20 ? [b(0), b(1), .leave] : [] }
+    let apart = stirTrace(steps: 90, twiceApart)
+    let both = stirTrace(steps: 90, twice)
+    var worst = 0.0
+    for t in 0..<90 { worst = max(worst, difference(both[t], zip(onlyFirst[t], apart[t]).map { $0 + $1 })) }
+    print("  left, back and left again within one step: \(pct(worst)) from the two ways apart")
+    try expect(worst <= 0.05, "left twice within a step: the air differs by \(pct(worst))")
+    try expectNoJumpAir(twice, jump, "left twice within a step")
+    // The sketch's order (a step between the last move and the leave) and the leave in the move's step stir the same.
+    let sketchOrder = stirTrace(steps: 40, first)
+    func sameStepLeave(_ k: Int) -> [PointerInput] {
+        if k == 20 { return [a(20), .leave] }
+        return k == 21 ? [] : first(k)
+    }
+    let sameStep = stirTrace(steps: 40, sameStepLeave)
+    try expect(sketchOrder == sameStep, "a leave in the last move's step lost the way to it")
+}
+
+/// No air at the points along a jump, at any step.
+private func expectNoJumpAir(_ events: @escaping (Int) -> [PointerInput], _ points: [(Double, Double)], _ what: String) throws {
     let breeze = Breeze(terrain: Terrain.single(width: 1600, height: 1000), cell: CGSize(width: 13, height: 19))
-    breeze.setPlayback(play)
-    let feed = way(60, .regular)
-    var next = 0
-    var endAir = 0.0, jumpAir = 0.0
-    for k in 1...60 {
-        while next < feed.count && feed[next].step <= k {
-            if let p = feed[next].p { breeze.pointerMoved(x: p.x, y: p.y, at: feed[next].t) } else { breeze.pointerLeft() }
-            next += 1
+    for k in 1...90 {
+        for e in events(k) {
+            switch e {
+            case .move(let x, let y): breeze.pointerMoved(x: x, y: y)
+            case .leave: breeze.pointerLeft()
+            }
         }
         breeze.step(meadowStep)
-        endAir = max(endAir, abs(breeze.sample(590, 300 + 90 * sin(2.4)).pointerX))
-        // Midway along the jump, out of reach of both ways: no air.
-        jumpAir = max(jumpAir, abs(breeze.sample(900, 550).pointerX) + abs(breeze.sample(900, 550).pointerY))
+        for (x, y) in points {
+            let s = breeze.sample(x, y)
+            try expect(s.pointerX == 0 && s.pointerY == 0, "\(what): air along the jump at (\(x), \(y)) after step \(k)")
+        }
     }
-    try expect(endAir > 20, "the way before the pointer left wasn't stirred to its end (\(endAir) pt/s)")
-    try expect(jumpAir == 0, "the jump back onto the meadow stirred the air (\(jumpAir) pt/s)")
 }
 
-/// Input later than the lag: 60 Hz samples held back and delivered in bursts every 0.3 s (up to 0.3 s late, twice
-/// the lag). The steps they were due on wait and are played when they arrive, decayed for the wait, so once a burst is
-/// in, the air is the on-time air.
-private func meadowStirLateBeyondTheLag() throws {
-    let play = PointerPlayback.played(lag: MeadowTuning.Stir.pathLag)
-    let ref = stirTrace(samples(gesture, rate: 60, delivery: .regular), playback: play)
-    var late = samples(gesture, rate: 60, delivery: .regular)
-    for i in late.indices { late[i].step = ((late[i].step - 1) / 18 + 1) * 18 + 1 }
-    let v = stirTrace(late, playback: play)
-    // Compared just after each burst is in (the step a burst arrives before), every steps' place known.
-    var worst = 0.0
-    for k in stride(from: 18, to: 180, by: 18) {
-        worst = max(worst, worstDifference([v[k]], [ref[k]]))
+/// Any pointer input at any speed setting (wild jumps, huge and broken points, leaves, several moves a step): every
+/// sample of the stir stays finite and within ±260 pt/s, and the air is finite everywhere.
+private func meadowStirFiniteAndBounded() throws {
+    let breeze = Breeze(terrain: Terrain.single(width: 1600, height: 1000), cell: CGSize(width: 13, height: 19))
+    let rng = MeadowRandom(99)
+    let speeds: [Double] = [1, 0.05, 1.5, 0.5, 0, -1, .nan, .infinity, 1e300, Double.leastNonzeroMagnitude]
+    let wild: [Double] = [.nan, .infinity, -.infinity, 1e300, -1e300, 1e12, Double.greatestFiniteMagnitude]
+    // First the same 25 pt stroke at 1500 pt/s again and again at one place (coming back without stirring), to
+    // drive the samples there to the clamp.
+    for _ in 0..<30 {
+        breeze.pointerMoved(x: 825, y: 500)
+        breeze.step(meadowStep)
+        breeze.pointerLeft()
+        breeze.pointerMoved(x: 800, y: 500)
     }
-    print("  input up to 0.3 s late, once each burst is in: \(pct(worst))")
-    try expect(worst <= 0.05, "input later than the lag gives other air once in: \(pct(worst))")
-}
-
-/// The host's side of the input contract: events stamped with their own host times, delivered in frame batches at
-/// 30, 60 and 120 Hz frames (even and uneven), through `OceanClock` and `syncInputClock`, at a steady speed and with
-/// speed changes, give the same air as the same path at 60 Hz, step for step.
-private func meadowStirThroughTheHostClock() throws {
-    let h0 = 5000.0
-    func run(rate: Double, delivery: Delivery, frameRate: Double, uneven: Bool, speedChanges: Bool) -> [[Double]] {
-        let breeze = Breeze(terrain: Terrain.single(width: 1600, height: 1000), cell: CGSize(width: 13, height: 19))
-        breeze.setPlayback(.played(lag: MeadowTuning.Stir.pathLag))
-        // When each sample reaches the host: as taken, with its partner, or 0–50 ms late (in order).
-        var feed: [(due: Double, t: Double, p: SIMD2<Double>)] = []
-        var e = 0
-        var lastDue = 0.0
-        while Double(e) / rate <= 2 {
-            let t: Double = Double(e) / rate
-            var due = t
-            switch delivery {
-            case .regular: break
-            case .paired: if e % 2 == 0 { due = Double(e + 1) / rate }
-            case .jittered: due = t + 0.05 * MeadowMath.hash3(Double(e), 5, 7)
+    var peak = 0.0
+    for r in 0..<breeze.rows { for c in 0..<breeze.columns { peak = max(peak, abs(breeze.stirSample(c, r).x)) } }
+    try expect(peak == 260, "repeated strokes reached \(peak) pt/s, not the clamp of 260")
+    for k in 0..<1200 {
+        for _ in 0..<Int(rng.unit() * 4) {
+            let r = rng.unit()
+            if r < 0.1 {
+                breeze.pointerLeft()
+            } else if r < 0.2 {
+                breeze.pointerMoved(x: wild[Int(rng.unit() * Double(wild.count))], y: rng.unit() * 1000)
+            } else if r < 0.3 {
+                breeze.pointerMoved(x: rng.unit() * 1600, y: wild[Int(rng.unit() * Double(wild.count))])
+            } else {
+                breeze.pointerMoved(x: rng.unit() * 2400 - 400, y: rng.unit() * 1600 - 300)
             }
-            lastDue = max(lastDue, due)
-            feed.append((lastDue, t, gesture(t)))
-            e += 1
         }
-        var clock = OceanClock()
-        var out: [[Double]] = []
-        var next = 0
-        var ts = h0
-        var f = 0
-        while out.count < 180 {
-            while next < feed.count && h0 + feed[next].due <= ts {
-                breeze.pointerMoved(x: feed[next].p.x, y: feed[next].p.y, hostTime: h0 + feed[next].t)
-                next += 1
-            }
-            let real = ts - h0
-            let speed: Double = speedChanges ? (real < 1 ? 1 : (real < 2 ? 1.5 : 0.5)) : 1
-            let n = clock.advance(to: ts, speed: speed)
-            for _ in 0..<n where out.count < 180 {
-                breeze.step(OceanClock.step, speed: speed)
-                var field: [Double] = []
-                var y = 150.0
-                while y <= 850 {
-                    var x = 200.0
-                    while x <= 1400 {
-                        let a = breeze.sample(x, y)
-                        field.append(a.pointerX)
-                        field.append(a.pointerY)
-                        x += 50
-                    }
-                    y += 50
-                }
-                out.append(field)
-            }
-            breeze.syncInputClock(hostTime: ts, speed: speed)
-            f += 1
-            let wobble: Double = uneven ? 0.6 * (MeadowMath.hash3(Double(f), 9, 3) - 0.5) : 0
-            ts = h0 + (Double(f) + wobble) / frameRate
-        }
-        return out
-    }
-    // The playback, against the same path at 60 Hz through the same frames and speeds.
-    var worst = 0.0, name = ""
-    for changes in [false, true] {
-        for frameRate in [30.0, 60, 120] {
-            for uneven in [false, true] {
-                let ref = run(rate: 60, delivery: .regular, frameRate: frameRate, uneven: uneven, speedChanges: changes)
-                for rate in [15.0, 30, 60, 120] {
-                    for d in Delivery.allCases where !(rate == 60 && d == .regular) {
-                        let v = worstDifference(run(rate: rate, delivery: d, frameRate: frameRate, uneven: uneven,
-                                                    speedChanges: changes), ref)
-                        if v > worst {
-                            worst = v
-                            name = "\(Int(rate)) Hz \(d.name), \(Int(frameRate)) Hz frames\(uneven ? " uneven" : "")\(changes ? ", speed changes" : "")"
-                        }
-                    }
+        breeze.step(meadowStep, speed: speeds[k % speeds.count])
+        if k % 5 == 0 {
+            for r in 0..<breeze.rows {
+                for c in 0..<breeze.columns {
+                    let v = breeze.stirSample(c, r)
+                    try expect(v.x.isFinite && v.y.isFinite && abs(v.x) <= 260 && abs(v.y) <= 260,
+                               "step \(k): stir \(v) at sample (\(c), \(r))")
+                    peak = max(peak, abs(v.x), abs(v.y))
                 }
             }
+            for (x, y) in [(800.0, 500.0), (0, 0), (1600, 1000), (-1e9, 1e9)] {
+                let a = breeze.sample(x, y)
+                try expect(a.x.isFinite && a.y.isFinite && a.speed.isFinite, "step \(k): air at (\(x), \(y)) \(a)")
+            }
         }
     }
-    // The frames themselves: at a steady speed, every frame rate, even or not, gives the air of even 60 Hz frames.
-    // (With speed changes the family clock re-times what it had accumulated, so step n lands up to a step apart in
-    // real time on different frames: compared step for step they differ by that, not by the pointer.)
-    let even60 = run(rate: 60, delivery: .regular, frameRate: 60, uneven: false, speedChanges: false)
-    var frames = 0.0
-    for frameRate in [30.0, 60, 120] {
-        for uneven in [false, true] {
-            frames = max(frames, worstDifference(run(rate: 60, delivery: .jittered, frameRate: frameRate, uneven: uneven,
-                                                     speedChanges: false), even60))
-        }
-    }
-    print("  through the host clock, frame rates against even 60 Hz frames: worst \(pct(frames))")
-    try expect(frames <= 0.05, "frame rates change the air by \(pct(frames))")
-    print("  through the host clock: worst \(pct(worst)) (\(name))")
-    try expect(worst <= 0.05, "through the host clock the air differs by \(pct(worst)) (\(name))")
+    print(String(format: "  wild input over 1200 steps after the clamp was reached: peak stir %.1f pt/s (limit 260)", peak))
 }
 
 private func meadowDownwashOnlyUnderLowButterflies() throws {
@@ -737,7 +711,8 @@ private func meadowWindPeaksAtTheSketchSpeed() throws {
 
 /// Whether a flower planted for screen `i` stands where the port allows, tested on its own terms: on its screen; or
 /// past it by at most 10 pt on each axis, on no screen, outside the terrain's bounds (not in a gap), with the nearest
-/// point of its screen on no other screen (so not across a shared edge, nor round a seam's end).
+/// point of its screen on no other screen, and the segment from its patch's centre (on its screen) to it touching no
+/// other screen (so not across a shared edge, offset or not, nor round a seam's end).
 private func standsOwn(_ f: Flower, _ terrain: Terrain) -> String? {
     guard f.screen >= 0 && f.screen < terrain.rects.count else { return "no screen \(f.screen)" }
     let r = terrain.rects[f.screen]
@@ -755,6 +730,24 @@ private func standsOwn(_ f: Flower, _ terrain: Terrain) -> String? {
             return "across the edge it shares with screen \(j)"
         }
     }
+    guard Double(r.minX) <= f.rootX && f.rootX <= Double(r.maxX) && Double(r.minY) <= f.rootY && f.rootY <= Double(r.maxY)
+    else { return "its patch centre (\(f.rootX), \(f.rootY)) is off its screen" }
+    for (j, o) in terrain.rects.enumerated() where j != f.screen {
+        if let y = crossing(SIMD2(f.rootX, f.rootY), SIMD2(f.x, f.y), o) {
+            return "reached from (\(f.rootX), \(f.rootY)) across screen \(j) (at \(y))"
+        }
+    }
+    return nil
+}
+
+/// Where the segment a → b first touches rect `o` (closed), sampled finely; nil if it doesn't. Independent of the
+/// port's clipping.
+private func crossing(_ a: SIMD2<Double>, _ b: SIMD2<Double>, _ o: CGRect) -> SIMD2<Double>? {
+    let n = 4000
+    for k in 0...n {
+        let p: SIMD2<Double> = a + (b - a) * (Double(k) / Double(n))
+        if Double(o.minX) <= p.x && p.x <= Double(o.maxX) && Double(o.minY) <= p.y && p.y <= Double(o.maxY) { return p }
+    }
     return nil
 }
 
@@ -769,6 +762,10 @@ private func meadowNoFlowerInAGap() throws {
         [CGRect(x: 0, y: 100, width: 900, height: 600), CGRect(x: 900, y: 0, width: 1000, height: 800),
          CGRect(x: 1900, y: 200, width: 800, height: 500)],
         [CGRect(x: 0, y: 0, width: 800, height: 600), CGRect(x: 800, y: 600, width: 800, height: 600)],
+        // Offset by a few points: side by side (the re-check's 2 pt, both ways) and one above the other.
+        [CGRect(x: 0, y: 0, width: 1000, height: 700), CGRect(x: 1000, y: 2, width: 1000, height: 700)],
+        [CGRect(x: 0, y: 0, width: 1000, height: 700), CGRect(x: 1000, y: -3, width: 1000, height: 700)],
+        [CGRect(x: 0, y: 0, width: 1000, height: 700), CGRect(x: 4, y: 700, width: 1000, height: 700)],
     ]
     var past = 0
     for (li, rects) in layouts.enumerated() {
@@ -794,6 +791,24 @@ private func meadowNoFlowerInAGap() throws {
     ]
     for (x, y, i, ok) in cases {
         try expect(two.flowers.mayStand(x, y, screen: i) == ok, "(\(x), \(y)) for screen \(i): \(!ok) (want \(ok))")
+    }
+    // The re-check's offset seam: the right screen 2 pt lower. A bloom past the top-right corner is beside the real
+    // 2 pt of the shared side, but the way from its patch crosses the shared span: refused. Without the patch centre
+    // (the nearest point of the screen) the same place is allowed, which is what the earlier test checked alone.
+    let offset = MeadowRig(Terrain(rects: layouts[6]), cell: 13, seed: 1, plant: false)
+    try expect(!offset.flowers.mayStand(1005, -4, screen: 0, from: SIMD2(970, 50)),
+               "(1005, −4) reached from (970, 50) across the shared edge of the offset screens")
+    try expect(!offset.flowers.mayStand(1004.84, -1.28, screen: 0, from: SIMD2(943.43, 74.54))
+               && offset.flowers.mayStand(1004.84, -1.28, screen: 0),
+               "seed 7773's bloom: refused from its patch, allowed from the screen's nearest point")
+    try expect(offset.flowers.mayStand(1004, -4, screen: 0, from: SIMD2(1000, 0)) && offset.flowers.mayStand(500, -4, screen: 0, from: SIMD2(500, 40)),
+               "past the real 2 pt of the side and past the top, reached straight out: allowed")
+    // Seed 7773 there, planted (the re-check's case: its patch at (943.43, 74.54) put bloom 5 at (1004.84, −1.28)).
+    let seeded = MeadowRig(Terrain(rects: layouts[6]), cell: 13, seed: 7773)
+    let patch = seeded.flowers.all.filter { abs($0.rootX - 943.43) < 0.01 && abs($0.rootY - 74.54) < 0.01 }
+    try expect(!patch.isEmpty, "seed 7773 no longer plants the patch at (943.43, 74.54): the case isn't tested")
+    for f in seeded.flowers.all {
+        if let why = standsOwn(f, seeded.flowers.terrain) { throw CheckFailure(detail: "seed 7773: flower \(f.id) at (\(f.x), \(f.y)) \(why)") }
     }
     // Screens meeting at a corner only: nothing reaches round it.
     let corner = MeadowRig(Terrain(rects: layouts[5]), cell: 13, seed: 1, plant: false)
@@ -971,6 +986,34 @@ private func meadowClickLimitAndFade() throws {
     rig.flowers.tuning.clickLimit = 2
     rig.flowers.limitClicked()
     try expect(rig.flowers.clickedOpen == 2, "limit 2 leaves \(rig.flowers.clickedOpen)")
+    try sparkBufferHolds()
+}
+
+/// The spark buffer's real limit (`Clicks.sparkBuffer`): 30 new blooms in one step let off 480 sparks and it keeps
+/// 256; the dropped sparks still draw their random numbers, so the input stream is where it would be had every spark
+/// been taken.
+private func sparkBufferHolds() throws {
+    func thirty(takingEach: Bool) throws -> (kept: Int, asked: Int, next: Double) {
+        let rig = MeadowRig(Terrain.single(width: 2600, height: 1600), cell: 13, seed: 5, plant: false)
+        var asked = 0, kept = 0
+        for k in 0..<30 {
+            let x: Double = 150 + 260 * Double(k % 10)
+            let y: Double = 200 + 400 * Double(k / 10)
+            guard case .bloomed(_, let n) = rig.flowers.click(x: x, y: y, rng: rig.input) else {
+                throw CheckFailure(detail: "click \(k) at (\(x), \(y)) didn't bloom")
+            }
+            asked += n
+            if takingEach { rig.flowers.takeSparks { _ in kept += 1 } }
+        }
+        if !takingEach { rig.flowers.takeSparks { _ in kept += 1 } }
+        return (kept, asked, rig.input.unit())
+    }
+    let burst = try thirty(takingEach: false)
+    let taken = try thirty(takingEach: true)
+    try expect(burst.asked == 480 && burst.kept == MeadowTuning.Clicks.sparkBuffer && burst.kept == 256,
+               "30 blooms in a step: \(burst.asked) sparks asked, \(burst.kept) kept (want 480, 256)")
+    try expect(taken.kept == 480, "taken after each click, \(taken.kept) of 480 sparks kept")
+    try expect(burst.next == taken.next, "dropping sparks moved the input stream")
 }
 
 /// Flower `id` closes now (its callback, by id), fades over 2 s, and is gone.
@@ -1206,16 +1249,24 @@ private func meadowBoundsAtTheEntryPoints() throws {
     }
     rig.step(20)
     try expect(rig.breeze.sample(800, 400).speed.isFinite, "a pointer at the largest coordinates broke the air")
-    // A pace that isn't usable: subnormal, zero, negative, huge, NaN. The input clock stays finite and moves by a
-    // step's real time at a pace held to 0.05…1.5.
-    let paces: [Double] = [Double.leastNonzeroMagnitude, 0, -1, 1e300, .infinity, .nan]
-    for v in paces {
-        let before = rig.breeze.inputClock
+    // A pace that isn't usable: subnormal, zero, negative, huge, NaN. A step is a step's real time at the pace held to
+    // 0.05…1.5 (1 when it isn't a positive number): the same 10 pt move stirs as at that pace, finite.
+    let paces: [(Double, Double)] = [(Double.leastNonzeroMagnitude, 0.05), (0, 1), (-1, 1), (1e300, 1.5), (.infinity, 1), (.nan, 1)]
+    func stroke(_ speed: Double) -> SIMD2<Double> {
+        let b = Breeze(terrain: Terrain.single(width: 1600, height: 913), cell: CGSize(width: 13, height: 19))
+        b.pointerMoved(x: 800, y: 400)
+        b.step(meadowStep, speed: 1)
+        b.pointerMoved(x: 810, y: 400)
+        b.step(meadowStep, speed: speed)
+        return SIMD2(b.sample(810, 400).pointerX, b.sample(810, 400).pointerY)
+    }
+    for (v, held) in paces {
+        let got = stroke(v), want = stroke(held)
+        try expect(got.x.isFinite && got.y.isFinite && got == want && want.x > 0, "pace \(v): the stroke \(got), want \(want) (pace \(held))")
         rig.breeze.step(meadowStep, speed: v)
-        let moved: Double = rig.breeze.inputClock - before
-        try expect(moved.isFinite && moved > 0 && moved <= meadowStep / 0.05 + 1e-12, "pace \(v): the input clock moved \(moved)")
         try expect(rig.breeze.sample(800, 400).speed.isFinite, "pace \(v): air not finite")
     }
+    try expect(stroke(0.05) != stroke(1) && stroke(1.5) != stroke(1), "the pace doesn't change the stroke: the test proves nothing")
     // Tuning written after start is put right: a NaN breeze keeps the default; a huge one is held to 3.
     rig.breeze.tuning.breeze = .nan
     rig.flowers.tuning.flowerSize = .infinity
@@ -1226,8 +1277,14 @@ private func meadowBoundsAtTheEntryPoints() throws {
     try expect(rig.breeze.tuning.breeze == 3, "a huge breeze wasn't held to 3")
     rig.step()
     try expect(rig.breeze.sample(700, 300).speed.isFinite, "air not finite after bad tuning writes")
-    // Only the clock's tick steps: anything else is refused, the clocks and fields unchanged.
-    let tick = rig.breeze.time, steps = rig.breeze.steps, clock = rig.breeze.inputClock
+    // Only the clock's tick steps: anything else is refused, the clock and fields unchanged (a pointer moved before
+    // them stirs nothing).
+    let tick = rig.breeze.time, steps = rig.breeze.steps
+    rig.breeze.pointerLeft()
+    rig.breeze.pointerMoved(x: 700, y: 300)
+    rig.breeze.pointerMoved(x: 900, y: 420)
+    var stirred = 0.0
+    for r in 0..<rig.breeze.rows { for c in 0..<rig.breeze.columns { stirred += simd_length(rig.breeze.stirSample(c, r)) } }
     let heads = rig.flowers.all.map { SIMD2($0.ox, $0.oy) }
     let odd: [Double] = [1.0 / 30, 1.0 / 120, 0.1, 1e-300, 1.0 / 60 + 1e-15, -meadowStep, .nan]
     for dt in odd {
@@ -1236,8 +1293,10 @@ private func meadowBoundsAtTheEntryPoints() throws {
         rig.breeze.downstroke(x: 700, y: 300, z: 0, sinStroke: 1, span: 100, dt: dt)
         rig.breeze.flutter(x: 700, y: 300, sinStroke: 1, span: 100, dt: dt)
     }
-    try expect(rig.breeze.time == tick && rig.breeze.steps == steps && rig.breeze.inputClock == clock,
-               "a step that isn't the tick was taken")
+    try expect(rig.breeze.time == tick && rig.breeze.steps == steps, "a step that isn't the tick was taken")
+    var stirredAfter = 0.0
+    for r in 0..<rig.breeze.rows { for c in 0..<rig.breeze.columns { stirredAfter += simd_length(rig.breeze.stirSample(c, r)) } }
+    try expect(stirredAfter == stirred, "a step that isn't the tick stirred or decayed the air")
     try expect(rig.flowers.all.map { SIMD2($0.ox, $0.oy) } == heads, "the flowers stepped at a length that isn't the tick")
     var washed = 0.0
     for r in 0..<rig.breeze.rows { for c in 0..<rig.breeze.columns { washed += simd_length(rig.breeze.washSample(c, r)) } }
@@ -1248,26 +1307,22 @@ private func meadowStepAllocatesNothing() throws {
     let terrain = Terrain(rects: [CGRect(x: 0, y: 0, width: 1512, height: 982), CGRect(x: 1512, y: 0, width: 2560, height: 1440)])
     let rig = MeadowRig(terrain, cell: 13, seed: 71)
     _ = rig.flowers.click(x: 700, y: 500, rng: rig.input)
-    rig.breeze.syncInputClock(hostTime: 100)
     rig.step(120)
-    rig.breeze.syncInputClock(hostTime: 100 + 120.0 / 60)
     var k = 120
     let n = allocations {
         for _ in 0..<600 {
-            // Late input: 15 Hz samples in pairs, stamped with host times, so steps wait and are played late; a
-            // leave and a re-entry every 2 s.
-            if k % 8 == 0 {
-                for j in stride(from: -8, through: -4, by: 4) {
-                    let te: Double = Double(k + j) / 60
-                    rig.breeze.pointerMoved(x: 1500 + 900 * sin(te), y: 600 + 400 * cos(1.7 * te), hostTime: 100 + te)
-                }
+            // Moves at 30 Hz and on every seventh step, a leave every 2 s (back with the next move), and once in
+            // those 2 s left and back within one step.
+            if k % 2 == 0 || k % 7 == 0 {
+                let te: Double = Double(k) / 60
+                rig.breeze.pointerMoved(x: 1500 + 900 * sin(te), y: 600 + 400 * cos(1.7 * te))
             }
             if k % 120 == 60 { rig.breeze.pointerLeft() }
+            if k % 120 == 90 { rig.breeze.pointerLeft(); rig.breeze.pointerMoved(x: 300, y: 300) }
             rig.breeze.downstroke(x: 1200, y: 500, z: 0.1, sinStroke: 0.8, span: 170, dt: meadowStep)
             rig.breeze.flutter(x: 1300, y: 520, sinStroke: 0.8, span: 120, dt: meadowStep)
             rig.step()
             _ = rig.breeze.sample(400, 300)
-            rig.breeze.syncInputClock(hostTime: 100 + Double(k + 1) / 60)
             k += 1
         }
     }
@@ -1313,18 +1368,29 @@ private func replaySketchFixture() throws {
     t.density = num(settings["density"])
     t.flowerSize = num(settings["flowerSize"])
     t.leaves = num(settings["leaves"])
-    t.clickLimit = Int(num(settings["clickLimit"]))
+    guard let clickLimit = integer(settings["clickLimit"]) else {
+        throw CheckFailure(detail: "the fixture's clickLimit \(settings["clickLimit"] ?? "none") isn't an integer")
+    }
+    t.clickLimit = clickLimit
     try expect(t.sanitized() == t, "the fixture's settings are out of range: \(t)")
     try expect(num(settings["timeScale"]) == 1, "the fixture runs at a time scale of \(num(settings["timeScale"]))")
-    let rig = MeadowRig(Terrain.single(width: W, height: H), cell: cw, seed: seed, tuning: t, sketchPointer: true)
+    let rig = MeadowRig(Terrain.single(width: W, height: H), cell: cw, seed: seed, tuning: t)
 
     let trace = d["trace"] as? [[String: Any]] ?? []
     let samples = d["samples"] as? [[String: Any]] ?? []
-    let ticks = samples.map { Int(num($0["tick"])) }
-    try expect(ticks == fixtureTicks, "sample ticks \(ticks), want \(fixtureTicks)")
+    let ticks = samples.map { integer($0["tick"]) }
+    try expect(ticks == fixtureTicks.map { Optional($0) }, "sample ticks \(ticks), want \(fixtureTicks)")
     let last = fixtureTicks[fixtureTicks.count - 1]
     try expect(step["ticks"] as? Int == last, "the declared last tick \(step["ticks"] ?? "none"), want \(last)")
     try expect(!trace.isEmpty, "no trace")
+    // Every event's tick an integer, in order, before the last tick.
+    var previous = 0
+    for (i, e) in trace.enumerated() {
+        guard let tick = integer(e["tick"]), tick >= previous && tick < last else {
+            throw CheckFailure(detail: "trace event \(i): tick \(e["tick"] ?? "none") isn't an integer in order below \(last)")
+        }
+        previous = tick
+    }
     // The trace's places, derived as the sketch does (html:2909–2918) and checked against the file's points.
     let points = d["points"] as? [String: Any] ?? [:]
     let stirA = SIMD2(0.3 * W, 0.75 * H), stirB = SIMD2(0.7 * W, 0.75 * H)
@@ -1357,7 +1423,7 @@ private func replaySketchFixture() throws {
     try near(stirPts.first, stirA, "the stir pass's start")
     try near(stirPts.last, stirB, "the stir pass's end")
     let bloomRow = points["bloom"] as? [Any] ?? []
-    try expect(bloom != nil && bloomRow.count == 3 && Int(num(bloomRow[2])) == bloom?.id,
+    try expect(bloom != nil && bloomRow.count == 3 && integer(bloomRow[2]) == bloom?.id,
                "the bloom: \(bloomRow) vs \(String(describing: bloom?.id))")
     if let b = bloom { try near(bloomRow, SIMD2(b.x, b.y), "the bloom's place") }
     // The sketch's pointer handlers, as far as the air and the flowers see them (html:2684–2710).
@@ -1403,12 +1469,12 @@ private func replaySketchFixture() throws {
     var sampled = 0
     var rows = 0
     for tick in 0...last {
-        if let s = samples.first(where: { Int(num($0["tick"])) == tick }) {
+        if let s = samples.first(where: { integer($0["tick"]) == tick }) {
             rows += try expectSample(s, rig, tick: tick, points: windPoints())
             sampled += 1
         }
         if tick == last { break }
-        while ev < trace.count && Int(num(trace[ev]["tick"])) == tick {
+        while ev < trace.count && integer(trace[ev]["tick"]) == tick {
             send(trace[ev])
             ev += 1
         }
@@ -1449,7 +1515,7 @@ private func expectSample(_ s: [String: Any], _ rig: MeadowRig, tick: Int, point
     try expect(rows.count == rig.flowers.all.count, "\(at): \(rig.flowers.all.count) flowers vs \(rows.count)")
     for (row, f) in zip(rows, rig.flowers.all) {
         let head = row["head"] as? [Any] ?? []
-        try expect(f.id == Int(num(row["id"])) && f.kind.name == (row["kind"] as? String ?? ""),
+        try expect(f.id == integer(row["id"]) && f.kind.name == (row["kind"] as? String ?? ""),
                    "\(at): flower \(f.id) \(f.kind.name) vs \(num(row["id"])) \(row["kind"] ?? "")")
         let pairs: [(String, Double, Double, Double)] = [
             ("x", f.x, num(row["x"]), 1e-5), ("y", f.y, num(row["y"]), 1e-5), ("r", f.radius, num(row["r"]), 1e-5),
