@@ -45,6 +45,7 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-20, on sketch round 6 (light mode for paper): "ok for now". Applies: new (round 6 accepted for now).
 - 2026-11-20, during s1 round 5: "also to be clear is the colors in light mode not beign correct intended?". The
   manager's answer: only partly. The muted look and no colour sparkle on paper follow Web, but the rest is wrong:
   solid near-black blocks for the black markings (heavy, muddy on paper), olive and brown wings, white flowers that
