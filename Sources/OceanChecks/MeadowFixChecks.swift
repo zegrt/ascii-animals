@@ -261,16 +261,20 @@ private func meadowBadTerrainHoldsStill() throws {
     try expect(c.flies.count == 9 && c.flowers.all.count > 0, "the meadow did not come back on a usable screen: \(c.flies.count) butterflies")
 }
 
-/// Finding 8: a pointer held still in the gap between two screens is never landed on.
+/// Finding 8: a pointer held still off the screens, in the gap between two or just past a real edge, is never landed
+/// on (the review's case first: seed 5, the pointer in the 40 pt gap from the start).
 private func meadowPointerInAGapIsNotLandedOn() throws {
-    for seed: Int32 in [5, 6, 7] {
-        let w = MeadowWorld(terrain: wideGap, cell: cell13, seed: seed)
-        for _ in 0..<60 { w.step(tick) }
-        w.pointerMoved(x: 1442, y: 430)
-        for s in 0..<(30 * 60) {
-            w.step(tick)
-            for b in w.flies where b.goal == .cursor || b.state == .cursor {
-                throw CheckFailure(detail: "seed \(seed): butterfly \(b.id) answers a pointer in the gap after \(Double(s) / 60) s")
+    let cases: [(Terrain, Double, Double, String)] = [(wideGap, 1442, 430, "in the gap"), (wideGap, 720, -6, "above the left screen"),
+                                                     (wideGap, 2930, 450, "right of the right screen"), (oneScreen, -6, 450, "left of one screen")]
+    for (t, px, py, where_) in cases {
+        for seed: Int32 in [5, 6, 7] {
+            let w = MeadowWorld(terrain: t, cell: cell13, seed: seed)
+            w.pointerMoved(x: px, y: py)
+            for s in 0..<(30 * 60) {
+                w.step(tick)
+                for b in w.flies where b.goal == .cursor || b.state == .cursor {
+                    throw CheckFailure(detail: "seed \(seed): butterfly \(b.id) answers a pointer \(where_) after \(Double(s) / 60) s")
+                }
             }
         }
     }
@@ -401,17 +405,24 @@ private func meadowClicksAllocateNothingLater() throws {
 /// Finding 6: the tool's numbers: each value the review found trapping is refused, the usual ones pass.
 private func meadowToolRefusesBadNumbers() throws {
     let size = CGSize(width: 340, height: 150)
-    try expect(ToolInput.size("nanx150") == nil && ToolInput.size("340xinf") == nil && ToolInput.size("0x150") == nil
-               && ToolInput.size("1e300x150") == nil && ToolInput.size("340") == nil && ToolInput.size("x") == nil, "a bad size passes")
-    try expect(ToolInput.size("340x150") == size && ToolInput.size("7680x4320") != nil, "a good size is refused")
-    for s in ["nan", "inf", "0", "-1", "1e300", "1e-300", "x"] {
-        try expect(ToolInput.scale(s, for: size) == nil, "--scale \(s) passes")
-    }
-    try expect(ToolInput.scale("2", for: size) == 2 && ToolInput.scale("0.5", for: CGSize(width: 2560, height: 2609)) == 0.5, "a good scale is refused")
-    for s in ["nan", "inf", "-1", "1e300", "x"] { try expect(ToolInput.seconds(s) == nil, "--seconds \(s) passes") }
+    let desk = CGSize(width: 2560, height: 2609)
+    let badSizes: [String] = ["nanx150", "340xinf", "0x150", "1e300x150", "340", "x"]
+    for t in badSizes { try expect(ToolInput.size(t) == nil, "size \(t) passes") }
+    let goodSize: CGSize? = ToolInput.size("340x150")
+    try expect(goodSize == size && ToolInput.size("7680x4320") != nil, "a good size is refused")
+    let badScales: [String] = ["nan", "inf", "0", "-1", "1e300", "1e-300", "x"]
+    for t in badScales { try expect(ToolInput.scale(t, for: size) == nil, "--scale \(t) passes") }
+    let two: CGFloat? = ToolInput.scale("2", for: size)
+    let half: CGFloat? = ToolInput.scale("0.5", for: desk)
+    try expect(two == 2 && half == 0.5, "a good scale is refused")
+    let badSeconds: [String] = ["nan", "inf", "-1", "1e300", "x"]
+    for t in badSeconds { try expect(ToolInput.seconds(t) == nil, "--seconds \(t) passes") }
     try expect(ToolInput.seconds("30") == 30 && ToolInput.seconds("0") == 0, "good seconds refused")
-    for s in ["0", "-15", "7", "1e3", "x"] { try expect(ToolInput.fps(s) == nil, "--fps \(s) passes") }
-    try expect([1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60].allSatisfy { ToolInput.fps(String($0)) == $0 }, "a good fps refused")
-    try expect(ToolInput.unit("nan") == nil && ToolInput.unit("1.5") == nil && ToolInput.unit("0.5") == 0.5, "--z")
+    let badFps: [String] = ["0", "-15", "7", "1e3", "x"]
+    for t in badFps { try expect(ToolInput.fps(t) == nil, "--fps \(t) passes") }
+    let goodFps: [Int] = [1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60]
+    for f in goodFps { try expect(ToolInput.fps(String(f)) == f, "--fps \(f) refused") }
+    try expect(ToolInput.unit("nan") == nil && ToolInput.unit("1.5") == nil, "a bad --z passes")
+    try expect(ToolInput.unit("0.5") == 0.5, "--z 0.5 refused")
     try expect(ToolInput.count("0") == nil && ToolInput.count("900") == 900, "--frames")
 }
