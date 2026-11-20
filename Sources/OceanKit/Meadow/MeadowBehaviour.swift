@@ -169,10 +169,12 @@ extension MeadowWorld {
     }
 
     /// `openingMoment` (html:1946–1972): one already nectaring, one basking, one about to land on a flower, the
-    /// rest flying.
+    /// rest flying. On screens with no way between them, each stays in its own group of screens (so the spread
+    /// `syncFlies` made at load holds).
     func openingMoment() {
         var fl = flies
         rng.shuffle(&fl)
+        func ownGroup(_ b: Butterfly, _ f: Flower) -> Bool { groupCount <= 1 || group(near: f.x, f.y) == group(near: b.x, b.y) }
         func onScreen(_ f: Flower) -> Bool {
             guard f.busy == 0 else { return false }
             let s = screens[screen(near: f.x, f.y)]
@@ -184,7 +186,7 @@ extension MeadowWorld {
             // The favourite (a stable sort by weight, highest first).
             var pick: Int? = nil
             var pw = -1.0
-            for (k, f) in flowers.all.enumerated() where onScreen(f) {
+            for (k, f) in flowers.all.enumerated() where onScreen(f) && ownGroup(nect, f) {
                 let w = nect.sp.weight(f.kind)
                 if w > pw { pw = w; pick = k }
             }
@@ -209,8 +211,9 @@ extension MeadowWorld {
             let bask = fl[i]
             var best = (x: 0.0, y: 0.0)
             var bs = -1.0
+            let home: Int? = groupCount > 1 ? group(near: bask.x, bask.y) : nil
             for _ in 0..<12 {
-                let s = screens[screenByArea()]
+                let s = screens[screenByArea(inGroup: home)]
                 let x: Double = s.minX + rng.range(0.12, 0.88) * s.w
                 let y: Double = s.minY + rng.range(0.12, 0.88) * s.h
                 var sep = 1e9
@@ -234,7 +237,7 @@ extension MeadowWorld {
         if i < fl.count {
             let come = fl[i]
             var opts: [Int] = []
-            for (k, f) in flowers.all.enumerated() where onScreen(f) {
+            for (k, f) in flowers.all.enumerated() where onScreen(f) && ownGroup(come, f) {
                 var taken = false
                 for o in flies where o.landed && hypot(o.x - f.x, o.y - f.y) < 0.9 * (spanRef(come) + spanRef(o)) { taken = true; break }
                 if !taken { opts.append(k) }

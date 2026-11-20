@@ -174,7 +174,7 @@ extension MeadowWorld {
         }
         let p = SIMD2(b.x, b.y)
         if onScreens(b.x, b.y) { return (0, 0) }
-        let out = terrain.signedOutside(p)
+        let out = signedOutside(b.x, b.y)
         guard out > m || inGap(b.x, b.y) else { return (0, 0) }
         let q = terrain.nearestInside(p)
         let ex: Double = q.x > b.x + 1e-9 ? 1 : q.x < b.x - 1e-9 ? -1 : 0
@@ -194,7 +194,7 @@ extension MeadowWorld {
             let ix: Double = min(0.6 * span, 0.15 * s.w), iy: Double = min(0.6 * span, 0.15 * s.h)
             if single {
                 if b.x > s.minX + ix && b.y > s.minY + iy && b.x < s.maxX - ix && b.y < s.maxY - iy { b.entering = false }
-            } else if terrain.signedOutside(SIMD2(b.x, b.y)) <= -min(ix, iy) {
+            } else if signedOutside(b.x, b.y) <= -min(ix, iy) {
                 b.entering = false
             }
         }
