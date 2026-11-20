@@ -45,6 +45,9 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-20: "why are stuff taking so long?", then to the manager's list of process tweaks: "no first take a step
+  back / exercise absrtact thnking". Applies: decide.escalate (the manager re-thinks the port's shape and brings it
+  to the director before more is started; m1's running fix round may finish; nothing new starts).
 - 2026-11-20: "pause after m1". Applies: new (m1 finishes its fix round and Codex re-check, and its CI; then all
   work stops; m2 does not start until the director resumes).
 - 2026-11-20: "continue also whats new doesnt need a full screen thing i think". Applies: new (t9: the 3.1
