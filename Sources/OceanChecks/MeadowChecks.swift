@@ -287,6 +287,7 @@ func meadowChecks() {
     meadowPainterChecks()
     meadowRestartChecks()
     meadowRestartFixChecks()
+    meadowRestart2Checks()
     // CI runners have no GPU: OCEAN_SKIP_GPU=1 skips the Metal checks (main.swift skips its own the same way).
     if ProcessInfo.processInfo.environment["OCEAN_SKIP_GPU"] == nil { meadowRenderChecks() }
 }
@@ -1479,56 +1480,6 @@ func meadowRestartChecks() {
     }
     check("closedWingsShowTheUnderside", closedWingsShowTheUnderside)
 
-    func drawingStaysOnScreen() throws {
-        // The restart's change 2: the flight keeps clear of the walls by the drawing's reach, so no butterfly's
-        // drawing leaves its screen. Free flight on a big monitor and a laptop, weather on: the body stays the drawn
-        // half-span inside the side edges and the drawing's reach up and down inside the top and bottom. Flying at flowers (the
-        // ground lets a seeker down to a low head, which t3 lands on): inside the side and top edges.
-        for field in [Terrain.single(width: 2560, height: 1440), Terrain.single(width: 1800, height: 1169)] {
-            let r = field.rects[0]
-            let land = Meadowland(random: WebRandom(seed: 4))
-            land.layout(terrain: field, cell: meadowCell)
-            let heads: [Int] = land.flowers.indices.filter { land.flowers[$0].kind != .grass }
-            for (i, kind) in ButterflyKind.allCases.enumerated() {
-                for seed in UInt64(1)...UInt64(3) {
-                    for seeking in [false, true] {
-                        let random = WebRandom(seed: seed * 7 + UInt64(i))
-                        let x0: Double = random.range(Double(r.minX) + 200, Double(r.maxX) - 200)
-                        let y0: Double = random.range(Double(r.minY) + 200, Double(r.maxY) - 300)
-                        let b = Butterfly(kind: kind, x: x0, y: y0, random: random)
-                        b.scale = Double(meadowCell.width) / 13
-                        let air = Breeze(bounds: field.bounds, cell: meadowCell)
-                        var target: SIMD2<Double>? = nil
-                        var left: Double = 0
-                        for step in 0..<(90 * 60) {
-                            air.step(flightDt, random: random)
-                            if seeking {
-                                left -= flightDt
-                                if left <= 0 {
-                                    let k: Int = heads[random.int(0, heads.count - 1)]
-                                    target = land.head(k)
-                                    left = random.range(3, 8)
-                                }
-                                b.state = .approach
-                            }
-                            b.fly(flightDt, target: target, breeze: air, terrain: field, random: random)
-                            let hs: Double = b.drawnHalfSpan, up: Double = b.drawnUp, down: Double = b.drawnDown
-                            let tag = "\(kind) seed \(seed)\(seeking ? " seeking" : "") on \(Int(r.width))×\(Int(r.height)), step \(step)"
-                            let left: Double = b.x - hs - Double(r.minX), right: Double = Double(r.maxX) - b.x - hs
-                            let above: Double = b.y - up - Double(r.minY), below: Double = Double(r.maxY) - b.y - down
-                            try expect(left >= -0.5 && right >= -0.5, "\(tag): body at x \(b.x), drawn half-span \(hs)")
-                            try expect(above >= -0.5, "\(tag): body at y \(b.y), drawn \(up) above it")
-                            if !seeking {
-                                try expect(below >= -0.5, "\(tag): body at y \(b.y), drawn \(down) below it")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    check("drawingStaysOnScreen", drawingStaysOnScreen)
-
     func oneButterflyFitsThePreview() throws {
         // The Settings preview, 340 × 150 pt at its 8-pt cell: one butterfly of each species at its biggest, open,
         // at the bottom of the downstroke, banked or closed, draws no more columns and rows than the preview has
@@ -1592,72 +1543,9 @@ func meadowRestartChecks() {
     check("subPixelRelayoutRedraws", subPixelRelayoutRedraws)
 }
 
-// ── t5 restart, fix round 1: nothing drawn leaves the screen; the clap reads as a butterfly ──
-
-/// Paints butterflies over one screen on a canvas padded all round, so what the screen would clip is kept, and finds
-/// the cells drawn (a glyph, a block or an overlay glyph) that are not whole cells of the screen: outside it, or in
-/// its last partial column or row (review t5 restart, "What is missing").
-private final class EdgeProbe {
-    let size: CGSize
-    let cell: CGSize
-    /// The screen's whole columns and rows, and the padding, in cells.
-    let cols: Int, rows: Int, padC: Int, padR: Int
-    let canvas: CellCanvas
-    let grid: GridSpec
-    let viewport: CGRect
-    let painter = MeadowPainter()
-    let land = Meadowland(random: WebRandom(seed: 3))
-    let theme: ThemeParams
-
-    init(size: CGSize, cell: CGSize, light: Bool = false) {
-        self.size = size
-        self.cell = cell
-        let cw: Double = Double(cell.width), ch: Double = Double(cell.height)
-        cols = Int(floor(Double(size.width) / cw))
-        rows = Int(floor(Double(size.height) / ch))
-        padC = Int(ceil(420 / cw))
-        padR = Int(ceil(420 / ch))
-        let wide: Double = Double(Int(ceil(Double(size.width) / cw)) + 2 * padC) * cw
-        let tall: Double = Double(Int(ceil(Double(size.height) / ch)) + 2 * padR) * ch
-        grid = GridSpec.make(viewportSize: CGSize(width: wide, height: tall), cell: cell)
-        viewport = CGRect(x: -Double(padC) * cw, y: -Double(padR) * ch, width: wide, height: tall)
-        canvas = CellCanvas(cols: grid.cols, rows: grid.rows)
-        theme = meadowTheme(light: light)
-    }
-
-    /// Paints one frame; returns how many drawn cells near each butterfly are not whole cells of the screen, and the
-    /// first of them (screen column and row).
-    func paint(_ flies: [Butterfly], breeze: Breeze, time: Double) -> (count: Int, first: (Int, Int)) {
-        canvas.clear()
-        painter.paint(land: land, butterflies: flies, breeze: breeze, time: time, viewport: viewport, grid: grid,
-                      theme: theme, into: canvas)
-        let cw: Double = Double(cell.width), ch: Double = Double(cell.height)
-        var count = 0
-        var first: (Int, Int) = (0, 0)
-        for b in flies {
-            let reach: Double = 420 * b.scale
-            let bc: Int = Int(floor(b.x / cw)) + padC, br: Int = Int(floor(b.y / ch)) + padR
-            let hc: Int = Int(ceil(reach / cw)), hr: Int = Int(ceil(reach / ch))
-            let c0: Int = max(0, bc - hc), c1: Int = min(canvas.cols - 1, bc + hc)
-            let r0: Int = max(0, br - hr), r1: Int = min(canvas.rows - 1, br + hr)
-            guard c0 <= c1 && r0 <= r1 else { continue }
-            for r in r0...r1 {
-                let sr: Int = r - padR
-                let rowIn: Bool = sr >= 0 && sr < rows
-                for c in c0...c1 {
-                    let sc: Int = c - padC
-                    if rowIn && sc >= 0 && sc < cols { continue }
-                    let i: Int = r * canvas.cols + c
-                    if drawn(canvas, i) || canvas.overGlyph[i] != CellCanvas.noGlyph {
-                        if count == 0 { first = (sc, sr) }
-                        count += 1
-                    }
-                }
-            }
-        }
-        return (count, first)
-    }
-}
+// ── t5 restart, fix round 1: low flowers keep their reach; the clap reads as a butterfly ──
+// (Its `nothingDrawnLeavesTheScreen`, with `drawingStaysOnScreen` above, was retired in restart 2: the director let
+// butterflies flutter partly off screen, 2026-11-20.)
 
 /// The flight's peak stroke (the clap): the stroke's mid plus its amplitude.
 private func peakStroke(_ kind: ButterflyKind) -> Double {
@@ -1693,98 +1581,9 @@ private func meanColour(_ cells: [(dc: Int, rgb: SIMD3<Double>, cell: Int)]) -> 
 func meadowRestartFixChecks() {
     let deg: Double = Double.pi / 180
 
-    /// Flies `b` for `seconds`, painting every `every`-th step through `probe`; throws at the first frame with a cell
-    /// drawn off the screen's whole cells.
-    func flyPainted(_ b: Butterfly, _ probe: EdgeProbe, seconds: Double, every: Int, weather: Bool, random: WebRandom,
-                    tag: String, target: SIMD2<Double>?) throws {
-        let field = Terrain.single(width: Double(probe.size.width), height: Double(probe.size.height))
-        let air = Breeze(bounds: field.bounds, cell: probe.cell)
-        air.ambient = weather
-        let steps: Int = Int(seconds * 60)
-        for step in 0..<steps {
-            air.step(flightDt, random: random)
-            if target != nil { b.state = .approach }
-            b.fly(flightDt, target: target, breeze: air, terrain: field, random: random)
-            guard step % every == 0 else { continue }
-            let r = probe.paint([b], breeze: air, time: Double(step) * flightDt)
-            try expect(r.count == 0,
-                       "\(tag), step \(step): \(r.count) cells drawn off the screen's whole cells, first at column \(r.first.0), row \(r.first.1) (screen \(probe.cols) × \(probe.rows) whole cells); body at (\(b.x), \(b.y)), stroke \(b.stroke / deg)°, bank \(b.bank / deg)°")
-        }
-    }
-
-    func nothingDrawnLeavesTheScreen() throws {
-        // Fix round 1, item 1 (review t5 restart, findings 1-3): real flights painted, every painted cell compared
-        // with the physical screen, its last partial column and row counting as off it.
-        // (a) The Settings preview, 340 × 150 at its 8-pt cell: one butterfly of each species alone, flying freely
-        // with the weather on, from the middle and from random starts.
-        let preview = CGSize(width: 340, height: 150)
-        let small: CGSize = GridSpec.cell(forWidth: 340)
-        for (i, kind) in ButterflyKind.allCases.enumerated() {
-            for seed in [UInt64(7), 1, 2, 3] {
-                let random = WebRandom(seed: seed * 13 + UInt64(i))
-                let x0: Double = seed == 7 ? 170 : random.range(60, 280)
-                let y0: Double = seed == 7 ? 75 : random.range(40, 110)
-                let b = Butterfly(kind: kind, x: x0, y: y0, random: random)
-                b.scale = Double(small.width) / 13
-                if seed == 1 { b.size = 1 + b.species.sizeSpread }
-                try flyPainted(b, EdgeProbe(size: preview, cell: small), seconds: 60, every: 1, weather: true,
-                               random: random, tag: "\(kind) seed \(seed) free on 340×150", target: nil)
-            }
-        }
-        // (b) Pursuits of a one-row flower's head, and of heads near the left, right and top edges, on a big monitor
-        // and a laptop, from the middle of the screen, in calm air and in weather.
-        for size in [CGSize(width: 2560, height: 1440), CGSize(width: 1440, height: 900)] {
-            let cell: CGSize = GridSpec.cell(forWidth: Double(size.width))
-            let w: Double = Double(size.width), h: Double = Double(size.height), ch: Double = Double(cell.height)
-            let heads: [(String, SIMD2<Double>)] = [
-                ("one-row head", SIMD2<Double>(w / 2, h - ch)),
-                ("one-row head left", SIMD2<Double>(0.12 * w, h - ch)),
-                ("left head", SIMD2<Double>(7, h - 7 * ch)),
-                ("left low head", SIMD2<Double>(39, h - 7 * ch)),
-                ("right head", SIMD2<Double>(w - 7, h - 5 * ch)),
-                ("top head", SIMD2<Double>(w / 2, 1))]
-            for (i, kind) in ButterflyKind.allCases.enumerated() {
-                for (name, head) in heads {
-                    for seed in [UInt64(7), 1] {
-                        let random = WebRandom(seed: seed * 17 + UInt64(i))
-                        let b = Butterfly(kind: kind, x: w / 2, y: h / 2, random: random)
-                        b.scale = Double(cell.width) / 13
-                        if seed == 1 { b.size = 1 + b.species.sizeSpread }
-                        try flyPainted(b, EdgeProbe(size: size, cell: cell), seconds: 30, every: 2, weather: seed == 1,
-                                       random: random, tag: "\(kind) seed \(seed) after the \(name) on \(Int(w))×\(Int(h))",
-                                       target: head)
-                    }
-                }
-            }
-            // (c) Tilted wings at each edge: started at the edge, facing out of the screen, flying freely (the first
-            // step crosses the wall), and banked hard toward it.
-            let starts: [(String, Double, Double, Double)] = [
-                ("left", 1, h / 2, Double.pi), ("right", w - 1, h / 2, 0), ("top", w / 2, 1, 1.5 * Double.pi),
-                ("bottom", w / 2, h - 1, 0.5 * Double.pi), ("top-left", 1, 1, 1.25 * Double.pi),
-                ("bottom-right", w - 1, h - 1, 0.25 * Double.pi)]
-            for (i, kind) in ButterflyKind.allCases.enumerated() {
-                for (name, x0, y0, heading) in starts {
-                    for seed in [UInt64(1), 2] {
-                        let random = WebRandom(seed: seed * 19 + UInt64(i))
-                        let b = Butterfly(kind: kind, x: x0, y: y0, random: random)
-                        b.scale = Double(cell.width) / 13
-                        b.size = 1 + b.species.sizeSpread
-                        b.heading = heading
-                        b.bank = (seed == 1 ? 1 : -1) * b.species.maxBank
-                        try flyPainted(b, EdgeProbe(size: size, cell: cell), seconds: 8, every: 1, weather: true,
-                                       random: random, tag: "\(kind) seed \(seed) from the \(name) edge on \(Int(w))×\(Int(h))",
-                                       target: nil)
-                    }
-                }
-            }
-        }
-    }
-    check("nothingDrawnLeavesTheScreen", nothingDrawnLeavesTheScreen)
-
     func lowFlowersKeepTheirReach() throws {
-        // Item 1's other half: at a one-row flower the flight still brings the butterfly's mouth to the head (the
-        // flight's point, within half a cell, as `flowerSeekersReachLowHeads` holds it), while the body is drawn high
-        // enough that the drawing stays on the screen (above).
+        // At a one-row flower the flight still brings the butterfly to the head (the flight's point, within half a
+        // cell, as `flowerSeekersReachLowHeads` holds it), on a big monitor and a laptop at their own cells.
         for size in [CGSize(width: 2560, height: 1440), CGSize(width: 1440, height: 900)] {
             let cell: CGSize = GridSpec.cell(forWidth: Double(size.width))
             let w: Double = Double(size.width), h: Double = Double(size.height)
@@ -1850,4 +1649,226 @@ func meadowRestartFixChecks() {
         try expect(blue.z > blue.x && brown.x > brown.z, "the morpho's flash: open \(blue), clap \(brown)")
     }
     check("clapReadsAsAButterfly", clapReadsAsAButterfly)
+}
+
+// ── t5 restart 2, simplified: the body is drawn where it flies; the clap turns over at every bank ──
+
+/// Blocks of a posed butterfly by canvas cell, with their colours (see `blockCells`).
+private func blockMap(_ kind: ButterflyKind, stroke: Double, bank: Double, heading: Double, light: Bool)
+    -> [Int: SIMD3<Double>] {
+    let size = CGSize(width: 640, height: 400)
+    let land = Meadowland(random: WebRandom(seed: 2))
+    let b = posed(kind, x: 318.5, y: 199.5)
+    b.stroke = stroke
+    b.bank = bank
+    b.heading = heading
+    let c = paintMeadow(MeadowPainter(), land: land, flies: [b], breeze: calmBreeze(CGRect(origin: .zero, size: size)),
+                        size: size, theme: meadowTheme(light: light))
+    var out: [Int: SIMD3<Double>] = [:]
+    for i in 0..<(c.cols * c.rows) where c.block[i] >> 24 != 0 {
+        let v: SIMD4<Double> = unpack(c.block[i])
+        out[i] = SIMD3<Double>(v.x, v.y, v.z)
+    }
+    return out
+}
+
+/// The share of block cells (of those in either) that change in one tiny step of a pose: present in one and not the
+/// other, or turned to a clearly different colour (more than 40 of 255 apart).
+private func flipShare(_ a: [Int: SIMD3<Double>], _ b: [Int: SIMD3<Double>]) -> Double {
+    var changed = 0
+    for (i, ca) in a {
+        if let cb = b[i] {
+            if simd_length(ca - cb) > 40 { changed += 1 }
+        } else {
+            changed += 1
+        }
+    }
+    var union: Int = a.count
+    for i in b.keys where a[i] == nil {
+        changed += 1
+        union += 1
+    }
+    let total: Int = max(1, union)
+    return Double(changed) / Double(total)
+}
+
+func meadowRestart2Checks() {
+    let deg: Double = Double.pi / 180
+    let eight: UInt8 = GlyphAtlas.index("8")!
+
+    /// Whether the thorax (the body's `8`) is drawn within a cell of (x, y) on `c` (grid at the origin, `cell` pt).
+    func thoraxAt(_ c: CellCanvas, _ x: Double, _ y: Double, cell: CGSize) -> Bool {
+        let bc: Int = Int(floor(x / Double(cell.width))), br: Int = Int(floor(y / Double(cell.height)))
+        for r in (br - 1)...(br + 1) where r >= 0 && r < c.rows {
+            for col in (bc - 1)...(bc + 1) where col >= 0 && col < c.cols {
+                if c.glyph[r * c.cols + col] == eight { return true }
+            }
+        }
+        return false
+    }
+
+    func clapTurnsOverAtEveryBank() throws {
+        // Restart 2, item 3 (re-check finding 5): at banks of 0°, 15° and 30° either way, from 50° to each species'
+        // peak stroke, no hundredth of a degree turns more than a tenth of the blocks over (the colour change from
+        // upper side to underside is a blend, not a switch where the signed width crosses zero), and the face changes
+        // over several degrees: at least four half-degree samples show both faces.
+        for light in [false, true] {
+            for kind in ButterflyKind.allCases {
+                let upper = meanColour(blockCells(kind, stroke: 0, light: light))
+                let under = meanColour(blockCells(kind, stroke: 90 * deg, light: light))
+                let peak: Double = peakStroke(kind)
+                let banks: [Double] = [0, 15 * deg, 30 * deg, -15 * deg, -30 * deg]
+                for bank in banks {
+                    let tag = "\(kind) \(light ? "paper" : "dark") bank \(Int((bank / deg).rounded()))°"
+                    var mixed = 0
+                    var s: Double = 50 * deg
+                    while s <= peak + 1e-9 {
+                        let a = blockMap(kind, stroke: s, bank: bank, heading: 1.5 * Double.pi, light: light)
+                        let b = blockMap(kind, stroke: s + 0.01 * deg, bank: bank, heading: 1.5 * Double.pi, light: light)
+                        let flip: Double = flipShare(a, b)
+                        try expect(flip <= 0.1, "\(tag): \(flip) of the blocks turn over between \(s / deg)° and \(s / deg + 0.01)°")
+                        let u: Int = a.values.filter { simd_length($0 - under) < simd_length($0 - upper) }.count
+                        let share: Double = a.isEmpty ? 0 : Double(u) / Double(a.count)
+                        if share > 0.15 && share < 0.85 { mixed += 1 }
+                        s += 0.5 * deg
+                    }
+                    try expect(mixed >= 4, "\(tag): only \(mixed) half-degree samples show both faces")
+                }
+                // Where the signed width crosses zero at a bank (the re-check's 59.99° → 60.01° at 30°).
+                let crossings: [Double] = [15 * deg, 30 * deg, -30 * deg]
+                for bank in crossings {
+                    let c: Double = 90 * deg - abs(bank)
+                    let a = blockMap(kind, stroke: c - 0.01 * deg, bank: bank, heading: 1.5 * Double.pi, light: light)
+                    let b = blockMap(kind, stroke: c + 0.01 * deg, bank: bank, heading: 1.5 * Double.pi, light: light)
+                    let flip: Double = flipShare(a, b)
+                    try expect(flip <= 0.1, "\(kind) \(light ? "paper" : "dark") bank \(bank / deg)°: \(flip) of the blocks turn over where the signed width crosses zero")
+                }
+            }
+        }
+    }
+    check("clapTurnsOverAtEveryBank", clapTurnsOverAtEveryBank)
+
+    func foldedSideNeverFlips() throws {
+        // Restart 2, item 3: at the clap the folded pair moves from one side of the body to the other as the bank
+        // changes over several degrees, never in one step: from −10° to 10° of bank in steps of a twentieth of a
+        // degree, no step changes more than a third of the blocks (as `clapReadsAsAButterfly` holds the face; one
+        // column of a narrow clap is a sixth of its blocks, a jump to the other side all of them), facing up, up-left
+        // and up-right.
+        for kind in ButterflyKind.allCases {
+            let stroke: Double = peakStroke(kind) - 1 * deg
+            let headings: [Double] = [1.5 * Double.pi, 1.25 * Double.pi, 1.75 * Double.pi]
+            for heading in headings {
+                var bank: Double = -10 * deg
+                var last = blockMap(kind, stroke: stroke, bank: bank, heading: heading, light: false)
+                while bank < 10 * deg {
+                    bank += 0.05 * deg
+                    let next = blockMap(kind, stroke: stroke, bank: bank, heading: heading, light: false)
+                    let flip: Double = flipShare(last, next)
+                    try expect(flip <= 1.0 / 3.0, "\(kind) heading \(Int((heading / deg).rounded()))°: \(flip) of the blocks change in the step to bank \(bank / deg)°")
+                    last = next
+                }
+            }
+        }
+    }
+    check("foldedSideNeverFlips", foldedSideNeverFlips)
+
+    func bodyDrawnWhereItFlies() throws {
+        // Restart 2: the body is drawn at the flight's point, on every screen. (a) The 340 × 150 preview, one
+        // butterfly of each species flying freely in weather; (b) pursuits of a one-row flower's head on a big
+        // monitor and a laptop. Every 5th step the thorax is drawn within a cell of (x, y).
+        let preview = CGSize(width: 340, height: 150)
+        var runs: [(CGSize, SIMD2<Double>?)] = [(preview, nil)]
+        for size in [CGSize(width: 2560, height: 1440), CGSize(width: 1440, height: 900)] {
+            let cell: CGSize = GridSpec.cell(forWidth: Double(size.width))
+            runs.append((size, SIMD2<Double>(Double(size.width) / 2, Double(size.height) - Double(cell.height))))
+        }
+        for (size, head) in runs {
+            let cell: CGSize = GridSpec.cell(forWidth: Double(size.width))
+            let w: Double = Double(size.width), h: Double = Double(size.height)
+            let field = Terrain.single(width: w, height: h)
+            let grid = GridSpec.make(viewportSize: size, cell: cell)
+            let canvas = CellCanvas(cols: grid.cols, rows: grid.rows)
+            let painter = MeadowPainter()
+            let land = Meadowland(random: WebRandom(seed: 3))
+            for (i, kind) in ButterflyKind.allCases.enumerated() {
+                for seed in [UInt64(7), 1] {
+                    let random = WebRandom(seed: seed * 23 + UInt64(i))
+                    let b = Butterfly(kind: kind, x: w / 2, y: h / 2, random: random)
+                    b.scale = Double(cell.width) / 13
+                    if seed == 1 { b.size = 1 + b.species.sizeSpread }
+                    b.fitDrawing(to: size)
+                    let air = Breeze(bounds: field.bounds, cell: cell)
+                    air.ambient = head == nil
+                    for step in 0..<(30 * 60) {
+                        air.step(flightDt, random: random)
+                        if head != nil { b.state = .approach }
+                        b.fly(flightDt, target: head, breeze: air, terrain: field, random: random)
+                        guard step % 5 == 0 else { continue }
+                        canvas.clear()
+                        painter.paint(land: land, butterflies: [b], breeze: air, time: Double(step) * flightDt,
+                                      viewport: CGRect(origin: .zero, size: size), grid: grid, theme: meadowTheme(), into: canvas)
+                        try expect(thoraxAt(canvas, b.x, b.y, cell: cell),
+                                   "\(kind) seed \(seed) on \(Int(w))×\(Int(h))\(head == nil ? "" : " after a one-row head"), step \(step): no thorax drawn within a cell of the body at (\(b.x), \(b.y))")
+                    }
+                }
+            }
+        }
+    }
+    check("bodyDrawnWhereItFlies", bodyDrawnWhereItFlies)
+
+    func previewSizeFitsEveryLean() throws {
+        // Restart 2, item 2: a screen too small for full-size butterflies gets a smaller size, chosen at layout, so
+        // one whole butterfly fits it at any lean the painter draws: on the 340 × 150 preview, each species at its
+        // biggest, fitted, painted leaning either way (heading and pitch) in the open, downstroke, banked, clap and
+        // closed poses, spans no more whole columns and rows than the preview has. Desktop screens keep full size.
+        let preview = CGSize(width: 340, height: 150)
+        let cell = GridSpec.cell(forWidth: 340)
+        let cols: Int = Int(floor(340 / Double(cell.width))), rows: Int = Int(floor(150 / Double(cell.height)))
+        let size = CGSize(width: 480, height: 450)
+        let grid = GridSpec.make(viewportSize: size, cell: cell)
+        let land = Meadowland(random: WebRandom(seed: 2))
+        for kind in ButterflyKind.allCases {
+            let desktops: [CGSize] = [CGSize(width: 2560, height: 1440), CGSize(width: 1440, height: 900),
+                                      CGSize(width: 1800, height: 1169)]
+            for screen in desktops {
+                let big = Butterfly(kind: kind, x: 0, y: 0, random: WebRandom(seed: 1))
+                big.scale = GridSpec.cell(forWidth: Double(screen.width)).width / 13
+                big.size = 1 + big.species.sizeSpread
+                big.fitDrawing(to: screen)
+                try expectClose(big.fit, 1, tol: 1e-12, "\(kind) on \(Int(screen.width))×\(Int(screen.height)) is drawn at \(big.fit) of its size")
+            }
+            let poses: [(Double, Double)] = [(0, 0), (-35 * deg, 0), (25 * deg, 40 * deg), (78 * deg, 0), (78 * deg, 20 * deg),
+                                             (90 * deg, 0)]
+            for (stroke, bank) in poses {
+                let leans: [(Double, Double)] = [(0, 0), (Double.pi, 0), (0, 0.6), (0, -0.6), (Double.pi, 0.6), (Double.pi, -0.6)]
+                for (heading, pitch) in leans {
+                    let b = posed(kind, x: 240, y: 225)
+                    b.scale = Double(cell.width) / 13
+                    b.size = 1 + b.species.sizeSpread
+                    b.fitDrawing(to: preview)
+                    b.stroke = stroke
+                    b.bank = bank
+                    b.heading = heading
+                    b.pitch = pitch
+                    let c = CellCanvas(cols: grid.cols, rows: grid.rows)
+                    c.clear()
+                    MeadowPainter().paint(land: land, butterflies: [b], breeze: calmBreeze(CGRect(origin: .zero, size: size)),
+                                          time: 0, viewport: CGRect(origin: .zero, size: size), grid: grid,
+                                          theme: meadowTheme(), into: c)
+                    var c0 = Int.max, c1 = Int.min, r0 = Int.max, r1 = Int.min, cells = 0
+                    for i in 0..<(c.cols * c.rows) where drawn(c, i) || c.overGlyph[i] != CellCanvas.noGlyph {
+                        cells += 1
+                        c0 = min(c0, i % c.cols); c1 = max(c1, i % c.cols)
+                        r0 = min(r0, i / c.cols); r1 = max(r1, i / c.cols)
+                    }
+                    let tag = "\(kind) stroke \(Int((stroke / deg).rounded()))° bank \(Int((bank / deg).rounded()))° heading \(Int((heading / deg).rounded()))° pitch \(pitch)"
+                    try expect(cells > 20, "\(tag): drew \(cells) cells")
+                    try expect(c0 > 0 && r0 > 0 && c1 < c.cols - 1 && r1 < c.rows - 1, "\(tag): clipped while measuring")
+                    try expect(c1 - c0 + 1 <= cols && r1 - r0 + 1 <= rows,
+                               "\(tag) at \(b.fit) of its size: \(c1 - c0 + 1) × \(r1 - r0 + 1) cells, the preview \(cols) × \(rows)")
+                }
+            }
+        }
+    }
+    check("previewSizeFitsEveryLean", previewSizeFitsEveryLean)
 }

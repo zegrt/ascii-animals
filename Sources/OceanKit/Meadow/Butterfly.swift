@@ -41,22 +41,10 @@ public final class Butterfly {
     public var scale: Double = 1
     /// Claps so far: one per wingbeat.
     public private(set) var claps: Int = 0
-    /// Where the body is drawn, from (x, y), pt: (0, 0), except where the whole drawing can't be at (x, y) on the
-    /// screen. At a flower too low for the drawing to fit above the ground, (x, y) is the mouth on the flower's head
-    /// and the body is drawn above it, so the drawing stays on the screen while the mouth still reaches the head. On
-    /// a screen too small for the walls' margins (the Settings preview) the flight roams within its capped soft walls
-    /// and the body is drawn where the whole drawing fits (t5 restart, fix round 1).
-    public private(set) var drawnOffset = SIMD2<Double>(0, 0)
-    /// The share of its size the butterfly is drawn at: 1, except on a screen too small for the whole drawing at its
-    /// widest lean (the Settings preview), where it is drawn small enough to fit.
+    /// The share of its size the butterfly is drawn at: 1, except on a screen too small for one whole butterfly
+    /// (the Settings preview), where `fitDrawing(to:)` chooses a smaller size at layout. The body is always drawn at
+    /// (x, y) (t5 restart 2).
     public private(set) var fit: Double = 1
-    /// How much of its lean the body is drawn with, 0…1: all of it, easing to upright within `leanFade` wingspans of
-    /// where a wall stops the upright drawing, so a butterfly turning at a screen's edge straightens up instead of
-    /// tipping a wing past it.
-    public private(set) var leanRoom: Double = 1
-    /// Wingspans over which the lean eases out before a wall.
-    static let leanFade = 0.3
-    private var fitKey = SIMD4<Double>(-1, -1, -1, -1)
 
     // Airspeed (ground velocity less the wind).
     private var ux: Double, uy: Double
@@ -174,24 +162,6 @@ public final class Butterfly {
     /// Wingspan in pt.
     public var wingspan: Double { species.span * 13 * scale * size }
 
-    /// Half the span as drawn (`ButterflySpecies.drawnSpan` cells of 13 pt at this scale), pt: how far the drawing
-    /// reaches from the body sideways.
-    public var drawnHalfSpan: Double { species.drawnSpan * 13 * scale * size * fit / 2 }
-
-    /// How far the drawing reaches above the body, pt, at 19-pt rows at this scale: the head and the antennae
-    /// (`MeadowPainter` draws their clubs 0.42 half-heights and 3.3 rows above the body).
-    public var drawnUp: Double {
-        let row: Double = 19 * scale
-        return 0.42 * species.drawnHeight * row * size * fit / 2 + 3.3 * row
-    }
-
-    /// How far the drawing reaches below the body, pt: the hindwings (the swallowtail's tails 1.4 half-heights) and
-    /// the tips' 0.4-row climb.
-    public var drawnDown: Double {
-        let row: Double = 19 * scale
-        return (species.tailRow ? 1.4 : 1) * species.drawnHeight * row * size * fit / 2 + 0.4 * row
-    }
-
     /// Stop beating and glide for `seconds`, wings in the glide pose; it won't end early.
     public func glide(for seconds: Double) {
         startGlide(seconds)
@@ -246,37 +216,7 @@ public final class Butterfly {
         return best
     }
 
-    /// How far inside the walls the flight keeps (and free flight puts its waypoints): at the sides, the top and the
-    /// bottom, the drawing's reach that way, so it stays on the screen, and a zone beyond it for the turn.
-    struct Walls {
-        var side: Double, top: Double, bottom: Double
-        /// Halfway from `d` to these.
-        func halfway(_ d: Walls) -> Walls {
-            Walls(side: (side + d.side) / 2, top: (top + d.top) / 2, bottom: (bottom + d.bottom) / 2)
-        }
-        /// Each held to a quarter of the screen's shorter side, as `capped` does.
-        func capped(_ r: CGRect) -> Walls {
-            Walls(side: Butterfly.capped(side, r), top: Butterfly.capped(top, r), bottom: Butterfly.capped(bottom, r))
-        }
-    }
-    /// The drawing's reach.
-    var reach: Walls { Walls(side: drawnHalfSpan, top: drawnUp, bottom: drawnDown) }
-    var margins: Walls {
-        let zx: Double = Butterfly.turnZone.x * wingspan, zy: Double = Butterfly.turnZone.y * wingspan
-        return Walls(side: drawnHalfSpan + zx, top: drawnUp + zy, bottom: drawnDown + zy)
-    }
-    /// The turn zones, wingspans: narrow at the sides (the drawing is wide, and free flight still roams the width);
-    /// deeper at the top and bottom, where the climbs and glides run into them.
-    static let turnZone = SIMD2<Double>(0.1, 0.2)
-
-    /// The wall push with these margins: each edge of the terrain (they run along the axes) with its own.
-    private func push(_ p: SIMD2<Double>, _ terrain: Terrain, _ m: Walls) -> SIMD2<Double> {
-        let sides: Double = terrain.wallPush(p, margin: m.side).x
-        let down: Double = terrain.wallPush(p, margin: m.top).y, up: Double = terrain.wallPush(p, margin: m.bottom).y
-        return SIMD2<Double>(sides, max(0, down) + min(0, up))
-    }
-
-    /// A random point inside a screen, clear of its walls, in the bottom 40 % of it `lowWaypoints` of the time.
+    /// A random point half a wingspan inside a screen, in the bottom 40 % of it `lowWaypoints` of the time.
     private func randomPoint(_ terrain: Terrain, _ random: WebRandom, span: Double) -> SIMD2<Double> {
         guard !terrain.rects.isEmpty else { return SIMD2<Double>(x, y) }
         var u: Double = random.unit() * terrain.area
@@ -285,11 +225,9 @@ public final class Butterfly {
             u -= Double(rect.width * rect.height)
             if u < 0 { r = rect; break }
         }
-        // At the drawing's reach: as the original placed them half a wingspan into its one-wingspan margin, inside
-        // the turn zone, so free flight roams right out to where the drawing still fits.
-        let m: Walls = reach.capped(r)
-        let minX: Double = Double(r.minX) + m.side, maxX: Double = Double(r.maxX) - m.side
-        let minY: Double = Double(r.minY) + m.top, maxY: Double = Double(r.maxY) - m.bottom
+        let inset: Double = Butterfly.capped(0.5 * span, r)
+        let minX: Double = Double(r.minX) + inset, maxX: Double = Double(r.maxX) - inset
+        let minY: Double = Double(r.minY) + inset, maxY: Double = Double(r.maxY) - inset
         let px: Double = minX < maxX ? random.range(minX, maxX) : Double(r.midX)
         let lowTop: Double = max(minY, Double(r.maxY) - 0.4 * Double(r.height))
         let py: Double
@@ -325,9 +263,7 @@ public final class Butterfly {
             let d: SIMD2<Double> = q - p
             let along: Double = cos(atan2(d.y, d.x) - prefer)
             let distance: Double = min(1, simd_length(d) / max(reach, 1))
-            // Going somewhere counts as much as going the preferred way, so the drawn size's wider margins still leave
-            // the flight roaming the whole field.
-            let score: Double = along + 1.0 * distance
+            let score: Double = along + 0.5 * distance
             if score > bestScore { best = q; bestScore = score }
         }
         let bearing: Double = atan2(best.y - p.y, best.x - p.x)
@@ -347,24 +283,8 @@ public final class Butterfly {
         if isFinite { good = snapshot } else { restore() }
     }
 
-    /// Where a butterfly flying at `t` aims: `t` moved in from its screen's sides and top until the drawing fits
-    /// there with half the turn zone to spare (the ground gives way to a low target, as the walls below do).
-    private func aimPoint(_ t: SIMD2<Double>, _ terrain: Terrain) -> SIMD2<Double> {
-        guard !terrain.rects.isEmpty else { return t }
-        let r: CGRect = terrain.rects[terrain.rectIndex(near: t)]
-        let m: Walls = margins.halfway(reach)
-        let inX: Double = Butterfly.capped(m.side, r)
-        let inY: Double = Butterfly.capped(m.top, r)
-        var q: SIMD2<Double> = t
-        let lo: Double = Double(r.minX) + inX, hi: Double = Double(r.maxX) - inX
-        q.x = lo <= hi ? min(max(q.x, lo), hi) : Double(r.midX)
-        q.y = max(q.y, min(Double(r.minY) + inY, Double(r.midY)))
-        return q
-    }
-
-    private func step(_ dt: Double, target aimed: SIMD2<Double>?, breeze: Breeze, terrain: Terrain, random: WebRandom) {
+    private func step(_ dt: Double, target: SIMD2<Double>?, breeze: Breeze, terrain: Terrain, random: WebRandom) {
         time += dt
-        let target: SIMD2<Double>? = aimed.map { aimPoint($0, terrain) }
         let sp = species
         let span: Double = wingspan
         let drag: Double = ButterflySpecies.drag
@@ -396,8 +316,7 @@ public final class Butterfly {
             // Free flight: roam toward a waypoint, climbing at up to 22° or dropping at up to 30° to its height,
             // the heading's height wandering on slow value noise.
             waypointLeft -= dt
-            // Reached within half a wingspan, so a waypoint near a wall is flown out to.
-            if !hasWaypoint || waypointLeft <= 0 || simd_length(waypoint - p) < 0.5 * span {
+            if !hasWaypoint || waypointLeft <= 0 || simd_length(waypoint - p) < span {
                 pickWaypoint(terrain, random, from: p, span: span, away: nil)
             }
             let d: SIMD2<Double> = waypoint - p
@@ -412,21 +331,17 @@ public final class Butterfly {
         }
         if climb > 0 { want = tilted(want, climb) }
         if bound != 0 { want = tilted(want, bound * sp.boundAngle) }
-        // Walls: a soft steer within a margin of an edge (the drawing's reach and a zone for the turn), and a push;
-        // behind it a hard stop at the drawing's reach (`stop`).
-        // Free flight meeting a wall turns as a correlated random walk: a new preferred direction drawn about the
-        // wall's normal, and a waypoint along it. Flying at a target (a flower, the cursor), the ground starts no
-        // higher than the target itself, so it never pushes a flower seeker off a flower one row tall; at the sides
-        // and the top the target itself is moved in (`aimPoint`).
+        // Walls: a soft steer within a wingspan of an edge, and a push. Free flight meeting a wall turns as a
+        // correlated random walk: a new preferred direction drawn about the wall's normal, and a waypoint along it.
+        // Flying at a target (a flower, the cursor), the walls start no farther in than the target itself, so the
+        // ground never pushes a flower seeker off a flower one row tall.
         let here: CGRect = terrain.rects.isEmpty ? terrain.bounds : terrain.rects[terrain.rectIndex(near: p)]
-        var m: Walls = margins.capped(here)
-        // The ground: no farther in than the target.
-        if let t = target { m.bottom = max(1e-9, min(m.bottom, Butterfly.clearance(t, terrain))) }
-        let push: SIMD2<Double> = self.push(p, terrain, m)
-        let my: Double = push.y < 0 ? m.bottom : m.top
-        let w = SIMD2<Double>(push.x / (7 * m.side), push.y / (7 * my))
+        var margin: Double = Butterfly.capped(span * (target == nil ? 1 : 0.5), here)
+        if let t = target { margin = min(margin, Butterfly.clearance(t, terrain)) }
+        let push: SIMD2<Double> = terrain.wallPush(p, margin: margin)
         let pushing = push.x != 0 || push.y != 0
         if pushing {
+            let w: SIMD2<Double> = push / (7 * margin)
             let sy: Double = sin(want) + 2 * w.y, sx: Double = cos(want) + 2 * w.x
             want = atan2(sy, sx)
             if target == nil && !wasPushing {
@@ -543,131 +458,51 @@ public final class Butterfly {
         let from = SIMD2<Double>(x, y)
         x += vx * dt
         y += vy * dt
-        stop(at: terrain, from: from, target: target)
+        stop(at: terrain, from: from)
     }
 
-    /// The cell the painter draws on at this scale, pt: `GridSpec.cell(forWidth:)`'s, 13 × 19 at full size.
-    var cell: SIMD2<Double> {
+    /// The hard edge behind the soft walls, on the body's point: a step that took the body off the screens is brought
+    /// back to the nearest point on them, and stops flying into that edge. Wings and tails may still pass an edge or
+    /// reach into the gap between displays, where they are simply not drawn, as the sharks' fins are (the director,
+    /// 2026-11-20). A body already off the screens (flying in from outside them) is left alone.
+    private func stop(at terrain: Terrain, from: SIMD2<Double>) {
+        let p = SIMD2<Double>(x, y)
+        guard !terrain.contains(p), terrain.contains(from) else { return }
+        let q: SIMD2<Double> = terrain.nearestInside(p)
+        let out: SIMD2<Double> = p - q
+        let gap: Double = simd_length(out)
+        guard gap > 0, gap.isFinite else { return }
+        let n: SIMD2<Double> = out / gap
+        let into: Double = ux * n.x + uy * n.y
+        if into > 0 {
+            ux -= into * n.x
+            uy -= into * n.y
+        }
+        x = q.x
+        y = q.y
+    }
+
+    /// Chooses `fit` for a screen of `screen` pt at this scale and size, at layout: 1 where one whole butterfly fits
+    /// the screen's whole cells at every lean and climb the painter draws, else the largest share that does (never
+    /// under a quarter).
+    public func fitDrawing(to screen: CGSize) {
         let cw: Double = (13 * scale * 1_000).rounded() / 1_000
-        return SIMD2<Double>(cw, (cw * 1.45).rounded())
-    }
-
-    /// The drawing's reach from its drawn body this step, pt (left, right, up, down): `drawnExtent` at the painter's
-    /// lean and the tips' climb now.
-    var drawnReach: SIMD4<Double> {
-        let c: SIMD2<Double> = cell
-        return drawnExtent(lean: drawnLean, climb: 0.4 * c.y * sin(stroke), fit: fit, cw: c.x, ch: c.y)
-    }
-
-    /// The whole cells of `r` (its grid starts at its top-left corner), pt: its last partial column and row are left
-    /// out, as the painter can't draw a whole cell there.
-    private func wholeCells(_ r: CGRect) -> SIMD2<Double> {
-        let c: SIMD2<Double> = cell
-        let w: Double = floor(Double(r.width) / c.x + 1e-9) * c.x, h: Double = floor(Double(r.height) / c.y + 1e-9) * c.y
-        return SIMD2<Double>(w, h)
-    }
-
-    /// `fit` for a screen `r`: the share of its size at which the drawing, at any lean and climb the painter draws,
-    /// fits the screen's whole cells. Kept until the screen's size, the scale or the size change.
-    private func refit(_ r: CGRect) {
-        let key = SIMD4<Double>(Double(r.width), Double(r.height), scale, size)
-        guard key != fitKey else { return }
-        fitKey = key
-        let room: SIMD2<Double> = wholeCells(r) - SIMD2<Double>(2e-3, 2e-3)
-        let c: SIMD2<Double> = cell
+        let ch: Double = (cw * 1.45).rounded()
+        guard cw > 0, ch > 0, screen.width > 0, screen.height > 0 else { fit = 1; return }
+        let roomX: Double = floor(Double(screen.width) / cw + 1e-9) * cw - 2e-3
+        let roomY: Double = floor(Double(screen.height) / ch + 1e-9) * ch - 2e-3
         var f: Double = 1
         for lean in [-0.5, -0.25, 0.0, 0.25, 0.5] {
-            for climb in [-0.4 * c.y, 0.4 * c.y] {
+            for climb in [-0.4 * ch, 0.4 * ch] {
                 // Each reach grows with the drawn size no faster than in a straight line from no size to full.
-                let e0: SIMD4<Double> = drawnExtent(lean: lean, climb: climb, fit: 0, cw: c.x, ch: c.y)
-                let e1: SIMD4<Double> = drawnExtent(lean: lean, climb: climb, fit: 1, cw: c.x, ch: c.y)
+                let e0: SIMD4<Double> = drawnExtent(lean: lean, climb: climb, fit: 0, cw: cw, ch: ch)
+                let e1: SIMD4<Double> = drawnExtent(lean: lean, climb: climb, fit: 1, cw: cw, ch: ch)
                 let w0: Double = e0.x + e0.y, w1: Double = e1.x + e1.y
                 let h0: Double = e0.z + e0.w, h1: Double = e1.z + e1.w
-                if w1 > room.x && w1 > w0 { f = min(f, (room.x - w0) / (w1 - w0)) }
-                if h1 > room.y && h1 > h0 { f = min(f, (room.y - h0) / (h1 - h0)) }
+                if w1 > roomX && w1 > w0 { f = min(f, (roomX - w0) / (w1 - w0)) }
+                if h1 > roomY && h1 > h0 { f = min(f, (roomY - h0) / (h1 - h0)) }
             }
         }
-        fit = clamp(f, 0.25, 1)
-    }
-
-    /// The hard edge behind the soft margin: a body whose drawing would reach past a screen's outer edge, or into its
-    /// last partial column or row, is set back to where the whole drawing fits (`drawnReach`, the painter's own
-    /// geometry, leaning and in whole cells) and stops moving into the edge. A step that crossed a wall is brought
-    /// back inside first. Flying at a target, the ground gives way to it as the soft margin does; on a tiny screen
-    /// the flight keeps to its capped soft walls. Either way what the flight's point lacks of the drawing's room is
-    /// made up where the body is drawn (`drawnOffset`), so the drawing still fits.
-    private func stop(at terrain: Terrain, from: SIMD2<Double>, target: SIMD2<Double>?) {
-        drawnOffset = SIMD2<Double>(0, 0)
-        var p = SIMD2<Double>(x, y)
-        if !terrain.contains(p) {
-            // Only a step that left the terrain is undone: one flying in from outside it is left alone.
-            guard terrain.contains(from) else { return }
-            p = terrain.nearestInside(p)
-        }
-        let here: CGRect = terrain.rects[terrain.rectIndex(near: p)]
-        refit(here)
-        let d: Walls = reach
-        // Upright near the walls: the lean eases out over the last `leanFade` wingspans before the upright reach.
-        var room: Double = 1
-        let fade: Double = max(1e-9, Butterfly.leanFade * wingspan)
-        for edge in terrain.edges {
-            let n: SIMD2<Double> = edge.normal
-            let s: Double = simd_dot(p - edge.a, n)
-            guard s >= 0 else { continue }
-            let along: Double = simd_dot(p - edge.a, (edge.b - edge.a) / max(edge.length, 1e-12))
-            guard along >= 0 && along <= edge.length else { continue }
-            let upright: Double = abs(n.x) > 0.5 ? d.side : (n.y < 0 ? d.bottom : d.top)
-            room = min(room, (s - upright) / fade)
-        }
-        leanRoom = clamp(room, 0, 1)
-        // The drawing's reach, never less than the upright reach the soft walls use.
-        let e0: SIMD4<Double> = drawnReach
-        let e = SIMD4<Double>(max(e0.x, d.side), max(e0.y, d.side), max(e0.z, d.top), max(e0.w, d.bottom))
-        // Where the walls' margins are capped (a tiny screen), the flight keeps to its soft walls alone.
-        let m: Walls = margins
-        let roomX: Bool = Butterfly.capped(m.side, here) >= m.side
-        let roomY: Bool = Butterfly.capped(max(m.top, m.bottom), here) >= max(m.top, m.bottom)
-        let eps: Double = 1e-3
-        var shift = SIMD4<Double>(0, 0, 0, 0)   // the drawing moved right, left, down, up
-        for edge in terrain.edges {
-            let n: SIMD2<Double> = edge.normal
-            // An edge's normal points inside: a floor's up (−y), a ceiling's down, a left wall's right.
-            let s: Double = simd_dot(p - edge.a, n)
-            guard s >= 0 else { continue }
-            let along: Double = simd_dot(p - edge.a, (edge.b - edge.a) / max(edge.length, 1e-12))
-            guard along >= 0 && along <= edge.length else { continue }
-            let r: CGRect = terrain.rects[edge.rect]
-            let whole: SIMD2<Double> = wholeCells(r)
-            let side: Bool = abs(n.x) > 0.5
-            let floor: Bool = !side && n.y < 0
-            // A right wall and a floor also keep the drawing out of the screen's last partial column and row.
-            var full: Double
-            if side {
-                full = n.x > 0 ? e.x : e.y + (Double(r.width) - whole.x)
-            } else {
-                full = floor ? e.w + (Double(r.height) - whole.y) : e.z
-            }
-            full += eps
-            var allowed: Double = (side ? roomX : roomY) ? full : 0
-            if floor, let t = target { allowed = min(allowed, Butterfly.clearance(t, terrain)) }
-            if s < allowed {
-                p += n * (allowed - s)
-                let into: Double = ux * n.x + uy * n.y
-                if into < 0 { ux -= into * n.x; uy -= into * n.y }
-            }
-            // What the flight's point still lacks of the drawing's room is made up where the body is drawn.
-            let short: Double = full - max(s, allowed)
-            if short > 0 {
-                if side {
-                    if n.x > 0 { shift.x = max(shift.x, short) } else { shift.y = max(shift.y, short) }
-                } else {
-                    if floor { shift.w = max(shift.w, short) } else { shift.z = max(shift.z, short) }
-                }
-            }
-        }
-        guard terrain.contains(p) else { return }
-        x = p.x
-        y = p.y
-        drawnOffset = SIMD2<Double>(shift.x - shift.y, shift.z - shift.w)
+        fit = f.isFinite ? clamp(f, 0.25, 1) : 1
     }
 }

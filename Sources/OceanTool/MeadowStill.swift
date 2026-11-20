@@ -71,6 +71,7 @@ enum MeadowStill {
                 let b = Butterfly(kind: kind, x: x, y: y, random: random)
                 b.scale = Double(cell.width) / 13
                 b.size = 1
+                b.fitDrawing(to: size)
                 b.heading = -Double.pi / 2
                 b.pitch = 0
                 b.stroke = pose.stroke
@@ -97,6 +98,8 @@ enum MeadowStill {
                 let y: Double = random.range(0.2, 0.75) * Double(size.height)
                 let b = Butterfly(kind: kind, x: x, y: y, random: random)
                 b.scale = Double(cell.width) / 13
+                // A screen too small for one whole butterfly (the Settings preview) draws them smaller.
+                b.fitDrawing(to: size)
                 flies.append(b)
             }
         }

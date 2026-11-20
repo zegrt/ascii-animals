@@ -383,6 +383,11 @@ private let HOLD_FROM = 42.5 * Double.pi / 180, HOLD_FULL = acos(CLAP_HOLD)
 private let TUCK_FROM = 60 * Double.pi / 180, TUCK_FULL = 72 * Double.pi / 180
 private let UNDER_FROM = 58 * Double.pi / 180, UNDER_FULL = 73 * Double.pi / 180
 private let FOLD_FROM = 84 * Double.pi / 180, FOLD_FULL = 89 * Double.pi / 180
+/// The bank (rad) over which the folded pair turns over from one side of the body to the other.
+private let SIDE_BLEND = 8 * Double.pi / 180
+/// The signed width either side of zero over which a wing's face sweeps from upper side to underside, tip first: about
+/// ±9° of stroke, so at a bank the face blends where the signed width crosses zero.
+private let SIGN_BLEND = 0.15
 /// The width an edge-on wing's outline is traced at, so its forewing and hindwing still read as lines.
 private let EDGE_LINE = 0.36
 
@@ -400,9 +405,13 @@ private struct Pose {
     let sL: Double, sR: Double
     /// Each wing as drawn: its width (≥ 0), and whether it is an edge-on line.
     let wL: Double, wR: Double
-    /// How far the underside has swept in from the tips toward the clap, 0…1.
-    let turn: Double
+    /// How far each wing's underside has swept in from its tip, 0…1: toward the clap, or as its signed width crosses
+    /// zero at a bank.
+    let turnL: Double, turnR: Double
     let lineL: Bool, lineR: Bool
+    /// The far pair is tucking (the clap): a wing narrower than edge-on then still draws what blocks its width holds,
+    /// so a wing tucking away, or opening on the folded side as it turns over, shrinks and grows without a jump.
+    let tucking: Bool
     /// How far the tips climb (pt, at the tip): −0.4 row · sin φ drops them on the downstroke.
     let climb: Double
     let id: Double
@@ -411,8 +420,8 @@ private struct Pose {
     init(_ b: Butterfly, cw: Double, ch: Double, id: Double) {
         kind = b.kind
         shape = WingShape.of(b.kind)
-        x = b.x + b.drawnOffset.x
-        y = b.y + b.drawnOffset.y
+        x = b.x
+        y = b.y
         let tilt: Double = b.drawnLean
         ax = sin(tilt)
         ay = -cos(tilt)
@@ -429,14 +438,22 @@ private struct Pose {
         let hold: Double = CLAP_HOLD * smoothstep(HOLD_FROM, HOLD_FULL, b.stroke)
         let tuck: Double = smoothstep(TUCK_FROM, TUCK_FULL, b.stroke)
         let fold: Double = smoothstep(FOLD_FROM, FOLD_FULL, b.stroke)
-        // The folded pair shows on the side the butterfly faces; the other tucks behind it.
-        let nearRight: Bool = b.bank < -0.05 || (abs(b.bank) <= 0.05 && cos(b.heading) >= -1e-9)
+        // The folded pair shows on the side the butterfly faces; the other tucks behind it. Which side that is turns
+        // over across `SIDE_BLEND` of bank (and of facing), so the fold never jumps sides in one step: on the right
+        // while the bank is under 0.05 rad facing right, under 0 facing straight up, under −0.05 facing left.
+        let right: Double = smoothstep(-SIDE_BLEND, 0, 0.05 * cos(b.heading) - b.bank)
         let heldL: Double = max(abs(sL), hold), heldR: Double = max(abs(sR), hold)
-        wL = nearRight ? heldL * (1 - tuck) : heldL + (1 - heldL) * fold
-        wR = nearRight ? heldR + (1 - heldR) * fold : heldR * (1 - tuck)
-        turn = smoothstep(UNDER_FROM, UNDER_FULL, b.stroke)
+        let tuckedL: Double = heldL * (1 - tuck), foldedL: Double = heldL + (1 - heldL) * fold
+        let tuckedR: Double = heldR * (1 - tuck), foldedR: Double = heldR + (1 - heldR) * fold
+        wL = right * tuckedL + (1 - right) * foldedL
+        wR = right * foldedR + (1 - right) * tuckedR
+        // The face: the clap's sweep, or, sooner, the sweep as the wing's signed width passes zero (at a bank).
+        let turn: Double = smoothstep(UNDER_FROM, UNDER_FULL, b.stroke)
+        turnL = max(turn, smoothstep(SIGN_BLEND, -SIGN_BLEND, sL))
+        turnR = max(turn, smoothstep(SIGN_BLEND, -SIGN_BLEND, sR))
         lineL = wL < EDGE_ON && tuck == 0
         lineR = wR < EDGE_ON && tuck == 0
+        tucking = tuck > 0
         climb = 0.4 * ch * sin(b.stroke)
         self.id = id
         twoSpots = hash3(id, 7, 3) < 0.5
@@ -445,7 +462,7 @@ private struct Pose {
     /// The drawn width of the wing on `v`'s side, and whether it shows its underside at `X` (half-spans out): past
     /// edge-on, or where the clap's sweep has reached.
     @inline(__always) func width(_ v: Double) -> Double { v < 0 ? wL : wR }
-    @inline(__always) func under(_ v: Double, _ X: Double) -> Bool { (v < 0 ? sL : sR) < 0 || X >= 1.2 - 1.3 * turn }
+    @inline(__always) func under(_ v: Double, _ X: Double) -> Bool { X >= 1.2 - 1.3 * (v < 0 ? turnL : turnR) }
 }
 
 /// A wing sample: how much of it is covered (0…1, soft at the edge) and, where covered, what it shows.
@@ -530,7 +547,7 @@ private struct WingHit {
     let u: Double = dx * p.ax + dy * p.ay
     let v: Double = dx * p.rx + dy * p.ry
     let w: Double = p.width(v)
-    guard w >= EDGE_ON else { return }
+    guard w >= EDGE_ON || (p.tucking && w > 0) else { return }
     // On screen, cells: across from the body and along it, the tips climbing with the stroke.
     let qx: Double = abs(v) / p.cw
     let X: Double = qx / (w * p.hsC)
@@ -1265,7 +1282,7 @@ public final class MeadowPainter {
 
     private func drawButterfly(_ b: Butterfly, _ k: Int, _ slot: inout Slot, _ time: Double, _ ox: Double, _ oy: Double,
                                _ cw: Double, _ ch: Double, _ out: Layer) {
-        let lx: Double = b.x + b.drawnOffset.x - ox, ly: Double = b.y + b.drawnOffset.y - oy
+        let lx: Double = b.x - ox, ly: Double = b.y - oy
         guard lx.isFinite, ly.isFinite, b.stroke.isFinite, b.bank.isFinite, b.heading.isFinite, b.pitch.isFinite else {
             slot.owner = nil
             return
@@ -1517,14 +1534,14 @@ public final class MeadowPainter {
     }
 }
 
-// ── How far a drawing reaches (for the flight's hard walls) ──
+// ── How far a drawing reaches (for the preview's smaller size, `Butterfly.fitDrawing(to:)`) ──
 
 extension Butterfly {
     /// The lean the painter draws the body at, radians (+ head to the right): toward where it flies, pitching with the
     /// stroke, never far from upright.
     var drawnLean: Double {
         let side: Double = cos(heading) >= 0 ? 1 : -1
-        return leanRoom * clamp(0.3 * cos(heading) - 0.5 * pitch * side, -0.5, 0.5)
+        return clamp(0.3 * cos(heading) - 0.5 * pitch * side, -0.5, 0.5)
     }
 
     /// How far the painter's drawing of this butterfly reaches from where its body is drawn, pt, as (left, right, up,
