@@ -7,7 +7,7 @@
 //     --interact (Web): the parity script (WebScript.swift): the pointer drawn through the near web, a click
 //     dropping a fly on it, the pointer held still near the jumper.
 //   OceanTool paths <out.png> [--seconds S] [--seed N]
-//     Meadow butterfly flight paths (Paths.swift): each species flown freely for S s (default 90) over an
+//     Meadow butterfly flight paths (Paths.swift): each species flown freely for S s (default 60) over an
 //     1800x1169 field in calm air with one gust, drawn in species colours with a tick at every wingbeat.
 //   OceanTool bench [--habitat ocean|web]
 //   OceanTool bench --desk [--habitat ocean|web] [--separate] [--laptop WxH] [--density D] [--seconds S]
@@ -107,7 +107,7 @@ case "crossing":
                      seed: seed, seconds: 9, fps: 15)
 
 case "paths":
-    let seconds = Double(option("--seconds") ?? "90") ?? 90
+    let seconds = Double(option("--seconds") ?? "60") ?? 60
     let seed = UInt64(option("--seed") ?? "1") ?? 1
     guard args.count == 1 else { fail("usage: OceanTool paths <out.png> [--seconds S] [--seed N]") }
     try FlightPaths.run(out: URL(fileURLWithPath: args[0]), seconds: seconds, seed: seed)
