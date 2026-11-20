@@ -204,7 +204,7 @@ Director's profile: none
 | t5v | A 30 s film of the butterflies flying, for the director to judge the motion | Content (small) | OceanTool/MeadowFrames.swift (new), OceanTool/main.swift | meadow-t5v (from meadow-t5r) | builder-t5v (Claude Opus, T3 child thread) | Codex | 0 | reviewed (review-t5v @ 94d9d2b); its 4 tool fixes moved into t3 (which rewrites meadow-frames) | briefs/t5v.md |
 | p1 | Throwaway prototype film of the Meadow seen from above, with depth | Prototype (never merged, no review) | new OceanTool files, OceanTool/main.swift | proto-top-down (from meadow-t5v) | builder-p1 (Claude Opus, T3 child thread) | none | 0 | built (proto-top-down @ de1f728); director's notes in Corrections | briefs/p1.md |
 | p2a | Look development 1: butterfly motion from above (the measured flight turned on its side) and wingbeat speed | Design (look development; approved; reviewed later in the plan's tasks) | new Meadow/OceanTool files, OceanTool/main.swift, additive Butterfly/ButterflySpecies | look-top-down (from proto-top-down) | builder-p2a (Claude Opus, T3 child thread) | later | 0 | held (the director: "take a step back"); notes only at look-top-down @ adc632f, no code changed | briefs/p2a.md |
-| s1 | The Meadow sketch: a live web original with sliders (published for the director) | Design (look development; approved; one review before the port, the director asked) | Tools/meadow-sketch/meadow.html (new) | meadow-sketch (from main) | builder-s1 (Claude Opus, T3 child thread) | Codex | 0 | built (meadow-sketch @ 0e2ecf7); round 2 built (meadow-sketch @ d893c50, done with concerns); round 3 built (meadow-sketch @ caca692, done with concerns); round 4 built (meadow-sketch @ ee6009b, done with concerns); leaves 0.9 set by the manager (f8811f6); round 5 built (meadow-sketch @ b01db3f, done); round 6 built (meadow-sketch @ 3f02cb3, done); the director: "ok for now", then "dbbl check shit then go": Codex review of the whole sketch at 3f02cb3 building (review-s1) | briefs/s1.md, briefs/s1r2.md … briefs/s1r6.md |
+| s1 | The Meadow sketch: a live web original with sliders (published for the director) | Design (look development; approved; one review before the port, the director asked) | Tools/meadow-sketch/meadow.html (new) | meadow-sketch (from main) | builder-s1 (Claude Opus, T3 child thread) | Codex | 0 | built (meadow-sketch @ 0e2ecf7); round 2 built (meadow-sketch @ d893c50, done with concerns); round 3 built (meadow-sketch @ caca692, done with concerns); round 4 built (meadow-sketch @ ee6009b, done with concerns); leaves 0.9 set by the manager (f8811f6); round 5 built (meadow-sketch @ b01db3f, done); round 6 built (meadow-sketch @ 3f02cb3, done); the director: "ok for now", then "dbbl check shit then go": Codex review a8f02d4 in (15 findings, routed below); fix round 1 building | briefs/s1.md, briefs/s1r2.md … briefs/s1r6.md |
 | r1 | Research: what makes Ocean and Web look and feel alive, and the Meadow's gaps | Small (read-only research) | docs/plans/2026-11-20-family-details.md | main | research agent | none | 0 | done (saved on main) | none |
 | r2 | Research for the port: the sketch's model, numbers and behaviours mapped against the Swift Meadow code on the task branches | Small (read-only research) | none (findings in the agent's final message; the manager writes docs/plans) | main | research agent (Claude Opus, T3 child thread) | none | 0 | building | none |
 | t5w | A new wingbeat (both wings together), wing shading and detail, and butterflies that turn to face where they fly, learning from the director's reference | Content | Meadow/MeadowPainter.swift, Meadow/Butterfly.swift (drawn heading, open), OceanChecks/MeadowChecks.swift | meadow-t5w (from meadow-t3) | | Codex | 0 | held (the view changed; replaced by look development) | briefs/t5w.md |
@@ -217,6 +217,28 @@ Director's profile: none
 | t10 | Words, watch and release 3.1 (plan T10; outward-facing, the director approves the release) | Content | to brief | meadow-t10 | | | 0 | open (waits on t9) | |
 
 ## Review routing
+
+- s1, Codex review a8f02d4 (review-s1, 2026-11-20, of meadow-sketch @ 3f02cb3), routed by the manager. The sketch
+  is the reference the port copies, so a wrong rule here becomes a wrong rule in Swift: everything the sketch
+  caused is fixed in it (fix round 1, briefs/s1f1.md), none put off.
+  - Fix: 1 (count can fail to settle at the edges), 2 (pause bypasses lifetimes; clicks pile up while paused),
+    3 (stored and URL settings not validated), 4 (one replant transition: orphaned visitors, limit not applied),
+    5 (cursor approach outlives leave, Off and resize; body off the edge), 6 (re-enabled species stay absent),
+    7 (pointer wind depends on the event rate: integrate in simulation time), 9 (size sliders crossed: one size
+    rule for panel, clipboard and drawing; clicked flowers follow Flower size), 10 (non-primary and lost pointer
+    releases click), 11 (hints that overstate: make the hints describe the approved rules, keep the behaviour),
+    12 (click-answer gap and hold threshold wording; nearest blocking bloom), 13 (the stored settings key moves on,
+    so every browser shows the true defaults; the port takes its defaults from a fresh profile), 14 (Space on a
+    focused control), 15's sketch part (seeded shuffles; UI draws on their own random stream).
+  - Rewrite the brief (the port plan, written next): 8 (frame budget at extreme legal settings: the port profiles
+    shadows, flower scans and glyph drawing separately and keeps the step apart from the draw; the paused backlog
+    part is fixed with 2), 15's port part (the clock and tick policy, slow motion as its own mode), 7's port part
+    (pointer impulses in simulation time), and the review's "What is missing": a replay fixture (seed, settings,
+    viewport, cell size, pointer trace, expected samples), the unit and clock mapping, the 7.5 Hz wingbeat cap and
+    catch-up policy against the app's frame rate, and display-terrain edges (entering small, leaving large,
+    landing while displays change).
+  - Dropped: none. Asked of the director: none (no finding goes against a decision; 11 keeps the approved
+    behaviour and fixes the words).
 
 - t1-2, review 61e1f6e (2026-11-20), routed by the manager:
   - Fix (in the task's Files, this task caused or carries them): 1 (finite guards), 2 (tiny-viewport walls),
