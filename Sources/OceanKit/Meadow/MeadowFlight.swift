@@ -412,13 +412,7 @@ extension MeadowWorld {
         b.vx = b.ux + wx * 0.55
         b.vy = b.uy + wy * 0.55
         let nx: Double = b.x + b.vx * dt, ny: Double = b.y + b.vy * dt
-        if single || !inGap(nx, ny) {
-            b.x = nx; b.y = ny
-        } else if !inGap(nx, b.y) {
-            b.x = nx
-        } else if !inGap(b.x, ny) {
-            b.y = ny
-        }
+        move(b, nx, ny)
 
         // ── settling onto the flower, the ground or the pointer ──
         if b.state == .approach && b.circleT <= 0 && b.spiral == nil {
@@ -445,8 +439,7 @@ extension MeadowWorld {
                     }
                 }
                 let pull: Double = min(1, (1 - dist / (0.6 * span)) * 6 * dt)
-                b.x += dx * pull
-                b.y += dy * pull
+                move(b, b.x + dx * pull, b.y + dy * pull)
                 if b.goal == .cursor {
                     b.zv = max(b.zv, 0.2 + 0.4 * (1 - dist / (0.6 * span)))
                     if dist < 0.15 * span && b.zs > 0.8 { land(b) }
@@ -528,8 +521,9 @@ extension MeadowWorld {
         b.leanY += (ly - b.leanY) * min(1, 6 * dt)
         let (tx, ty) = target(b)
         let pull: Double = min(1, 10 * dt)
-        b.x += b.ux * dt + (tx + b.leanX - b.x) * pull
-        b.y += b.uy * dt + (ty + b.leanY - b.y) * pull
+        let lx1: Double = b.x + (b.ux * dt + (tx + b.leanX - b.x) * pull)
+        let ly1: Double = b.y + (b.uy * dt + (ty + b.leanY - b.y) * pull)
+        move(b, lx1, ly1)
         b.vx = b.ux
         b.vy = b.uy
         let zT: Double = b.state == .cursor ? 0.92 : 0

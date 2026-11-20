@@ -114,12 +114,19 @@ struct FlowerOp {
     var roll: Float = 1
 }
 
-/// A flower's recorded cells on one screen, with what they were drawn at.
+/// A flower's recorded cells on one screen, with what they were drawn at: a slot, reused for another flower once
+/// this one has gone (its storage kept).
 final class FlowerCache {
     var ops: [FlowerOp] = []
     var hx = Double.nan, hy = Double.nan
     var grow = -1.0, leafGrow = -1.0, fk = -1.0, vd = -1.0, radius = -1.0
     var used = 0
+    /// Ready for another flower: nothing recorded, drawn next time.
+    func reset() {
+        ops.removeAll(keepingCapacity: true)
+        hx = .nan; hy = .nan
+        grow = -1; leafGrow = -1; fk = -1; vd = -1; radius = -1
+    }
 }
 
 /// Grow-only raw storage: the painter's buffers are read and written through plain pointers in the frame's loops,
@@ -158,8 +165,67 @@ final class ViewportCache {
     var tuftM: [Float] = []
     /// Each tuft's `hash3(c, r, 13)` (whether it lies over in a gust), fixed per cell.
     var tuftH: [Float] = []
+    /// The flowers' recordings by flower id, in slots that are reused: `slots` holds every slot made, `free` the
+    /// ones not in use. Sized by the world's flower bound (`Flowers.most`) before drawing, so a new flower (a click)
+    /// takes a slot without allocating; slots of flowers not drawn are handed back every `sweepEvery` of this
+    /// screen's own paints, so each screen's recordings stay bounded however the screens' paints interleave.
     var flowers: [Int: FlowerCache] = [:]
+    var slots: [FlowerCache] = []
+    var free: [FlowerCache] = []
+    var sweepIds: [Int] = []
+    /// What a slot's recording is sized for (ops).
+    var opsRoom = 0
+    /// This screen's own paints.
+    var paints = 0
     var used = 0
+    static let sweepEvery = 60
+
+    /// Every slot back to free (a rebuild or a new screen).
+    func releaseFlowers() {
+        for (_, c) in flowers { c.reset(); free.append(c) }
+        flowers.removeAll(keepingCapacity: true)
+    }
+
+    /// Enough slots for `count` flowers, each with room for `ops` (allocates only when the bound grows).
+    func ensureSlots(_ count: Int, ops: Int) {
+        if ops > opsRoom {
+            opsRoom = ops
+            for c in slots where c.ops.capacity < ops { c.ops.reserveCapacity(ops) }
+        }
+        guard slots.count < count else { return }
+        flowers.reserveCapacity(count)
+        free.reserveCapacity(count)
+        sweepIds.reserveCapacity(count)
+        slots.reserveCapacity(count)
+        while slots.count < count {
+            let c = FlowerCache()
+            c.ops.reserveCapacity(opsRoom)
+            slots.append(c)
+            free.append(c)
+        }
+    }
+
+    /// A slot for flower `id` (its own if it has one).
+    func slot(_ id: Int, paint: Int) -> FlowerCache {
+        if let c = flowers[id] { return c }
+        if free.isEmpty { sweep(paint, keepLast: true) }
+        if free.isEmpty { sweep(paint, keepLast: false) }
+        let c: FlowerCache
+        if let f = free.popLast() { c = f } else { c = FlowerCache(); c.ops.reserveCapacity(opsRoom); slots.append(c) }
+        flowers[id] = c
+        return c
+    }
+
+    /// Hands back the slots of flowers not drawn this paint (or, with `keepLast`, not drawn this paint or the last).
+    func sweep(_ paint: Int, keepLast: Bool) {
+        let oldest = keepLast ? paint - 1 : paint
+        for (id, c) in flowers where c.used < oldest { sweepIds.append(id) }
+        for id in sweepIds {
+            if let c = flowers.removeValue(forKey: id) { c.reset(); free.append(c) }
+        }
+        sweepIds.removeAll(keepingCapacity: true)
+    }
+
     deinit { gR.free(); gG.free(); gB.free(); packed.free() }
 }
 
@@ -214,7 +280,7 @@ public final class MeadowPainter {
         for v in views where v.used < oldest.used { oldest = v }
         oldest.rect = rect
         oldest.built = false
-        oldest.flowers.removeAll()
+        oldest.releaseFlowers()
         return oldest
     }
 
@@ -232,6 +298,7 @@ public final class MeadowPainter {
         paintCount += 1
         let v = view(for: viewport)
         v.used = paintCount
+        v.paints += 1
         var f = MeadowFrame(painter: self, world: world, view: v, cols: cols, rows: rows, viewport: viewport, grid: grid, theme: t)
         f.buildGround()
         f.readAir()
@@ -283,6 +350,8 @@ struct MeadowFrame {
     let simT: Double
     let sparkleRate: Double
     let paintCount: Int
+    /// This screen's own paints.
+    let viewPaints: Int
     // Depth (`farPush`, html:675–690) and a fading flower's ink (`INK_K`, html:670).
     var FAR = 0.0, FAR_DIM = 1.0, FAR_SAT = 1.0, FAR_FLAT = 0.0, FAR_FAINT = 1.0
     var INK_K = 1.0
@@ -323,6 +392,7 @@ struct MeadowFrame {
         sparkleRate = tuning.sparkle * (calm ? 0.35 : 1)
         simT = world.time
         paintCount = p.paintCount
+        viewPaints = v.paints
     }
 
     // ── the cell writers (html:694–713) ──
@@ -522,7 +592,7 @@ struct MeadowFrame {
         v.tuftK.removeAll(keepingCapacity: true)
         v.tuftM.removeAll(keepingCapacity: true)
         v.tuftH.removeAll(keepingCapacity: true)
-        v.flowers.removeAll()
+        v.releaseFlowers()
         let bgc: MeadowRGB = LIGHT ? PlantInk.paper : MeadowRGB(0, 0, 0)
         let gc: MeadowRGB = LIGHT ? PlantInk.groundPaper : PlantInk.ground
         let pr: MeadowRGB = LIGHT ? PlantInk.paper : MeadowRGB(0, 0, 0)

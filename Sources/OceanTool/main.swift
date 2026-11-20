@@ -43,6 +43,20 @@ func option(_ name: String) -> String? {
     return v
 }
 
+/// Option `name` checked by `parse` (ToolInput), or `fallback` when absent; a bad value stops the tool with a message.
+func checked<T>(_ name: String, _ fallback: String, _ what: String, _ parse: (String) -> T?) -> T {
+    let text = option(name) ?? fallback
+    guard let v = parse(text) else { fail("bad \(name) \(text): \(what)") }
+    return v
+}
+func checkedSize(_ text: String) -> CGSize {
+    guard let v = ToolInput.size(text) else { fail("bad size \(text): W x H, each 1…\(Int(ToolInput.maxSide))") }
+    return v
+}
+let secondsRule = "0…\(Int(ToolInput.maxSeconds)) s"
+let fpsRule = "1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30 or 60"
+let scaleRule = "above 0, the image at most \(Int(ToolInput.maxSide)) px each way"
+
 guard let command = args.first else { fail("usage: OceanTool still|iconset ...") }
 args.removeFirst()
 
@@ -61,15 +75,15 @@ case "still":
     if flag("--light") { s.appearance = .light }
     if flag("--calm") { s.calm = true }
     let seed = UInt64(option("--seed") ?? "1") ?? 1
-    let warmup = Double(option("--warmup") ?? "6") ?? 6
-    let scale = CGFloat(Double(option("--scale") ?? "2") ?? 2)
+    let warmup = checked("--warmup", "6", secondsRule, ToolInput.seconds)
+    let scaleText = option("--scale") ?? "2"
     if let list = option("--sharks") { s.sharks = list.split(separator: ",").compactMap { SharkKind(rawValue: String($0)) } }
     habitatOptions(&s)
     let live = flag("--live")
     guard args.count == 2 else { fail("usage: OceanTool still <out.png> <W>x<H>") }
-    let dims = args[1].split(separator: "x").compactMap { Double($0) }
-    guard dims.count == 2 else { fail("bad size \(args[1])") }
-    let img = try StillRenderer.render(settings: s.sanitized(), size: CGSize(width: dims[0], height: dims[1]), scale: scale,
+    let size = checkedSize(args[1])
+    guard let scale = ToolInput.scale(scaleText, for: size) else { fail("bad --scale \(scaleText): \(scaleRule)") }
+    let img = try StillRenderer.render(settings: s.sanitized(), size: size, scale: scale,
                                        warmup: warmup, systemIsDark: true, accent: SIMD3(0.2, 0.5, 1), seed: seed,
                                        settle: s.habitat != .ocean && !live)
     try StillRenderer.writePNG(img, to: URL(fileURLWithPath: args[0]))
@@ -80,19 +94,19 @@ case "frames":
     if flag("--light") { s.appearance = .light }
     if flag("--calm") { s.calm = true }
     let seed = UInt64(option("--seed") ?? "1") ?? 1
-    let seconds = Double(option("--seconds") ?? "6") ?? 6
-    let fps = Int(option("--fps") ?? "20") ?? 20
-    let frameWarmup = Double(option("--warmup") ?? "8") ?? 8
+    let seconds = checked("--seconds", "6", secondsRule, ToolInput.seconds)
+    let fps = checked("--fps", "20", fpsRule, ToolInput.fps)
+    let frameWarmup = checked("--warmup", "8", secondsRule, ToolInput.seconds)
     let interact = flag("--interact")
-    let scale = CGFloat(Double(option("--scale") ?? "1") ?? 1)
+    let scaleText = option("--scale") ?? "1"
     if let list = option("--sharks") { s.sharks = list.split(separator: ",").compactMap { SharkKind(rawValue: String($0)) } }
     habitatOptions(&s)
-    guard args.count == 2, 60 % fps == 0 else { fail("usage: OceanTool frames <dir> <W>x<H> [--fps 10|12|15|20|30|60]") }
-    let dims = args[1].split(separator: "x").compactMap { Double($0) }
-    guard dims.count == 2 else { fail("bad size \(args[1])") }
+    guard args.count == 2 else { fail("usage: OceanTool frames <dir> <W>x<H> [--fps 10|12|15|20|30|60]") }
+    let size = checkedSize(args[1])
+    guard let scale = ToolInput.scale(scaleText, for: size) else { fail("bad --scale \(scaleText): \(scaleRule)") }
     let dir = URL(fileURLWithPath: args[0], isDirectory: true)
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    let rec = try FrameRecorder(settings: s.sanitized(), size: CGSize(width: dims[0], height: dims[1]), scale: scale, seed: seed,
+    let rec = try FrameRecorder(settings: s.sanitized(), size: size, scale: scale, seed: seed,
                                 warmup: frameWarmup)
     let count = Int(seconds * Double(fps))
     let script = interact ? (rec.habitat as? WebSim).map { WebScript(world: $0.world) } : nil
@@ -130,13 +144,13 @@ case "meadow-sheet":
     if flag("--light") { s.appearance = .light }
     if flag("--calm") { s.calm = true }
     let seed = UInt64(option("--seed") ?? "4242") ?? 4242
-    let scale = CGFloat(Double(option("--scale") ?? "1") ?? 1)
-    let z = Double(option("--z") ?? "0.5") ?? 0.5
+    let scaleText = option("--scale") ?? "1"
+    let z = checked("--z", "0.5", "0…1", ToolInput.unit)
     guard let sheet = option("--sheet").flatMap(MeadowWorld.Sheet.init(rawValue:)) else { fail("--sheet flowers|flies") }
     guard args.count == 2 else { fail("usage: OceanTool meadow-sheet <out.png> <W>x<H> --sheet flowers|flies") }
-    let dims = args[1].split(separator: "x").compactMap { Double($0) }
-    guard dims.count == 2, dims.allSatisfy({ $0.isFinite && $0 >= 16 && $0 <= 8192 }), z.isFinite, z >= 0, z <= 1 else { fail("bad size or --z") }
-    let size = CGSize(width: dims[0], height: dims[1])
+    let size = checkedSize(args[1])
+    guard size.width >= 16 && size.height >= 16 && size.width <= 8192 && size.height <= 8192 else { fail("bad size \(args[1]): 16…8192 each way") }
+    guard let scale = ToolInput.scale(scaleText, for: size) else { fail("bad --scale \(scaleText): \(scaleRule)") }
     let cell = GridSpec.cell(forWidth: size.width)
     let sim = MeadowSim(settings: s.sanitized(), seed: seed)
     sim.layout(terrain: .single(width: size.width, height: size.height), cell: cell, settings: s)
@@ -149,12 +163,12 @@ case "meadow-sheet":
 
 case "meadow-desk":
     let seed = UInt64(option("--seed") ?? "4242") ?? 4242
-    let seconds = Double(option("--seconds") ?? "0") ?? 0
-    let fps = Int(option("--fps") ?? "15") ?? 15
-    let warmup = Double(option("--warmup") ?? "0.0167") ?? 0.0167
-    let scale = CGFloat(Double(option("--scale") ?? "0.5") ?? 0.5)
+    let seconds = checked("--seconds", "0", secondsRule, ToolInput.seconds)
+    let fps = checked("--fps", "15", fpsRule, ToolInput.fps)
+    let warmup = checked("--warmup", "0.0167", secondsRule, ToolInput.seconds)
+    let scale = checked("--scale", "0.5", scaleRule) { ToolInput.scale($0, for: MeadowDesk.size) }
     let light = flag("--light")
-    guard args.count == 1, fps > 0, 60 % fps == 0, seconds.isFinite, seconds >= 0, warmup.isFinite, warmup >= 0 else {
+    guard args.count == 1 else {
         fail("usage: OceanTool meadow-desk <dir> [--seconds S] [--fps 15|30|60] [--warmup S] [--seed N] [--scale N] [--light]")
     }
     try MeadowDesk.run(out: URL(fileURLWithPath: args[0], isDirectory: true), seed: seed, seconds: seconds, fps: fps,
@@ -168,17 +182,18 @@ case "bench":
     var s = Settings.defaults
     habitatOptions(&s)
     let separate = flag("--separate")
-    let laptopDims = (option("--laptop") ?? "1800x1169").split(separator: "x").compactMap { Double($0) }
-    guard laptopDims.count == 2 else { fail("bad --laptop size") }
-    let laptop = CGSize(width: laptopDims[0], height: laptopDims[1])
+    let laptop = checkedSize(option("--laptop") ?? "1800x1169")
     if let d = option("--density"), let v = Double(d) { s.fishDensity = v }
     if flag("--desk") {
-        try Bench.run(s.sanitized(), laptop: laptop, separate: separate, seconds: Double(option("--seconds") ?? "20") ?? 20)
+        let seconds = checked("--seconds", "20", "above 0, at most \(Int(ToolInput.maxSeconds)) s") { t in
+            ToolInput.seconds(t).flatMap { $0 > 0 ? $0 : nil }
+        }
+        try Bench.run(s.sanitized(), laptop: laptop, separate: separate, seconds: seconds)
         break
     }
     if flag("--digest") {
         s.habitat = .web
-        Bench.digest(s, laptop: laptop, separate: separate, frames: Int(option("--frames") ?? "900") ?? 900)
+        Bench.digest(s, laptop: laptop, separate: separate, frames: checked("--frames", "900", "1…1000000", ToolInput.count))
         break
     }
     if s.habitat == .web || s.habitat == .meadow {
