@@ -1,6 +1,6 @@
 # Meadow 3.1: porting the sketch to the app (plan, 2026-11-20)
 
-Status: proposal for the director. Nothing is built from it until the director approves it.
+Status: approved by the director, 2026-11-20 ("dbbl check shit then go", and the answers below).
 
 ## What we port
 The director tuned a live web sketch, `Tools/meadow-sketch/meadow.html` on `meadow-sketch`, over six rounds and
@@ -66,12 +66,9 @@ m3 runs beside m1 and m2 (different files). Files never overlap between open tas
 - The wingbeat stays as the director set it; the 15 fps film in m6 shows whether it looks choppy on battery, and the
   director decides then.
 
-## Questions for the director
-1. **Ground colour per cell.** The family's canvas has one background colour. The sketch's green hints and every
-   shadow on bare ground need a colour per cell, a change to the shared drawing code that the sharks and spiders use
-   (their pictures would be checked to stay identical). Recommended: yes.
-2. **The monarch's life cycle and the courtship chases** (in the original plan, not in the sketch). The hanging
-   chrysalis is a side-view image. Recommended: leave both out of 3.1 and ship what the sketch shows.
-3. **What users can change** in Settings. Recommended: which species, and how many (scaled by screen size from your
-   7 on a laptop); "land on a still pointer" follows the app's existing interaction setting; everything else is
-   fixed at your numbers.
+## The director's answers
+1. **Ground colour per cell:** "Yes, change it" (m3; Ocean and Web must draw exactly as before).
+2. **The monarch's life cycle and the courtship chases:** "Leave out of 3.1".
+3. **What users can change:** "presets like the other two animas": named butterfly line-ups, like Ocean's shark
+   presets and Web's spider presets, with Custom (m8). "Land on a still pointer" follows the app's interaction
+   setting; everything else stays fixed at the director's numbers.
