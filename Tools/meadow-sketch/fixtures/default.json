@@ -1,5 +1,5 @@
 {
-  "fixture": 1,
+  "fixture": 2,
   "scenario": "default",
   "sketch": "meadow s1",
   "seed": 42,
@@ -60,7 +60,7 @@
     "rows": 59,
     "S": 1
   },
-  "step": {"dt": 0.016667, "ticks": 1800},
+  "step": {"rate": 60, "ticks": 1800},
   "trace": [
     {"tick": 20, "t": 0.333333, "type": "move", "x": 259.2, "y": 335.1, "id": 1, "button": -1},
     {"tick": 21, "t": 0.35, "type": "move", "x": 265.309091, "y": 338.484848, "id": 1, "button": -1},

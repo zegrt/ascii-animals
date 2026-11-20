@@ -145,7 +145,10 @@ const angDiff = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
 const params = new URLSearchParams(location.search);
 
 // `?debug=1&fixture=<name>` runs a replay fixture (see "Replay fixture" below): seed 42 unless `?seed=` is given.
-const FIXTURE = params.get('debug') === '1' && params.has('fixture') ? params.get('fixture') : '';
+// Only the named scenarios run; any other name (even one an object inherits, such as `constructor`) is refused.
+const FIXTURE_NAMES = ['default', 'air-flowers'];
+const FIXTURE_ASKED = params.get('debug') === '1' && params.has('fixture') ? params.get('fixture') : '';
+const FIXTURE = FIXTURE_NAMES.includes(FIXTURE_ASKED) ? FIXTURE_ASKED : '';
 let seed = params.has('seed') ? (+params.get('seed') | 0) : FIXTURE ? 42 : ((Math.random() * 1e6) | 0);
 function mulberry32(a) {
   return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a);
@@ -361,7 +364,7 @@ if (params.has('theme')) set.theme = params.get('theme') === 'light' ? 'light' :
 { const u = {}; for (const [k, v] of params) if (k.startsWith('s.') && k.slice(2) in DEFAULTS) u[k.slice(2)] = urlValue(k.slice(2), v); set = normalize(u, set); }
 // A replay fixture runs on its own settings, not the saved ones or the URL's (it never saves them).
 const FIXTURE_SETTINGS = { 'default': {}, 'air-flowers': { species: { monarch: false, morpho: false, swallowtail: false, white: false } } };
-if (FIXTURE && FIXTURE in FIXTURE_SETTINGS) set = normalize(FIXTURE_SETTINGS[FIXTURE]);
+if (FIXTURE && Object.hasOwn(FIXTURE_SETTINGS, FIXTURE)) set = normalize(FIXTURE_SETTINGS[FIXTURE]);
 function save() { try { localStorage.setItem(STORE, JSON.stringify(set)); } catch (e) { /* ignore */ } }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -2843,24 +2846,37 @@ window.addEventListener('keydown', e => {
 // step, with nothing drawn until the end, then holds the last frame (paused) and offers the result as a JSON
 // download (a link at the top left), sets `window.__fixture`, and prints it to the console as one line starting
 // `MEADOW_FIXTURE ` (for a headless run). Saved and URL settings are ignored; nothing is saved. The run itself is
-// the sketch unchanged: the same planting, opening, stepping and pointer handlers a user would drive.
+// the sketch unchanged: the same planting, opening, stepping and pointer handlers a user would drive. Any other
+// name is refused: the page says so (and logs `MEADOW_FIXTURE_REFUSED <name>`) and runs the normal sketch.
+//
+// The clock: one tick is exactly 1/60 s, one step(1 / 60) at 1 × (Slow motion 1). A replay counts ticks and
+// steps by exactly 1/60 s (in a double, 1 / 60); it never takes its timestep from the file. The file stores the
+// rate as the integer 60; every `t` in it is tick / 60 rounded to 6 decimals, informational only.
+//
+// The viewport: the committed fixtures were made at 1728 × 1117 CSS pixels, 2× (the reference; cell 13 × 19,
+// S = 1). The trace's places are chosen from the meadow as planted, so at another size a click may not do what the
+// trace means. The run checks it: the open-ground click must plant one new bloom where it clicked, and the bloom
+// click must touch the chosen bloom without planting. If either fails, the file gains `problems` (absent when
+// none), the console logs `MEADOW_FIXTURE_PROBLEM <text>` for each, and the download link says so. Don't commit
+// a fixture with problems.
 //
 // Scenarios:
 //   default      the director's defaults (normalize(null)).
 //   air-flowers  the defaults with every species off: no butterflies, only the breeze, the pointer's air and the
 //                flowers (How many stops at 1; with no species on, the count is 0).
 //
-// The file (version 1). Units: positions and lengths in CSS pixels, which the sketch calls pt (the canvas is
+// The file (version 2; version 1 stored a rounded dt as its clock). Units: positions and lengths in CSS pixels, which the sketch calls pt (the canvas is
 // W × H of them; S = cell width / 13 scales the meadow's sizes); time in seconds; angles in radians (0 = +x, y
 // down); speeds in pt/s. Numbers are rounded to 6 decimals.
-//   fixture       1 (the format version)
+//   fixture       2 (the format version)
 //   scenario      the scenario's name
 //   sketch        'meadow s1'
 //   seed          the seed. Two mulberry32 streams come from it: the meadow's own (seed) for planting, flight and
 //                 the opening, and the input's (seed ^ 0x5bd1e995) for everything a pointer event causes
 //   settings      every setting, normalized (the same keys and values Copy settings gives)
 //   viewport      { width, height, dpr, cell: { w, h }, cols, rows, S }: the window the run used
-//   step          { dt: 1/60, ticks: 1800 }: one tick is one step(dt) at 1 × (Slow motion 1)
+//   step          { rate: 60, ticks: 1800 }: the replay clock. rate is an integer, ticks a second: one tick is
+//                 exactly 1/rate s (1/60), one step(1 / 60) at 1 × (Slow motion 1); ticks is the last tick
 //   trace         the pointer events, in order: { tick, t, type, x, y, id, button }. type is move, down, up or
 //                 leave (pointermove, pointerdown, pointerup, pointerleave on the meadow; id 1, primary, a mouse;
 //                 button 0 for down and up, -1 otherwise). An event at tick n is delivered after the sample at
@@ -2886,6 +2902,7 @@ window.addEventListener('keydown', e => {
 //     butterflies every butterfly: { id, species, state, x, y, z, heading, stroke }. state: fly, approach,
 //                 nectar, bask or cursor (the sketch's names); z: height, 0 (on the ground) to 1; heading: the
 //                 direction it faces; stroke: the wing stroke angle the drawing uses
+//   problems      only when a click did not do what the trace means (see "The viewport" above): [text, …]
 const FIXTURE_TICKS = [0, 1, 60, 600, 1800];
 function runFixture(name) {
   const r6 = v => Math.round(v * 1e6) / 1e6;
@@ -2934,20 +2951,39 @@ function runFixture(name) {
     Object.assign(wind, saved);
     return out;
   };
+  // The clicks land on release (pointerup), so each is checked across its up event: open ground must plant one new
+  // bloom where it clicked; the bloom must be touched (its touch time set) with nothing planted.
+  const problems = [];
+  const checkClick = (e, before) => {
+    if (e.tick === 406) {
+      const f = flowers[flowers.length - 1];
+      if (flowers.length !== before.n + 1 || !f || Math.hypot(f.x - e.x, f.y - e.y) > 0.5)
+        problems.push('the open-ground click at tick 406 (' + e.x + ', ' + e.y + ') planted nothing: the place is not open ground at ' + W + ' x ' + H);
+    } else if (e.tick === 496) {
+      if (!bloom) problems.push('no bloom planted at load to click at tick 496');
+      else if (flowers.length !== before.n || bloom.touchT !== simT)
+        problems.push('the bloom click at tick 496 did not touch bloom ' + bloom.id + (flowers.length !== before.n ? ' (it planted one)' : ''));
+    }
+  };
   const samples = [];
   let ev = 0;
   const last = FIXTURE_TICKS[FIXTURE_TICKS.length - 1];
   for (let tick = 0; ; tick++) {
     if (FIXTURE_TICKS.includes(tick)) samples.push(sample(tick));
     if (tick === last) break;
-    while (ev < trace.length && trace[ev].tick === tick) send(trace[ev++]);
+    while (ev < trace.length && trace[ev].tick === tick) {
+      const e = trace[ev++], before = { n: flowers.length };
+      send(e);
+      if (e.type === 'up') checkClick(e, before);
+    }
     step(1 / 60);
   }
-  const out = { fixture: 1, scenario: name, sketch: 'meadow s1', seed, settings: { ...set, species: { ...set.species } },
+  const out = { fixture: 2, scenario: name, sketch: 'meadow s1', seed, settings: { ...set, species: { ...set.species } },
     viewport: { width: W, height: H, dpr: DPR, cell: { w: cw, h: ch }, cols, rows, S: r6(S) },
-    step: { dt: r6(1 / 60), ticks: last }, trace,
+    step: { rate: 60, ticks: last }, trace,
     points: { ground: ground.map(r6), bloom: bloom ? [r6(bloom.x), r6(bloom.y), bloom.id] : null, hold: hold.map(r6), stir: [stirA.map(r6), stirB.map(r6)] },
     samples };
+  if (problems.length) out.problems = problems;
   // One record a line: easy to read and to diff.
   const prim = x => x === null || typeof x !== 'object', flatVal = x => prim(x) || (Array.isArray(x) && x.every(prim));
   const fmt = (v, ind) => {
@@ -2959,10 +2995,12 @@ function runFixture(name) {
   };
   const text = fmt(out, '') + '\n';
   window.__fixture = out; window.__fixtureText = text;
+  for (const p of problems) console.error('MEADOW_FIXTURE_PROBLEM ' + p);
   console.log('MEADOW_FIXTURE ' + JSON.stringify(out));
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
-  a.download = name + '.json'; a.textContent = 'Download fixture ' + name + '.json';
+  a.download = name + '.json';
+  a.textContent = 'Download fixture ' + name + '.json' + (problems.length ? ' (' + problems.length + ' problem' + (problems.length > 1 ? 's' : '') + ': see the console; not for committing)' : '');
   a.style.cssText = 'position:fixed;left:12px;top:12px;z-index:9;padding:6px 10px;background:#fff;color:#000;font:12px system-ui;border-radius:6px';
   document.body.appendChild(a);
   paused = true; pauseBtn.textContent = 'Play'; render(); document.body.dataset.ready = '1';
@@ -3004,9 +3042,15 @@ function start() {
   if (params.get('debug') === '1') window.__meadow = { step, render, clickAt: ui(clickAt), syncFlies: ui(syncFlies), onChange, replant: ui(replant), depthScale,
     get flies() { return flies; }, get flowers() { return flowers; }, get set() { return set; }, get t() { return simT; }, get ptr() { return ptr; },
     get dust() { return dust; }, get paused() { return paused; }, get W() { return W; }, get H() { return H; }, get S() { return S; }, wind, windAt, get DWX() { return DWX; }, get PFX() { return PFX; }, get PFY() { return PFY; } };
-  if (FIXTURE) {
-    if (FIXTURE in FIXTURE_SETTINGS) { runFixture(FIXTURE); return; }
-    console.warn('Unknown fixture "' + FIXTURE + '"; known: ' + Object.keys(FIXTURE_SETTINGS).join(', '));
+  if (FIXTURE) { runFixture(FIXTURE); return; }
+  if (FIXTURE_ASKED) {
+    // Refused: say so on the page and in the console, then run the normal sketch.
+    const msg = 'Unknown fixture "' + FIXTURE_ASKED + '" refused; known: ' + FIXTURE_NAMES.join(', ');
+    window.__fixtureRefused = FIXTURE_ASKED;
+    console.error('MEADOW_FIXTURE_REFUSED ' + FIXTURE_ASKED + ' (' + msg + ')');
+    const n = document.createElement('div'); n.textContent = msg;
+    n.style.cssText = 'position:fixed;left:12px;top:12px;z-index:9;padding:6px 10px;background:#fff;color:#000;font:12px system-ui;border-radius:6px';
+    document.body.appendChild(n);
   }
   // ?sheet=flowers or ?sheet=flies lays out every kind for a close look (a development aid).
   const sheet = params.get('sheet');
