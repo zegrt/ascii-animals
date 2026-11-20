@@ -103,7 +103,7 @@ Director's profile: none
 | Id | Task | Size | Files | Branch | Builder | Reviewer | Rounds | State | Brief |
 |---|---|---|---|---|---|---|---|---|---|
 | t1-2 | Breeze, flowers and butterfly flight (plan T1 + T2), with the director's path fix | Content | Sources/OceanKit/Meadow/{Breeze,Flowers,ButterflySpecies,Butterfly}.swift, Sources/OceanChecks/MeadowChecks.swift, Sources/OceanTool/{Paths,main}.swift | meadow-t1-2 | builder-t1-2 (Claude Opus, T3 child thread; fix round 1) | reviewer-t1-2 (Claude Opus, T3 child thread) | 1 | reviewed, waits for the end of the stack (director: no merge yet): reviewed (review-t1-2 @ 68288c7), CI passed on 1e11a1b (PR #1), merge rehearsed 2026-11-20 (200 passed, app builds) | briefs/t1-2.md |
-| t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered); fix round 1 adds the director's bigger butterflies and better flowers | Content (grown: now also t1-2's sizes and flower shapes; the director set the look, so no separate plan) | Meadow/MeadowPainter.swift (new), OceanTool/{MeadowStill,main}.swift, OceanChecks/MeadowChecks.swift, Render/GlyphAtlas.swift (append only); fix round 1 adds Meadow/ButterflySpecies.swift (sizes) and Meadow/Flowers.swift (heads, leaves, clumps) | meadow-t5 (from meadow-t1-2); restart on meadow-t5r | builder-t5 (Claude Opus, T3 child thread) | reviewer-t5 (Codex) | 2 before the restart; 2 after it | building (restart 2, simplified) | briefs/t5.md |
+| t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered); fix round 1 adds the director's bigger butterflies and better flowers | Content (grown: now also t1-2's sizes and flower shapes; the director set the look, so no separate plan) | Meadow/MeadowPainter.swift (new), OceanTool/{MeadowStill,main}.swift, OceanChecks/MeadowChecks.swift, Render/GlyphAtlas.swift (append only); fix round 1 adds Meadow/ButterflySpecies.swift (sizes) and Meadow/Flowers.swift (heads, leaves, clumps) | meadow-t5 (from meadow-t1-2); restart on meadow-t5r | builder-t5 (Claude Opus, T3 child thread) | reviewer-t5 (Codex) | 2 before the restart; 2 after it; restart 2: 0 | in review (restart 2 built: meadow-t5r @ 56d339e, done with concerns) | briefs/t5.md |
 | t5v | A 30 s film of the butterflies flying, for the director to judge the motion | Content | to brief (OceanTool only) | meadow-t5v (from meadow-t5r) | | Codex | 0 | open (waits on t5) | |
 | t3 | Meadow world and behaviours (plan T3) | Content | Meadow/{MeadowWorld,Behaviour}.swift (new), OceanChecks/MeadowChecks.swift, Meadow/MeadowPainter.swift (convenience paint, breeze trail), Meadow/Breeze.swift (pointer field), OceanTool/MeadowStill.swift | meadow-t3 (from meadow-t5) | | Codex | 0 | open (waits on t5v watched by the director) | briefs/t3.md |
 | t4 | Cursor landing, courtship, crossings, monarch life cycle (plan T4) | Content | to brief | meadow-t4 | | | 0 | open (waits on t3) | |
@@ -175,6 +175,10 @@ Director's profile: none
     moved up to 85 pt from the flight's point), 3 (wings reach into the gap of offset displays), 5 (banked claps
     still flip colour in one step). Second failed round, so review.restart: "Restart 2" in briefs/t5.md, one
     shared butterfly geometry for flight and drawing. It changes the design, so it waits for the director.
+  - Restart 2 (simplified) reported 2026-11-20 (56d339e, done with concerns): workarounds removed, two checks
+    retired as decided, four new checks; the builder set `foldedSideNeverFlips` at a third of the blocks per step;
+    margins read as the earlier flight's (about 0.6 of the drawn wingspan); painter not re-timed. Fresh Codex
+    review.
   - Rewrite t3's brief: 8 (the pointer's breeze trail needs the pointer's air apart from the weather; t3 owns the
     pointer input).
   - The director on the stills, 2026-11-20: "would like bigger butterflies and better flowrs". In t5's fix round 1.
@@ -192,3 +196,5 @@ Director's profile: none
   skipping that part; the white's surge comment cites a between-flight speed spread, not a beat-to-beat one.
 - From t5's restart review (2026-11-20): over 128 seeds the white's turning ratio passes on all but seed 54 (1.28
   against 1.25); the check's pinned seeds pass with room.
+- From t5's restart 2 (2026-11-20): an earlier finished worktree (t3-988a7193…) still has `meadow-t5r` checked out
+  with uncommitted edits in 4 files; left alone. Clean it up only after checking nothing there is wanted.
