@@ -189,6 +189,13 @@ public final class Butterfly {
         return atan2(-sin(elevation), side * cos(elevation))
     }
 
+    /// A wall margin of `want`, but never more than a quarter of the screen's shorter side, so on a tiny screen
+    /// (the Settings preview) the walls don't meet in the middle.
+    @inline(__always) static func capped(_ want: Double, _ r: CGRect) -> Double {
+        let short: Double = Double(min(r.width, r.height))
+        return min(want, 0.25 * short)
+    }
+
     /// A random point half a wingspan inside a screen, in the bottom 40 % of it `lowWaypoints` of the time.
     private func randomPoint(_ terrain: Terrain, _ random: WebRandom, span: Double) -> SIMD2<Double> {
         guard !terrain.rects.isEmpty else { return SIMD2<Double>(x, y) }
@@ -198,7 +205,7 @@ public final class Butterfly {
             u -= Double(rect.width * rect.height)
             if u < 0 { r = rect; break }
         }
-        let inset: Double = 0.5 * span
+        let inset: Double = Butterfly.capped(0.5 * span, r)
         let minX: Double = Double(r.minX) + inset, maxX: Double = Double(r.maxX) - inset
         let minY: Double = Double(r.minY) + inset, maxY: Double = Double(r.maxY) - inset
         let px: Double = minX < maxX ? random.range(minX, maxX) : Double(r.midX)
@@ -305,7 +312,8 @@ public final class Butterfly {
         if bound != 0 { want = tilted(want, bound * sp.boundAngle) }
         // Walls: a soft steer within a wingspan of an edge, and a push. Free flight meeting a wall turns as a
         // correlated random walk: a new preferred direction drawn about the wall's normal, and a waypoint along it.
-        let margin: Double = span * (target == nil ? 1 : 0.5)
+        let here: CGRect = terrain.rects.isEmpty ? terrain.bounds : terrain.rects[terrain.rectIndex(near: p)]
+        let margin: Double = Butterfly.capped(span * (target == nil ? 1 : 0.5), here)
         let push: SIMD2<Double> = terrain.wallPush(p, margin: margin)
         let pushing = push.x != 0 || push.y != 0
         if pushing {
