@@ -22,7 +22,8 @@ tag `v3.0.1`).
 |---|---|---|
 | Director | the owner | the owner's Mac |
 | Manager | Claude (Opus) | the owner's Mac, the main T3 thread for this project |
-| Builder / reviewer | Claude agents, one per task or review | the owner's Mac, each in its own worktree next to the main folder |
+| Builder | Claude agents, one per task | the owner's Mac, each in its own worktree next to the main folder |
+| Reviewer | Codex agents (from 2026-11-20), one per review or re-check | the owner's Mac, each in its own worktree |
 
 Director's profile: none
 
@@ -64,12 +65,16 @@ Director's profile: none
 - 2026-11-20: t1-2 gets its CI run through a draft pull request (CI runs only on main and on pull requests), so a
   red build never lands on main (manager).
 
+- 2026-11-20: Reviews and re-checks are done by Codex from now on ("use codex for reviewing", the director).
+  t1-2's review and re-check, already done by Claude, stand.
+- 2026-11-20: t5 is briefed ahead (briefs/t5.md); it is assigned only after t1-2 is merged (manager).
+
 ## Tasks
 
 | Id | Task | Size | Files | Branch | Builder | Reviewer | Rounds | State | Brief |
 |---|---|---|---|---|---|---|---|---|---|
 | t1-2 | Breeze, flowers and butterfly flight (plan T1 + T2), with the director's path fix | Content | Sources/OceanKit/Meadow/{Breeze,Flowers,ButterflySpecies,Butterfly}.swift, Sources/OceanChecks/MeadowChecks.swift, Sources/OceanTool/{Paths,main}.swift | meadow-t1-2 | builder-t1-2 (Claude Opus, T3 child thread; fix round 1) | reviewer-t1-2 (Claude Opus, T3 child thread) | 1 | reviewed (re-check passed, review-t1-2 @ 68288c7); waits on CI (PR #1) | briefs/t1-2.md |
-| t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered) | Content | to brief | meadow-t5 | | | 0 | open (waits on t1-2 merged) | |
+| t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered) | Content | Meadow/MeadowPainter.swift (new), OceanTool/{MeadowStill,main}.swift, OceanChecks/MeadowChecks.swift, Render/GlyphAtlas.swift (append only) | meadow-t5 | | Codex | 0 | open (waits on t1-2 merged) | briefs/t5.md |
 | t3 | Meadow world and behaviours (plan T3) | Content | to brief | meadow-t3 | | | 0 | open (waits on t5) | |
 | t4 | Cursor landing, courtship, crossings, monarch life cycle (plan T4) | Content | to brief | meadow-t4 | | | 0 | open (waits on t3) | |
 | t6 | Meadow habitat, settings and tools (plan T6) | Content | to brief | meadow-t6 | | | 0 | open (waits on t4) | |
