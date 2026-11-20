@@ -82,6 +82,7 @@ public final class Meadowland {
 
     /// Lean: the breeze's drag ∝ |v|·v sets a steady tip offset of `drag / (1 + drag)` stem lengths, where
     /// drag = |v|·v × leanGain / leanSpeed². 60 pt/s leans a stem ~0.45 of its length; a 120 pt/s gust ~0.77.
+    /// Speeds are for 13-pt cells: `leanSpeed` scales with `cell.width / 13`, like the breeze.
     static let leanGain = 0.82
     static let leanSpeed = 60.0
     /// Stems are stiff along their length: air blowing down moves the tip a quarter as much.
@@ -200,7 +201,8 @@ public final class Meadowland {
         let speed: Double = simd_length(v)
         var target = SIMD2<Double>(0, 0)
         if speed > 1e-9 {
-            let drag: SIMD2<Double> = v * (speed * Meadowland.leanGain / (Meadowland.leanSpeed * Meadowland.leanSpeed))
+            let leanSpeed: Double = Meadowland.leanSpeed * Double(cell.width) / 13
+            let drag: SIMD2<Double> = v * (speed * Meadowland.leanGain / (leanSpeed * leanSpeed))
             let mag: Double = simd_length(drag)
             let flutter: Double = 1 + Meadowland.flutter * sin(TAU * 0.4 * f.f0 * time + f.phase)
             let lean: SIMD2<Double> = drag * (len * flutter / (1 + mag))

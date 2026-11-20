@@ -10,6 +10,9 @@ import Foundation
 ///   the meadow so neighbouring flowers sway a beat apart, plus a gust of 60–120 pt/s every 20–60 s that sweeps
 ///   across as a front. It varies only along x, so it is kept per grid column.
 ///
+/// The weather's speeds (the wind, the gusts, and how fast their pattern and fronts travel) are given for 13-pt
+/// cells and scale with `cell.width / 13`, like the butterflies'.
+///
 /// Research §4.2, §7 and the Recommended parameters (Breeze grid).
 public final class Breeze {
     /// The natural breeze and its gusts. Checks turn it off to see only what the pointer wrote.
@@ -21,6 +24,7 @@ public final class Breeze {
     private let ox: Double, oy: Double   // ocean-space position of sample (0, 0)
     private let sx: Double, sy: Double   // sample spacing, pt
     private let nx: Int, ny: Int
+    private let scale: Double            // cell.width / 13
     // Stirred air, double-buffered for the diffusion.
     private var vx: [Double], vy: [Double]
     private var bx: [Double], by: [Double]
@@ -51,6 +55,7 @@ public final class Breeze {
         oy = Double(bounds.minY)
         nx = max(2, Int(ceil(Double(bounds.width) / sx)) + 1)
         ny = max(2, Int(ceil(Double(bounds.height) / sy)) + 1)
+        scale = cw / 13
         let n = nx * ny
         vx = [Double](repeating: 0, count: n)
         vy = vx
@@ -148,7 +153,7 @@ public final class Breeze {
 
     private func planGust(at t: Double, _ random: WebRandom) {
         gustAt = t
-        gustPeak = random.range(60, 120)
+        gustPeak = random.range(60, 120) * scale
         gustLength = random.range(3, 5)
     }
 
@@ -160,7 +165,8 @@ public final class Breeze {
             planGust(at: time + random.range(20, 60), random)
             weatherReady = true
         }
-        if time > gustAt + gustLength + Double(nx) * sx / Breeze.gustFront {
+        let front: Double = Breeze.gustFront * scale, travel: Double = Breeze.travel * scale
+        if time > gustAt + gustLength + Double(nx) * sx / front {
             // The gust has crossed the meadow: the next one starts 20–60 s after it did.
             planGust(at: max(time, gustAt + random.range(20, 60)), random)
         }
@@ -168,14 +174,14 @@ public final class Breeze {
         for i in 0..<nx {
             let x: Double = Double(i) * sx
             // Travelling value noise: two octaves at ~0.035 and ~0.1 Hz.
-            let u: Double = time - prevailing * x / Breeze.travel
+            let u: Double = time - prevailing * x / travel
             let n: Double = 0.65 * noise1(u * 0.035, seed) + 0.35 * noise1(u * 0.1, seed + 17)
-            let speed: Double = 25 + 15 * clamp(n * 1.6, -1, 1)
+            let speed: Double = (25 + 15 * clamp(n * 1.6, -1, 1)) * scale
             let angle: Double = 0.3 * noise1(u * 0.05, seed + 41)   // wanders ±17° off level
             var wx: Double = prevailing * speed * cos(angle)
             var wy: Double = speed * sin(angle)
             // A gust front, with the prevailing wind: a sin² bump that reaches this column later the farther it is from where it began.
-            let tau: Double = time - gustAt - abs(x - startX) / Breeze.gustFront
+            let tau: Double = time - gustAt - abs(x - startX) / front
             if tau > 0 && tau < gustLength {
                 let s: Double = sin(Double.pi * tau / gustLength)
                 wx += prevailing * gustPeak * s * s
