@@ -955,20 +955,21 @@ struct GustReader {
         var x0 = 0, y0 = 0, w = 0, h = 0
         let s: Double
 
-        /// The corners `noise` can meet for a, b in lo…hi (one corner of slack each way, for rounding).
-        init(_ buf: inout MBuf<Double>, s: Double, loA: Double, hiA: Double, loB: Double, hiB: Double) {
+        /// The corners `noise` can meet for a, b in lo…hi (one corner of slack each way, for rounding). `room` is what
+        /// any frame's table can need on this grid (`GustReader.init`), made at once, so no frame allocates.
+        init(_ buf: inout MBuf<Double>, s: Double, loA: Double, hiA: Double, loB: Double, hiB: Double, room: Double) {
             self.s = s
-            p = buf.p
             let most: Double = 65536
+            if room.isFinite && room > 0 { buf.ensure(Int(min(room, most))) }
+            p = buf.p
             guard loA.isFinite && hiA.isFinite && loB.isFinite && hiB.isFinite, abs(loA) < 1e9 && abs(hiA) < 1e9 && abs(loB) < 1e9 && abs(hiB) < 1e9
             else { return }
             let fa: Double = floor(loA) - 1, ta: Double = floor(hiA) + 2
             let fb: Double = floor(loB) - 1, tb: Double = floor(hiB) + 2
             let cw: Double = ta - fa + 1, chh: Double = tb - fb + 1
-            guard cw * chh <= most else { return }
+            // Never grown here (a frame allocates nothing): a table that wouldn't fit is not made, and `noise` hashes.
+            guard cw * chh <= most, Int(cw) * Int(chh) <= buf.capacity else { return }
             x0 = Int(fa); y0 = Int(fb); w = Int(cw); h = Int(chh)
-            buf.ensure(w * h)
-            p = buf.p
             for j in 0..<h {
                 for i in 0..<w { p[j * w + i] = MeadowMath.hash3(Double(x0 + i), Double(y0 + j), s) }
             }
@@ -1022,10 +1023,18 @@ struct GustReader {
             let b: Double = (-px * dirY + py * dirX) / (W.bandAcross * unit)
             loA = min(loA, a); hiA = max(hiA, a); loB = min(loB, b); hiB = max(hiB, b)
         }
-        one = Lattice(&painter.lattice1, s: W.octave1Noise, loA: loA, hiA: hiA, loB: loB, hiB: hiB)
+        // Whatever the wind's direction and the time, a and b span at most the grid's diagonal over the band sizes; a
+        // table is that plus its slack (4 corners) and rounding (2 more) each way.
+        let spanX: Double = Double(max(0, columns - 1)) * breeze.spacing, spanY: Double = Double(max(0, rows - 1)) * breeze.spacing
+        let diag: Double = (spanX * spanX + spanY * spanY).squareRoot()
+        let dA: Double = diag / (W.bandAlong * unit), dB: Double = diag / (W.bandAcross * unit)
+        let room1: Double = (dA.rounded(.up) + 6) * (dB.rounded(.up) + 6)
+        let room2: Double = (dA * W.octave2Along).rounded(.up) + 6
+        let room2b: Double = (dB * W.octave2Across).rounded(.up) + 6
+        one = Lattice(&painter.lattice1, s: W.octave1Noise, loA: loA, hiA: hiA, loB: loB, hiB: hiB, room: room1)
         let loA2: Double = loA * W.octave2Along + W.octave2Shift, hiA2: Double = hiA * W.octave2Along + W.octave2Shift
         let loB2: Double = min(loB * W.octave2Across, hiB * W.octave2Across), hiB2: Double = max(loB * W.octave2Across, hiB * W.octave2Across)
-        two = Lattice(&painter.lattice2, s: W.octave2Noise, loA: loA2, hiA: hiA2, loB: loB2, hiB: hiB2)
+        two = Lattice(&painter.lattice2, s: W.octave2Noise, loA: loA2, hiA: hiA2, loB: loB2, hiB: hiB2, room: room2 * room2b)
     }
 
     /// `Breeze.gust(x, y)`.
