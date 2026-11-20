@@ -236,7 +236,7 @@ Director's profile: none
 | t10 | Words, watch and release 3.1 (plan T10; outward-facing, the director approves the release) | Content | to brief | meadow-t10 | | | 0 | open (waits on t9) | |
 | m1 | Air and flowers from above (breeze, pointer air, downwash, flowers, planting, clicks on flowers, the tuning file) | Content | to brief (port plan m1) | meadow-m1 (from main) | | Codex | 0 | open (waits for the sketch's fix round 1 and its re-check) | |
 | m2 | Flight from above | Content | to brief (port plan m2) | meadow-m2 (from meadow-m1) | | Codex | 0 | open (waits on m1) | |
-| m3 | A ground colour per cell in the shared canvas | Content | Sources/OceanKit/Render/{CellCanvas,OceanRenderer,Shaders}.swift, Sources/OceanChecks/CanvasChecks.swift, Sources/OceanChecks/main.swift (only if a new check group needs registering) | meadow-m3 (from main) | builder-m3 (Claude Opus, T3 child thread) | Codex | 0 | building | briefs/m3.md |
+| m3 | A ground colour per cell in the shared canvas | Content | Sources/OceanKit/Render/{CellCanvas,OceanRenderer,Shaders}.swift, Sources/OceanChecks/CanvasChecks.swift, Sources/OceanChecks/main.swift (only if a new check group needs registering) | meadow-m3 (from main) | builder-m3 (Claude Opus, T3 child thread) | Codex | 0 | built (meadow-m3 @ 2640dc6, done); Codex review building (review-m3) | briefs/m3.md |
 | m4 | Painter: the meadow | Content | to brief (port plan m4) | meadow-m4 (from meadow-m2, with m3 merged up the stack) | | Codex | 0 | open (waits on m2, m3) | |
 | m5 | Painter: the butterflies | Content | to brief (port plan m5) | meadow-m5 | | Codex | 0 | open (waits on m4) | |
 | m6 | World and behaviours, several screens | Content | to brief (port plan m6) | meadow-m6 | | Codex | 0 | open (waits on m5) | |
@@ -354,6 +354,10 @@ Director's profile: none
   (fps usage text lists six values, any divisor of 60 works): align.
 
 ## Noticed
+- 2026-11-20, m3's builder: when the Meadow joins `OceanTool bench --digest` (m8), the per-cell ground must be added
+  to the digest in `Sources/OceanTool/Bench.swift`. Also m3's ruling: during a habitat dissolve, cells not yet
+  revealed show the plain background, not their ground (the family's rule; the green fades in with the rest);
+  the review judges it.
 - 2026-11-20, s1 round 4's builder: "New meadow" removes the flowers the director planted (only density and flower
   size changes keep them); round 3's finished worktree still has `meadow-sketch` checked out with staged changes
   that would put the sketch back to an older state (not to be committed; clean up with the stale worktrees).
