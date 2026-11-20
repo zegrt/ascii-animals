@@ -45,6 +45,13 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-20, during s1 round 5: "also to be clear is the colors in light mode not beign correct intended?". The
+  manager's answer: only partly. The muted look and no colour sparkle on paper follow Web, but the rest is wrong:
+  solid near-black blocks for the black markings (heavy, muddy on paper), olive and brown wings, white flowers that
+  go grey and vanish, and pale mint leaves as the loudest colour. The family on paper uses pale tinted blocks with
+  dark ink glyphs and no solid black. Round 2 converted the dark palette by a formula instead of designing a paper
+  palette. Applies: task.change (round 5 is building on the same file; a light-mode round 6 follows it, designing
+  the paper palette from Ocean's and Web's light stills).
 - 2026-11-20, on sketch round 4: "looks good one last thing rn there is no seperation between the close butterfies
   and the stuff far away especially the flowers.. what do we do, discuss no edits yet"; the manager proposed
   pushing the meadow back with light (family depth dimming) plus a dark rim around high butterflies, with less
