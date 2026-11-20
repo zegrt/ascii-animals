@@ -91,3 +91,10 @@ check that fails without the fix, and stay out of m8's Files:
 5. Initial butterflies are spread across screens that can't reach each other (a real gap), when the count allows,
    so no display starts empty.
 Single-screen Meadow, Ocean and Web unchanged; within Web's CPU. Add a "Fix round 2" section to `reports/mp.md`.
+
+## Fix round 3 (2026-11-21; CI only)
+CI on eaad21f (Swift 6.3.3, `OCEAN_SKIP_GPU=1`) fails `meadowClicksAllocateNothingLater` with 11 allocations in the
+frames after clicks; it passes locally and passed on 965e8c9. Find what allocates under CI's conditions (no GPU,
+the older toolchain, its optimizer) and fix the cause in the Meadow, not the check. Reproduce with
+`OCEAN_SKIP_GPU=1`; if it only reproduces on CI, say how you established the cause. Single-screen Meadow, Ocean and
+Web unchanged. Add a "Fix round 3" section to `reports/mp.md`.
