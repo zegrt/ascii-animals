@@ -95,7 +95,8 @@ Director's profile: none
 
 - 2026-11-20: After t5, a short film of the butterflies flying before t3 starts (the director: "yes"). Also: keep
   the physics where it makes them look better, and decide how realistic we want them ("its a line drawn in sand on
-  a spectrum", the director). Pending: the manager's proposed line, asked.
+  a spectrum", the director). The line is decided after the director sees the film ("we can only decied afteri see it in motion"). Until then,
+  as a working default only: real where a viewer would notice it, stylised where it helps the look.
 
 ## Tasks
 
