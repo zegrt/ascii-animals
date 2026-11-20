@@ -45,6 +45,8 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-20, on the first Meadow stills: "would like bigger butterflies and better flowrs". Applies: new (t5 fix
+  round 1).
 
 - 2026-11-19, on the T2 flight-path picture: "did you see the flight paths? they seem clusted at the center of the
   screen". Applies: new (sent to the T2 builder mid-task, before this board existed; now part of brief t1-2).
@@ -74,12 +76,16 @@ Director's profile: none
   `meadow-t1-2`. The director approves the stack at the end; each task still gets its own review and CI run. A later
   fix to an earlier task's files goes through that task's own branch and is then merged up the stack (manager).
 
+- 2026-11-20: A later task may change an earlier stacked task's file when the change is that later task's own
+  purpose (the director's bigger butterflies and better flowers in t5); its row names the file. Other fixes to an
+  earlier task go through that task's branch (manager).
+
 ## Tasks
 
 | Id | Task | Size | Files | Branch | Builder | Reviewer | Rounds | State | Brief |
 |---|---|---|---|---|---|---|---|---|---|
 | t1-2 | Breeze, flowers and butterfly flight (plan T1 + T2), with the director's path fix | Content | Sources/OceanKit/Meadow/{Breeze,Flowers,ButterflySpecies,Butterfly}.swift, Sources/OceanChecks/MeadowChecks.swift, Sources/OceanTool/{Paths,main}.swift | meadow-t1-2 | builder-t1-2 (Claude Opus, T3 child thread; fix round 1) | reviewer-t1-2 (Claude Opus, T3 child thread) | 1 | reviewed, waits for the end of the stack (director: no merge yet): reviewed (review-t1-2 @ 68288c7), CI passed on 1e11a1b (PR #1), merge rehearsed 2026-11-20 (200 passed, app builds) | briefs/t1-2.md |
-| t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered) | Content | Meadow/MeadowPainter.swift (new), OceanTool/{MeadowStill,main}.swift, OceanChecks/MeadowChecks.swift, Render/GlyphAtlas.swift (append only) | meadow-t5 (from meadow-t1-2) | builder-t5 (Claude Opus, T3 child thread) | reviewer-t5 (Codex) | 1 | pending (director: how the butterflies should look, before fix round 1) | briefs/t5.md |
+| t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered); fix round 1 adds the director's bigger butterflies and better flowers | Content (grown: now also t1-2's sizes and flower shapes; the director set the look, so no separate plan) | Meadow/MeadowPainter.swift (new), OceanTool/{MeadowStill,main}.swift, OceanChecks/MeadowChecks.swift, Render/GlyphAtlas.swift (append only); fix round 1 adds Meadow/ButterflySpecies.swift (sizes) and Meadow/Flowers.swift (heads, leaves, clumps) | meadow-t5 (from meadow-t1-2) | builder-t5 (Claude Opus, T3 child thread) | reviewer-t5 (Codex) | 1 | building (fix round 1) | briefs/t5.md |
 | t3 | Meadow world and behaviours (plan T3) | Content | Meadow/{MeadowWorld,Behaviour}.swift (new), OceanChecks/MeadowChecks.swift, Meadow/MeadowPainter.swift (convenience paint only), OceanTool/MeadowStill.swift | meadow-t3 (from meadow-t5) | | Codex | 0 | open (waits on t5 reviewed: its Files overlap t5's) | briefs/t3.md |
 | t4 | Cursor landing, courtship, crossings, monarch life cycle (plan T4) | Content | to brief | meadow-t4 | | | 0 | open (waits on t3) | |
 | t6 | Meadow habitat, settings and tools (plan T6) | Content | to brief | meadow-t6 | | | 0 | open (waits on t4) | |
@@ -122,7 +128,7 @@ Director's profile: none
     check), 10 (meadow-still validates its numbers), and the report's local folder paths.
   - Rewrite t3's brief: 8 (the pointer's breeze trail needs the pointer's air apart from the weather; t3 owns the
     pointer input).
-  - The director said 2026-11-20 nothing yet on the stills; asked.
+  - The director on the stills, 2026-11-20: "would like bigger butterflies and better flowrs". In t5's fix round 1.
 
 ## Noticed
 
