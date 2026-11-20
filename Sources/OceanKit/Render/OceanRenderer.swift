@@ -60,7 +60,7 @@ public final class OceanRenderer {
 /// plain background), read only when misc.y is 1. A frame whose paint wrote no
 /// ground (`CellCanvas.hasGround`) uploads none: misc.y is 0 and the block
 /// texture stands in at index 6, unread.
-/// Texture 3 is not per cell: the glyph atlas (rgba8, one glyph tile per
+/// Texture 3 is not per cell: the glyph atlas (r8Unorm, one glyph tile per
 /// `GlyphAtlas` index, sized from the cell size and scale; `GlyphAtlas.make`).
 struct CanvasUniforms {
     var grid: SIMD4<Float>       // cols, rows, cell w, cell h (points)
@@ -102,7 +102,7 @@ public final class ViewportRenderer {
     /// logged once and frames draw without a ground until the next resize.
     private var groundTextures: [MTLTexture] = []
     private var groundTexturesFailed = false
-    /// Ground uploads since this viewport was made: one per frame whose paint wrote a ground, none otherwise.
+    /// Ground uploads since this viewport was made: one per frame whose paint wrote a ground and whose ground textures exist, none otherwise.
     public private(set) var groundUploads = 0
     /// What this viewport has already drawn of its world: steps run through
     /// the wake, and events stamped. A world shared by several screens is
