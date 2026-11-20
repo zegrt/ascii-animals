@@ -148,6 +148,10 @@ Director's profile: none
 
 ## Decisions
 
+- 2026-11-20, the director on d1 (docs/plans/2026-11-20-meadow-in-the-app.md on design-d1): presets: "Fewer
+  presets" (which ones: asked); Custom: "Yes, switches + How many"; what's-new: "C: small card"; the 7 were tuned
+  on "A laptop screen" (7 is the laptop number; bigger displays get more by area).
+
 - 2026-11-20: The port is reshaped (the director: "mm ok and preformant"; docs/plans/2026-11-20-meadow-port-plan.md,
   "Revised the same day"): m1 and m3 stand; one translation pass, mp, replaces m2, m4, m5, m6, m7; the director
   judges fidelity by eye on films next to the sketch; the Meadow must cost no more CPU than Web at 30 and 15 fps and
@@ -262,7 +266,7 @@ Director's profile: none
 | m7 | Pointer and clicks | Content | to brief (port plan m7) | meadow-m7 | | Codex | 0 | open (waits on m6) | superseded by mp (one translation pass, 2026-11-20)
 | mp | One translation pass: the rest of the sketch (flight, butterflies, behaviours, pointer, painter) into the family's shape, runnable in OceanTool, films next to the sketch, within Web's CPU | Content (large; judged by eye, one review) | Sources/OceanKit/Meadow/* (new files; additions to MeadowTuning; m1's files only where the world needs hooks), Sources/OceanChecks/Meadow*.swift, Sources/OceanChecks/main.swift, Sources/OceanTool/{Meadow*,main,Bench}.swift, Sources/OceanKit/Domain/{HabitatKind,HabitatSim}.swift and the minimal `.meadow` switch cases in Sources/ASCIIAnimals (not offered in the app) | meadow-mp (from meadow-m1 after its fix round 2, with meadow-m3 merged in) | builder-mp (Claude Opus, T3 child thread) | Codex | 0 | building | briefs/mp.md |
 | m8 | The Meadow habitat, its presets and settings, OceanTool | Content | to brief (port plan m8) | meadow-m8 | | Codex | 0 | open (waits on m7) | |
-| d1 | The Meadow in the app, designed: presets, Settings, menu, status word, what's-new (not full screen), welcome; mock-up pictures for the director | Design (proposal only; nothing built) | docs/plans/2026-11-20-meadow-in-the-app.md, docs/plans/media/d1/* | design-d1 (from main) | builder-d1 (Claude Opus, T3 child thread) | none (the director approves it) | 0 | built (design-d1 @ f813cc9, done); with the director (four questions) | briefs/d1.md |
+| d1 | The Meadow in the app, designed: presets, Settings, menu, status word, what's-new (not full screen), welcome; mock-up pictures for the director | Design (proposal only; nothing built) | docs/plans/2026-11-20-meadow-in-the-app.md, docs/plans/media/d1/* | design-d1 (from main) | builder-d1 (Claude Opus, T3 child thread) | none (the director approves it) | 0 | built (design-d1 @ f813cc9, done); answered by the director except which presets to keep (asked) | briefs/d1.md |
 
 ## Review routing
 
