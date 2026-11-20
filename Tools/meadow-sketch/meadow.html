@@ -445,7 +445,65 @@ function plantInks() {
 const INKS = {}, PI_ = plantInks(), PLANT_DARK = PI_;
 for (const k in SPECIES) INKS[k] = wingInks(k);
 // On paper the ground is the paper with hints of green, and pollen is a dark gold ink.
-const GROUND_PAPER = rgb(229, 236, 222), GOLD_PAPER = rgb(150, 124, 40);
+const GROUND_PAPER = rgb(236, 240, 229), GOLD_PAPER = rgb(150, 124, 40);
+
+// ── On paper: a palette made for paper (round 6), not a formula over the dark one ──
+// The family on paper (Ocean's and Web's light stills): pale to mid tinted tiles, lightness about 0.55–0.85 and
+// low saturation, with dark ink glyphs carved on them; the darkest parts are a few mid-dark tiles in the middle of
+// a body, never a black patch; the ground is the bare paper. Here each colour is a pigment laid on the paper as a
+// wash, paper × (pigment / 255)^amount: a little pigment is a pale tint of its own hue (never grey), more is the
+// full colour, and the lit side of anything takes less of it. Black markings are graphite washed to a mid tone with
+// near-black ink glyphs carved on them; white things are a faint warm or cool tint drawn by their ink.
+const WASH = [0, 0, 0];
+function paperWash(p, a) {
+  WASH[0] = PAPER[0] * Math.pow(p[0] / 255, a); WASH[1] = PAPER[1] * Math.pow(p[1] / 255, a); WASH[2] = PAPER[2] * Math.pow(p[2] / 255, a);
+  return WASH;
+}
+/** One species on paper. pig: the wing's pigment; deep / lit: how much of it at the root and in shade, and where the
+ *  wing catches the light; ink: the carved glyphs; edge: the silhouette's light glyphs; under: the underside's
+ *  pigment; mark: the black markings' graphite and its amounts (darkest first); markInk: their glyphs; spot, ring,
+ *  blue: the coloured spots, with their amounts. Dots in the black borders are paper-coloured glyphs (Web's flecks
+ *  and eyes on paper are the paper colour). */
+const PAPER_WINGS = {
+  monarch: { pig: rgb(226, 128, 60), deep: 0.8, lit: 0.3, ink: rgb(84, 38, 10), edge: rgb(196, 94, 24), under: rgb(214, 150, 84),
+    mark: rgb(66, 58, 54), markA: [0.48, 0.38, 0.3], markInk: rgb(30, 25, 22), spot: rgb(236, 146, 56), spotA: 0.55,
+    ring: rgb(220, 200, 150), ringA: 0.4, blue: rgb(0, 0, 0), blueA: 0 },
+  morpho: { pig: rgb(60, 112, 212), deep: 0.6, lit: 0.2, ink: rgb(18, 32, 82), edge: rgb(44, 96, 196), under: rgb(150, 108, 66),
+    mark: rgb(52, 58, 76), markA: [0.48, 0.38, 0.3], markInk: rgb(20, 23, 34), spot: rgb(150, 176, 226), spotA: 0.3,
+    ring: rgb(208, 168, 76), ringA: 0.6, blue: rgb(0, 0, 0), blueA: 0 },
+  swallowtail: { pig: rgb(236, 206, 84), deep: 0.85, lit: 0.36, ink: rgb(82, 66, 10), edge: rgb(172, 140, 18), under: rgb(234, 216, 132),
+    mark: rgb(62, 58, 50), markA: [0.48, 0.38, 0.3], markInk: rgb(26, 24, 19), spot: rgb(242, 210, 70), spotA: 0.6,
+    ring: rgb(232, 104, 34), ringA: 0.6, blue: rgb(64, 104, 214), blueA: 0.48 },
+  white: { pig: rgb(226, 220, 186), deep: 0.9, lit: 0.25, ink: rgb(74, 76, 70), edge: rgb(112, 116, 104), under: rgb(212, 224, 150),
+    mark: rgb(76, 76, 84), markA: [0.44, 0.36, 0.28], markInk: rgb(30, 30, 34), spot: rgb(150, 150, 150), spotA: 0.4,
+    ring: rgb(150, 150, 150), ringA: 0.4, blue: rgb(0, 0, 0), blueA: 0 },
+};
+// The body: graphite washed to a mid tone with near-black glyphs; the eyes a darker tile with a paper `o`.
+const PAPER_BODY = rgb(60, 52, 46), PAPER_BODY_INK = rgb(26, 22, 20), PAPER_EYE = rgb(36, 36, 42);
+/** The meadow on paper, per kind and part: [pigment, amount, glyph ink, glyph alpha]. Petals and florets are pale
+ *  washes of their own hue with the strokes in a deeper ink of it; the daisy is a faint cream drawn in graphite.
+ *  Leaves and grass are a faint sage, pushed back so nothing on the ground is louder than the butterflies. */
+const PAPER_PLANTS = {
+  daisy: { petal: [rgb(238, 228, 200), 0.45, rgb(96, 94, 86), 0.9], disc: [rgb(236, 178, 34), 0.75, rgb(112, 76, 10), 0.9] },
+  coneflower: { petal: [rgb(206, 96, 170), 0.42, rgb(130, 52, 104), 0.85], disc: [rgb(190, 92, 30), 0.85, rgb(74, 32, 10), 0.9] },
+  dandelion: { petal: [rgb(244, 198, 24), 0.55, rgb(140, 100, 0), 0.85], disc: [rgb(230, 150, 20), 0.8, rgb(110, 70, 0), 0.9] },
+  milkweed: { floret: [rgb(224, 120, 156), 0.48, rgb(128, 38, 78), 1], cluster: [rgb(176, 96, 130), 0.4, rgb(176, 96, 128), 0.6] },
+  clover: { floret: [rgb(206, 104, 150), 0.48, rgb(124, 40, 82), 1], tip: [rgb(226, 170, 196), 0.4, rgb(150, 80, 112), 0.85],
+    cluster: [rgb(170, 90, 128), 0.4, rgb(170, 90, 128), 0.6] },
+  fennel: { umbel: [rgb(228, 208, 80), 0.55, rgb(122, 104, 18), 0.9], ray: [rgb(0, 0, 0), 0, rgb(126, 142, 92), 0.75] },
+  mustard: { mflower: [rgb(238, 204, 50), 0.6, rgb(120, 96, 0), 0.95], mpetal: [rgb(0, 0, 0), 0, rgb(196, 156, 20), 0.85],
+    bud: [rgb(0, 0, 0), 0, rgb(112, 126, 56), 0.8] },
+  leaf: { leaf: [rgb(120, 158, 104), 0.17, rgb(108, 132, 96), 0.5], thread: [rgb(0, 0, 0), 0, rgb(124, 144, 110), 0.5] },
+};
+const PAPER_GRASS = rgb(126, 144, 112), PAPER_GRASS_STIRRED = rgb(98, 124, 80);
+const PPB = [0, 0, 0]; let PPI = PAPER, PPA = 1;
+/** The paper colours of a flower's part at its shading k (≈ 0.5 in shade … 1.2 lit): PPB the block, PPI the ink and
+ *  PPA its alpha. The lit side takes less pigment. */
+function paperPart(kind, part, k) {
+  const t = PAPER_PLANTS[part === 'leaf' || part === 'thread' ? 'leaf' : kind], e = (t && t[part]) || PAPER_PLANTS.leaf.thread;
+  const c = paperWash(e[0], e[1] * clamp(1.5 - 0.55 * k, 0.6, 1.4));
+  PPB[0] = c[0]; PPB[1] = c[1]; PPB[2] = c[2]; PPI = e[2]; PPA = e[3];
+}
 function setTheme() {
   LIGHT = set.theme === 'light';
   document.documentElement.setAttribute('data-theme', LIGHT ? 'light' : 'dark');
@@ -598,7 +656,8 @@ function glyphAt(i, gi, r, g, b, a) {
 /** A shadow: darker block, fainter glyph. */
 function shade(i, k) {
   if (k <= 0) return;
-  if (LIGHT) { const m = 1 - 0.32 * k; BR[i] *= m; BG[i] *= m; BB[i] *= m; IA[i] *= 1 - 0.5 * k; }
+  // On paper a shadow is a cool grey wash, as daylight shade is, not a grey smudge.
+  if (LIGHT) { BR[i] *= 1 - 0.24 * k; BG[i] *= 1 - 0.21 * k; BB[i] *= 1 - 0.15 * k; IA[i] *= 1 - 0.5 * k; }
   else { const m = 1 - k; BR[i] *= m; BG[i] *= m; BB[i] *= m; IA[i] *= 1 - 0.9 * k; }
 }
 
@@ -874,6 +933,7 @@ function headSample(f, dx, dy, grow) {
         const gi = cone ? (h < 0.5 ? G['*'] : h < 0.75 ? G['x'] : G['+']) : daisy ? (t < 0.35 ? G['o'] : h < 0.5 ? G['·'] : G['°']) : (h < 0.5 ? G['*'] : G['·']);
         fhit(3, base[0] * dome, base[1] * dome, base[2] * dome, gi, ink[0], ink[1], ink[2], 0.85, true);
         FH.disc = true; FH.lit = !cone;   // a daisy's or dandelion's lit disc; the coneflower's dark cone carries bright glyphs
+        FH.part = 'disc'; FH.k = dome;
         return;
       }
       // Ray petals round the disc, each its own length and shade; gaps between them show the ground. Each petal is
@@ -903,6 +963,7 @@ function headSample(f, dx, dy, grow) {
       else gi = lineGlyph(Math.cos(pa), Math.sin(pa), lineRow(0, 0, Math.cos(pa), Math.sin(pa), dx, dy));
       const ik = Math.min(1.15, 0.75 + 0.45 * k);
       fhit(2, base[0] * k * block, base[1] * k * block, base[2] * k * block, gi, Math.min(255, base[0] * ik), Math.min(255, base[1] * ik), Math.min(255, base[2] * ik), 0.92, true);
+      FH.part = 'petal'; FH.k = k;
       return;
     }
     case 'milkweed': case 'clover': {
@@ -934,10 +995,12 @@ function headSample(f, dx, dy, grow) {
         const gi = clover ? (t > 0.6 ? G["'"] : G['°']) : (best < 0.18 ? G['*'] : G['°']);
         const bk = 0.62;
         fhit(2, tip[0] * shadeK * bk, tip[1] * shadeK * bk, tip[2] * shadeK * bk, gi, ink[0], ink[1], ink[2], 0.6 + 0.4 * lam, true);
+        FH.part = clover && t > 0.55 ? 'tip' : 'floret';
       } else {
         fhit(2, body[0] * shadeK, body[1] * shadeK, body[2] * shadeK, (best > 0.55 ? G['·'] : 0), fl[0], fl[1], fl[2], 0.4, true);
+        FH.part = 'cluster';
       }
-      FH.disc = true;
+      FH.disc = true; FH.k = shadeK;
       return;
     }
     case 'fennel': {
@@ -958,7 +1021,7 @@ function headSample(f, dx, dy, grow) {
         const gi = t < 0.45 ? (h < 0.5 ? G[':'] : G['*']) : h < 0.55 ? G['·'] : h < 0.8 ? G['°'] : G['.'];
         const bk = 0.3 * (1 - t);
         fhit(2, P2[0] * k * bk, P2[1] * k * bk, P2[2] * k * bk, gi, Math.min(255, P2[0] * k), Math.min(255, P2[1] * k), Math.min(255, P2[2] * k), 0.95, t < 0.55);
-        FH.disc = true;
+        FH.disc = true; FH.part = 'umbel'; FH.k = k;
         return;
       }
       // The ray: a thin line from the centre to the umbellet, one glyph per step along it, as silk is drawn.
@@ -970,6 +1033,7 @@ function headSample(f, dx, dy, grow) {
         const c = P.fennelRay;
         fhit(1, 0, 0, 0, lineGlyph(ca, sa, lineRow(0, 0, ca, sa, dx, dy)), c[0], c[1], c[2], 0.8, false);
       } else if (r < 0.1 * Rr) { const c = P.fennelRay; fhit(1, 0, 0, 0, G['*'], c[0], c[1], c[2], 0.9, false); }
+      FH.part = 'ray'; FH.k = 1;
       return;
     }
     case 'mustard': {
@@ -979,10 +1043,12 @@ function headSample(f, dx, dy, grow) {
         const q = f.sub[i]; const qx = dx - q.x * grow, qy = dy - q.y * grow; const sr = q.s * grow;
         const d = Math.hypot(qx / cw, qy / ch * 1.25);   // in cells
         if (d > 1.15) continue;
-        if (!q.open) { const c = P.mustardBud; fhit(1, 0, 0, 0, d < 0.6 ? G['o'] : G['·'], c[0], c[1], c[2], 0.85, false); return; }
+        FH.k = 1;
+        if (!q.open) { const c = P.mustardBud; fhit(1, 0, 0, 0, d < 0.6 ? G['o'] : G['·'], c[0], c[1], c[2], 0.85, false); FH.part = 'bud'; return; }
         const c = P.mustard;
-        if (d < 0.6) { const bk = 0.55; fhit(2, c[0] * bk, c[1] * bk, c[2] * bk, G['+'], Math.min(255, c[0] * 1.1), Math.min(255, c[1] * 1.1), Math.min(255, c[2] * 1.1), 1, true); return; }
+        if (d < 0.6) { const bk = 0.55; fhit(2, c[0] * bk, c[1] * bk, c[2] * bk, G['+'], Math.min(255, c[0] * 1.1), Math.min(255, c[1] * 1.1), Math.min(255, c[2] * 1.1), 1, true); FH.part = 'mflower'; return; }
         fhit(1, 0, 0, 0, hash3(i, Math.round(qx), s) < 0.5 ? G['·'] : G["'"], c[0], c[1], c[2], 0.85, false);
+        FH.part = 'mpetal';
         return;
       }
       return;
@@ -1009,6 +1075,7 @@ function leafSample(f, dx, dy) {
           const chev = Math.abs(Math.hypot(lx, ly) - wid * 0.16) < cw * 0.35;
           const c = chev ? P.leafLit : P.leaf;
           fhit(1, c[0], c[1], c[2], chev ? G['v'] : 0, P.rib[0], P.rib[1], P.rib[2], 0.7, true);
+          FH.part = 'leaf'; FH.k = chev ? 1.15 : 0.9;
           return;
         }
       }
@@ -1020,7 +1087,7 @@ function leafSample(f, dx, dy) {
     if (l.k === 4) half *= 0.78 + 0.22 * Math.abs(Math.sin(t * 14));   // a dandelion's teeth
     if (l.k === 1) {
       // Fennel's thread-like leaves: a fine line.
-      if (Math.abs(lat) < 0.3 * cw) { fhit(1, 0, 0, 0, lineGlyph(ca, sa, lineRow(0, 0, ca, sa, dx, dy)), P.leafEdge[0], P.leafEdge[1], P.leafEdge[2], 0.7, false); return; }
+      if (Math.abs(lat) < 0.3 * cw) { fhit(1, 0, 0, 0, lineGlyph(ca, sa, lineRow(0, 0, ca, sa, dx, dy)), P.leafEdge[0], P.leafEdge[1], P.leafEdge[2], 0.7, false); FH.part = 'thread'; FH.k = 1; return; }
       continue;
     }
     if (Math.abs(lat) > half) continue;
@@ -1035,6 +1102,7 @@ function leafSample(f, dx, dy) {
     if (mid && t < 0.9) fhit(1, br, bg, bb, lineGlyph(ca, sa, lineRow(0, 0, ca, sa, dx, dy)), P.rib[0], P.rib[1], P.rib[2], 0.75, true);
     else if (edge) fhit(1, br, bg, bb, (hash3(Math.round(dx / cw), Math.round(dy / ch), f.seed) < 0.5 ? G[','] : G["'"]), P.leafEdge[0], P.leafEdge[1], P.leafEdge[2], 0.7, true);
     else fhit(1, br, bg, bb, 0, 0, 0, 0, 0, true);
+    FH.part = 'leaf'; FH.k = bk * (1 + 0.25 * mixK);
     return;
   }
 }
@@ -1067,31 +1135,42 @@ function drawFlower(f) {
     // least 3 of 5 samples are; otherwise an edge, a light glyph with no block.
     headSample(f, px - hx, py - hy, grow);
     const centre = FH.hit && FH.solid;
-    if (FH.hit && !FH.solid) { lGlyph(i, FH.gi, FH.ir, FH.ig, FH.ib, FH.ia); continue; }   // a ray, as silk
+    if (FH.hit && !FH.solid) {   // a ray, as silk
+      if (LIGHT) { paperPart(f.kind, FH.part, 1); glyphAt(i, FH.gi, PPI[0], PPI[1], PPI[2], PPA * FH.ia); }
+      else lGlyph(i, FH.gi, FH.ir, FH.ig, FH.ib, FH.ia);
+      continue;
+    }
     let hits = centre ? 1 : 0;
     let sr = FH.r, sg = FH.g, sb = FH.b, gi = FH.gi, ir = FH.ir, ig = FH.ig, ib = FH.ib, ia = FH.ia, disc = FH.disc, lit = FH.lit;
+    let part = FH.part, pk = FH.k;
     for (let k = 1; k < 5; k++) {
       headSample(f, x0 + SUB5[k][0] * cw - hx, y0 + SUB5[k][1] * ch - hy, grow);
-      if (FH.hit && FH.solid) { hits++; if (!centre && hits === 1) { sr = FH.r; sg = FH.g; sb = FH.b; ir = FH.ir; ig = FH.ig; ib = FH.ib; } }
+      if (FH.hit && FH.solid) { hits++; if (!centre && hits === 1) { sr = FH.r; sg = FH.g; sb = FH.b; ir = FH.ir; ig = FH.ig; ib = FH.ib; part = FH.part; pk = FH.k; } }
     }
     if (hits) {
       const cov = hits / 5;
       const key = keyOf(Math.round((px - hx) / (cw * 0.9)), Math.round((py - hy) / (cw * 0.9)), f.seed);
+      if (LIGHT) paperPart(f.kind, part, pk);
       if (centre && cov >= 0.6) {
         if (disc && vd > 0) {
           const k = 1 - 0.15 * vd; sr *= k; sg *= k; sb *= k;
           if (vd > 0.5 && DIM_STEP[gi] !== undefined) gi = DIM_STEP[gi];
+          // On paper a visited disc goes a little paler (less pigment) rather than darker.
+          if (LIGHT) for (let j = 0; j < 3; j++) PPB[j] += (PAPER[j] - PPB[j]) * 0.15 * vd;
         }
-        flowerBlock(i, sr, sg, sb, lit);
+        if (LIGHT) blockAt(i, PPB[0], PPB[1], PPB[2], 1); else flowerBlock(i, sr, sg, sb, lit);
         if (gi) {
           // Blooms shimmer at half the wings' rate, so they twinkle quietly.
           const s = shimmer(key, 0.03 * sparkleK, 0.05 * sparkleK);
-          if (s) shimmerGlyph(i, gi, s, key, false); else sGlyph(i, gi, ir, ig, ib, ia);
+          if (s) shimmerGlyph(i, gi, s, key, false);
+          else if (LIGHT) glyphAt(i, gi, PPI[0], PPI[1], PPI[2], PPA * Math.min(1, ia + 0.1));
+          else sGlyph(i, gi, ir, ig, ib, ia);
         } else GI[i] = 0;
       } else {
         const e = cov >= 0.5 ? HEAVY[(key >>> 8) & 1] : LIGHT_EDGE[(key >>> 8) & 3];
-        TC[0] = ir; TC[1] = ig; TC[2] = ib;
-        edgeGlyph(i, e, TC, 70 + 80 * cov);
+        // On paper an edge is the part's own ink, fainter the less of the cell it covers.
+        if (LIGHT) glyphAt(i, e, PPI[0], PPI[1], PPI[2], PPA * (0.35 + 0.5 * cov));
+        else { TC[0] = ir; TC[1] = ig; TC[2] = ib; edgeGlyph(i, e, TC, 70 + 80 * cov); }
       }
       continue;
     }
@@ -1101,7 +1180,13 @@ function drawFlower(f) {
     // Leaves: dim blocks with lighter ribs, mapped on paper as Web's legs (pale blocks, darker ribs).
     if (leafGrow > 0) {
       leafSample(f, (px - f.x) / leafGrow, (py - f.y) / leafGrow);
-      if (FH.hit) {
+      if (FH.hit && LIGHT) {
+        // On paper: a faint sage wash with its ribs and edges in a soft green-grey ink.
+        paperPart(f.kind, FH.part, FH.k);
+        if (FH.solid) blockAt(i, PPB[0], PPB[1], PPB[2], 1);
+        if (FH.gi) glyphAt(i, FH.gi, PPI[0], PPI[1], PPI[2], PPA * FH.ia / 0.7);
+        else if (FH.solid) GI[i] = 0;
+      } else if (FH.hit) {
         if (FH.solid) sBlock(i, FH.r, FH.g, FH.b, 1, 0.16);   // leaves: only a hint of green on paper
         if (FH.gi) { if (FH.solid) sGlyph(i, FH.gi, FH.ir, FH.ig, FH.ib, FH.ia); else lGlyph(i, FH.gi, FH.ir, FH.ig, FH.ib, FH.ia); }
         else if (FH.solid) GI[i] = 0;
@@ -1947,10 +2032,17 @@ function drawButterfly(b) {
   // sits back instead.
   const flat = 0.78 + 0.28 * POSE.depth, near = LIGHT ? 1 - 0.08 * POSE.depth : 1 + 0.14 * POSE.depth;
   const dim = flat + (near - flat) * Math.min(1, set.depth);
+  // On paper depth is pigment: a low one takes a little less (0.88 on a flower at Depth 0), and with Depth they
+  // stay full and take a touch more as they rise (1.0 on a flower to 1.1 at the glass).
+  const pflat = 0.88 + 0.12 * POSE.depth, pnear = 1 + 0.1 * POSE.depth;
+  const rich = pflat + (pnear - pflat) * Math.min(1, set.depth);
+  const pw = PAPER_WINGS[b.kind];
   REC = true; recN = 0; recStamp++;
   const under = POSE.under, U = ink.under, ramp = ink.ramp, marks = ink.marks;
   const white = b.kind === 'white';
   for (let k = 0; k < 3; k++) FHUE[k] = ramp[2][k] + (U[k] - ramp[2][k]) * under;
+  // The paper field's pigment and edge ink, toward the underside's as the wings close.
+  for (let k = 0; k < 3; k++) { PIG[k] = pw.pig[k] + (pw.under[k] - pw.pig[k]) * under; PEDGE[k] = pw.edge[k] + (pw.under[k] * 0.7 - pw.edge[k]) * under; }
   buildVeins(b);
   const stamp = ++stampN;
   for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
@@ -1976,6 +2068,8 @@ function drawButterfly(b) {
       const gi = cov >= 0.5 ? HEAVY[(key >>> 8) & 1] : LIGHT_EDGE[(key >>> 8) & 3];
       rec(i);
       if (isField && shimmer(key, 0.07, 0) === 1) { const a = ACCENTS[key % 7]; glyphAt(i, gi, a[0], a[1], a[2], 1); }
+      // On paper an edge is ink: the wing's own hue for the field, graphite for the black borders.
+      else if (LIGHT) { const e = isField ? PEDGE : pw.markInk; glyphAt(i, gi, e[0], e[1], e[2], (0.5 + 0.45 * cov) * (isField ? 1 : 0.8)); }
       else edgeGlyph(i, gi, isField ? FHUE : marks[2], (70 + 80 * cov) * dim * (isField ? 1 : 0.6));
       continue;
     }
@@ -1987,6 +2081,7 @@ function drawButterfly(b) {
     if (b.kind === 'morpho') shade += 0.6 * spec * (1 - under);
     if (region === SEAM) shade -= 0.22;
     shade = clamp(shade, 0, 1);
+    if (LIGHT) { paperWingCell(i, region, shade, hX, key, pw, rich, part, hs, px, py, white); continue; }
     switch (region) {
       case FIELD: case SEAM: {
         let p = clamp(shade * 3.3 - 0.25, 0, 3); if (hX < 0.14) p = Math.min(p, 1.2);
@@ -2049,6 +2144,63 @@ function drawButterfly(b) {
   drawRim(b);
 }
 
+const PIG = [0, 0, 0], PEDGE = [0, 0, 0];
+/** A wing cell on paper (round 6). The field is the species' pigment as a wash, deep at the root and in shade, pale
+ *  where it catches the light, with the family's carved glyphs in the species' dark ink. The black markings are
+ *  graphite washed to a mid tone, three steps, with near-black glyphs carved on them, so they read dark from the
+ *  glyphs, not from a black block; the dots in them are the paper colour. Spots, rings and blue are pale washes of
+ *  their own colour with an ink glyph. */
+function paperWingCell(i, region, shade, hX, key, pw, rich, part, hs, px, py, white) {
+  switch (region) {
+    case FIELD: case SEAM: {
+      let p = clamp(shade * 3.3 - 0.25, 0, 3); if (hX < 0.14) p = Math.min(p, 1.2);
+      const c = paperWash(PIG, (pw.deep + (pw.lit - pw.deep) * p / 3) * rich);
+      blockAt(i, c[0], c[1], c[2], 1);
+      // A vein: a graphite line over the field.
+      const vg = region === FIELD ? veinGlyph(part, hs, px, py) : 0;
+      if (vg) { const m = pw.markInk; glyphAt(i, vg, m[0], m[1], m[2], 0.9); break; }
+      const gi = SKIN[clamp(Math.floor((1 - shade) * 8.99) + ((key >>> 4) % 3) - 1, 0, 8)];
+      const s = shimmer(key, 0.06, 0.10);
+      if (s) { shimmerGlyph(i, gi, s, key, white); break; }
+      if (white && (key >>> 12) % 10 < 3) { GI[i] = 0; break; }
+      // The family's carved ink, a little lighter on the lit side so a pale wing stays pale.
+      const k = pw.ink; glyphAt(i, gi, k[0], k[1], k[2], shade > 0.55 ? 0.78 : 0.92);
+      break;
+    }
+    case MARK: {
+      const ml = clamp(Math.floor(shade * 2.2 + ((key >>> 6) % 100) / 100 - 0.5), 0, 2);
+      const c = paperWash(pw.mark, pw.markA[ml] * rich); blockAt(i, c[0], c[1], c[2], 1);
+      const m = pw.markInk; glyphAt(i, MARK_G[(key >>> 8) % MARK_G.length], m[0], m[1], m[2], 0.95);
+      break;
+    }
+    case DOT: {
+      const c = paperWash(pw.mark, pw.markA[1] * rich), k2 = (key >>> 10) % 100; blockAt(i, c[0], c[1], c[2], 1);
+      glyphAt(i, k2 < 45 ? G['·'] : k2 < 85 ? G['°'] : G['o'], PAPER[0], PAPER[1], PAPER[2], 1);
+      break;
+    }
+    case SPOT: {
+      const c = paperWash(pw.spot, pw.spotA * (1.2 - 0.4 * shade) * rich); blockAt(i, c[0], c[1], c[2], 1);
+      const m = pw.ink; glyphAt(i, (key >>> 10) % 2 ? G['·'] : G['°'], m[0], m[1], m[2], 0.85);
+      break;
+    }
+    case RING: {
+      const c = paperWash(pw.ring, pw.ringA * rich); blockAt(i, c[0], c[1], c[2], 1);
+      const m = pw.markInk; glyphAt(i, G['o'], m[0], m[1], m[2], 0.9);
+      break;
+    }
+    case CENTRE: {
+      const c = paperWash(pw.mark, pw.markA[0] * rich); blockAt(i, c[0], c[1], c[2], 1);
+      glyphAt(i, G['@'], PAPER[0], PAPER[1], PAPER[2], 0.95);
+      break;
+    }
+    case BLUE: {
+      const c = paperWash(pw.blue, pw.blueA * (1.15 - 0.3 * shade) * rich); blockAt(i, c[0], c[1], c[2], 1);
+      const m = pw.markInk; glyphAt(i, (key >>> 10) % 2 ? G['·'] : G[':'], m[0], m[1], m[2], 0.8);
+      break;
+    }
+  }
+}
+
 /** The rim: one cell of dark ink round a high butterfly's silhouette (wings, body, eyes; not the antennae), over
  *  whatever is behind it, so it cuts out from the meadow. A cell keeps its tile: its block sinks toward the ink and
  *  its glyph fades, as a shadow does, so it reads as the mosaic, not a drawn outline. Diagonal neighbours take a
@@ -2101,17 +2253,23 @@ function drawBody(b, ink, dim, stamp) {
     const t = (a - tail) / (head - tail);
     const cx = (i % cols + 0.5) * cw, cy = (Math.floor(i / cols) + 0.5) * ch;
     const g = t > 0.86 ? (eyes ? G['%'] : G['o']) : t > 0.58 ? G['8'] : t < 0.08 ? G['·'] : lineGlyph(fx, fy, lineRow(POSE.cx, POSE.cy, fx, fy, cx, cy));
-    wBlock(i, bl[0] * dim, bl[1] * dim, bl[2] * dim, 1); wingStamp[i] = stamp;
+    // On paper the body is graphite washed to a mid tone, with near-black glyphs: the darkest tiles on the
+    // butterfly, as a spider's body is on paper, but not a black one.
+    if (LIGHT) { const c = paperWash(PAPER_BODY, 0.55); blockAt(i, c[0], c[1], c[2], 1); } else wBlock(i, bl[0] * dim, bl[1] * dim, bl[2] * dim, 1);
+    wingStamp[i] = stamp;
     const key = keyOf(Math.round(a / (cw * 0.9)), 0, b.id * 8 + 7);
     const s = t <= 0.86 ? shimmer(key, 0.06, 0.10) : 0;
-    if (s) shimmerGlyph(i, g, s, key, false); else wGlyph(i, g, bi[0] * dim, bi[1] * dim, bi[2] * dim, 0.95);
+    if (s) shimmerGlyph(i, g, s, key, false);
+    else if (LIGHT) glyphAt(i, g, PAPER_BODY_INK[0], PAPER_BODY_INK[1], PAPER_BODY_INK[2], 0.95);
+    else wGlyph(i, g, bi[0] * dim, bi[1] * dim, bi[2] * dim, 0.95);
     if (t > 0.86) headCell = i;
   }
   if (eyes) for (const sg of [-1, 1]) {
     const a = head - 0.04 * hh, x = POSE.cx + fx * a + rx * sg * 0.85 * cw, y = POSE.cy + fy * a + ry * sg * 0.85 * cw;
     const i = cellOf(x, y); if (i < 0 || i === headCell) continue;
     // The family's eye: a dark block (level 12) with an `o` in the eye ink (paper colour on paper).
-    wBlock(i, 12 * dim, 12 * dim, 14 * dim, 1); wingStamp[i] = stamp;
+    if (LIGHT) { const c = paperWash(PAPER_EYE, 0.7); blockAt(i, c[0], c[1], c[2], 1); } else wBlock(i, 12 * dim, 12 * dim, 14 * dim, 1);
+    wingStamp[i] = stamp;
     if (LIGHT) glyphAt(i, G['o'], PAPER[0], PAPER[1], PAPER[2], 1); else glyphAt(i, G['o'], 154, 160, 173, 1);
   }
   const fe = ink.feeler, fl = Math.max(1, lum(fe[0], fe[1], fe[2]));
@@ -2237,7 +2395,11 @@ function drawGround() {
     let g = t0;
     if (s > 0.45 && hash3(c, r, 13) < 0.25 + 0.6 * s) g = lineGlyph(wind.x, wind.y, tuftM[i]);
     const kk = s * 0.85;
-    lGlyph(i, g, gr[0] + (st[0] - gr[0]) * kk, gr[1] + (st[1] - gr[1]) * kk, gr[2] + (st[2] - gr[2]) * kk,
+    // On paper: a soft sage ink, a little deeper where a gust lays the blades over; kept below the butterflies.
+    if (LIGHT) {
+      const a = PAPER_GRASS, z = PAPER_GRASS_STIRRED;
+      glyphAt(i, g, a[0] + (z[0] - a[0]) * kk, a[1] + (z[1] - a[1]) * kk, a[2] + (z[2] - a[2]) * kk, 0.75 * tuftK[i] * (0.42 + 0.58 * s) * grassAmt);
+    } else lGlyph(i, g, gr[0] + (st[0] - gr[0]) * kk, gr[1] + (st[1] - gr[1]) * kk, gr[2] + (st[2] - gr[2]) * kk,
       tuftK[i] * (0.42 + 0.58 * s) * grassAmt);
   }
   farPush(0);
