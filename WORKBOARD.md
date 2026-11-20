@@ -79,7 +79,7 @@ Director's profile: none
 | Id | Task | Size | Files | Branch | Builder | Reviewer | Rounds | State | Brief |
 |---|---|---|---|---|---|---|---|---|---|
 | t1-2 | Breeze, flowers and butterfly flight (plan T1 + T2), with the director's path fix | Content | Sources/OceanKit/Meadow/{Breeze,Flowers,ButterflySpecies,Butterfly}.swift, Sources/OceanChecks/MeadowChecks.swift, Sources/OceanTool/{Paths,main}.swift | meadow-t1-2 | builder-t1-2 (Claude Opus, T3 child thread; fix round 1) | reviewer-t1-2 (Claude Opus, T3 child thread) | 1 | reviewed, waits for the end of the stack (director: no merge yet): reviewed (review-t1-2 @ 68288c7), CI passed on 1e11a1b (PR #1), merge rehearsed 2026-11-20 (200 passed, app builds) | briefs/t1-2.md |
-| t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered) | Content | Meadow/MeadowPainter.swift (new), OceanTool/{MeadowStill,main}.swift, OceanChecks/MeadowChecks.swift, Render/GlyphAtlas.swift (append only) | meadow-t5 (from meadow-t1-2) | builder-t5 (Claude Opus, T3 child thread) | Codex | 0 | building | briefs/t5.md |
+| t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered) | Content | Meadow/MeadowPainter.swift (new), OceanTool/{MeadowStill,main}.swift, OceanChecks/MeadowChecks.swift, Render/GlyphAtlas.swift (append only) | meadow-t5 (from meadow-t1-2) | builder-t5 (Claude Opus, T3 child thread) | reviewer-t5 (Codex) | 0 | in review (built: meadow-t5 @ bbab77d, done with concerns) | briefs/t5.md |
 | t3 | Meadow world and behaviours (plan T3) | Content | Meadow/{MeadowWorld,Behaviour}.swift (new), OceanChecks/MeadowChecks.swift, Meadow/MeadowPainter.swift (convenience paint only), OceanTool/MeadowStill.swift | meadow-t3 (from meadow-t5) | | Codex | 0 | open (waits on t5 reviewed: its Files overlap t5's) | briefs/t3.md |
 | t4 | Cursor landing, courtship, crossings, monarch life cycle (plan T4) | Content | to brief | meadow-t4 | | | 0 | open (waits on t3) | |
 | t6 | Meadow habitat, settings and tools (plan T6) | Content | to brief | meadow-t6 | | | 0 | open (waits on t4) | |
@@ -105,6 +105,11 @@ Director's profile: none
     exemption judged a model fact, nothing loosened. Two leftovers routed later (Noticed): a tighter morpho sink
     form, and a code comment's citation.
   - Before approval: t1-2 must pass CI (Swift 6.3.3), not only local checks.
+
+- t5 report (bbab77d, 2026-11-20), concerns for the review to judge: `wingsDoNotFlicker` was rewritten before its
+  first commit; wing width is stylised (tips drop) rather than the physical width; the breeze trail can't tell the
+  pointer's air from the weather; the ground-band cache repaints most frames in a breeze. Also: reports/t5.md holds
+  local folder paths, so meadow-t5 can't be pushed until the report drops them (fix round).
 
 ## Noticed
 
