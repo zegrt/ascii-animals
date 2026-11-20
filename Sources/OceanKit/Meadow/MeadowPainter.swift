@@ -101,19 +101,46 @@ struct FlowerHit {
     }
 }
 
-/// One recorded cell write of a flower, replayed every frame until the flower is drawn again.
+/// One recorded cell write of a flower, replayed every frame until the flower is drawn again. 36 bytes: its last
+/// three words are a shimmer's key, last roll and the tick it was rolled on, or a block's colour pushed back.
 struct FlowerOp {
     enum Kind: UInt8 { case block, glyph, shimmerGlyph, clearGlyph, shade }
     var kind: Kind
     var gi: UInt8
     var cell: Int32
     var r: Float, g: Float, b: Float, a: Float
-    var key: UInt32
-    /// The shimmer's last roll and the tick it was rolled on (it re-rolls 2.4 times a second, html:599).
-    var tick: Int32 = Int32.min
-    var roll: Float = 1
-    /// The colour pushed back with the meadow (`far` of r, g, b), for the push its cache's `farKey` names.
-    var fr = 0.0, fg = 0.0, fb = 0.0
+    private var w0: UInt32, w1: UInt32, w2: UInt32
+
+    init(kind: Kind, gi: UInt8, cell: Int32, r: Float, g: Float, b: Float, a: Float, key: UInt32) {
+        self.kind = kind; self.gi = gi; self.cell = cell
+        self.r = r; self.g = g; self.b = b; self.a = a
+        w0 = key; w1 = UInt32(bitPattern: Int32.min); w2 = Float(1).bitPattern
+    }
+
+    /// A shimmer's key, and its last roll and the tick it was rolled on (it re-rolls 2.4 times a second, html:599).
+    var key: UInt32 { w0 }
+    var tick: Int32 {
+        get { Int32(bitPattern: w1) }
+        set { w1 = UInt32(bitPattern: newValue) }
+    }
+    var roll: Float {
+        get { Float(bitPattern: w2) }
+        set { w2 = newValue.bitPattern }
+    }
+    /// A block's colour pushed back with the meadow (`far` of r, g, b, as the block stores it), for the push its
+    /// cache's `farKey` names. In the words a shimmer uses, so the record doesn't grow (a block has no shimmer).
+    var fr: Float {
+        get { Float(bitPattern: w0) }
+        set { w0 = newValue.bitPattern }
+    }
+    var fg: Float {
+        get { Float(bitPattern: w1) }
+        set { w1 = newValue.bitPattern }
+    }
+    var fb: Float {
+        get { Float(bitPattern: w2) }
+        set { w2 = newValue.bitPattern }
+    }
 }
 
 /// A flower's recorded cells on one screen, with what they were drawn at: a slot, reused for another flower once
@@ -123,7 +150,7 @@ final class FlowerCache {
     var hx = Double.nan, hy = Double.nan
     var grow = -1.0, leafGrow = -1.0, fk = -1.0, vd = -1.0, radius = -1.0
     var used = 0
-    /// The push (`FAR`, `FAR_DIM`, `FAR_SAT`, paper) the ops' `fr`, `fg`, `fb` were made for; NaN when none.
+    /// The push (`FAR`, `FAR_DIM`, `FAR_SAT`, paper) the blocks' `fr`, `fg`, `fb` were made for; NaN when none.
     var farKey = SIMD4<Double>(.nan, .nan, .nan, .nan)
     /// Ready for another flower: nothing recorded, drawn next time.
     func reset() {
@@ -204,14 +231,16 @@ struct CellFields {
 }
 
 /// One grass tuft (`buildGround`): its cell, glyph, ink strength `k`, where its line lies in the cell `m`, its
-/// `hash3(c, r, 13)` (whether it lies over in a gust), and its four air samples (`j`, `j1`, `j2`, `j3`) with its
-/// weights between them on the breeze's grid. Kept together, so a tuft is read from one place.
+/// `hash3(c, r, 13)` (whether it lies over in a gust), and where it reads the air on the breeze's grid: its first
+/// sample `air` (`j`), the others a column on (`dx`, 0 at the last column) and a row on (`dy`, 0 at the last row),
+/// and its weights between them (`fx`, `fy`). Kept together in 32 bytes, so a tuft is read from one place.
 struct Tuft {
     var cell: Int32
-    var glyph: UInt8
     var k: Float, m: Float, h: Float
-    var air = SIMD4<Int32>(0, 0, 0, 0)
-    var w = SIMD2<Float>(0, 0)
+    var air: Int32 = 0
+    var fx: Float = 0, fy: Float = 0
+    var glyph: UInt8
+    var dx: UInt8 = 0, dy: UInt8 = 0
 }
 
 /// One screen's cached ground (`buildGround`, html:2523–2543) and its flowers' recordings.
@@ -725,8 +754,8 @@ struct MeadowFrame {
                 let h = mhash(gcx, gry, 11)
                 if h < dens {
                     let gi = MG.tufts[Int(mhash(gcx, gry, 5) * Double(MG.tufts.count))]
-                    v.tufts.append(Tuft(cell: Int32(i), glyph: gi, k: Float((0.45 + 0.55 * mhash(gcx, gry, 7)) * (0.55 + 0.45 * patch)),
-                                        m: Float(mhash(gcx, gry, 17)), h: Float(mhash(gcx, gry, 13))))
+                    v.tufts.append(Tuft(cell: Int32(i), k: Float((0.45 + 0.55 * mhash(gcx, gry, 7)) * (0.55 + 0.45 * patch)),
+                                        m: Float(mhash(gcx, gry, 17)), h: Float(mhash(gcx, gry, 13)), glyph: gi))
                 }
             }
         }
@@ -801,12 +830,11 @@ struct MeadowFrame {
                 let gy: Double = clamp((y - o.y) / spacing, 0, gyMax)
                 let ix = Int(gx), iy = Int(gy)
                 let fx = Float(gx - Double(ix)), fy = Float(gy - Double(iy))
-                let j = iy * bc + ix
-                let j1 = ix + 1 < bc ? j + 1 : j
-                let j2 = iy + 1 < brows ? j + bc : j
-                let j3 = ix + 1 < bc ? j2 + 1 : j2
-                v.tufts[k].air = SIMD4(Int32(j), Int32(j1), Int32(j2), Int32(j3))
-                v.tufts[k].w = SIMD2(fx, fy)
+                v.tufts[k].air = Int32(iy * bc + ix)
+                v.tufts[k].dx = ix + 1 < bc ? 1 : 0
+                v.tufts[k].dy = iy + 1 < brows ? 1 : 0
+                v.tufts[k].fx = fx
+                v.tufts[k].fy = fy
             }
         }
         let C = self.cells
@@ -817,9 +845,8 @@ struct MeadowFrame {
             let i = Int(t.cell)
             var wx = 0.0, wy = 0.0
             if airN > 0 {
-                let js = t.air, w = t.w
-                let fx = w.x, fy = w.y
-                let j = Int(js.x), j1 = Int(js.y), j2 = Int(js.z), j3 = Int(js.w)
+                let fx = t.fx, fy = t.fy
+                let j = Int(t.air), j1 = j + Int(t.dx), j2 = j + Int(t.dy) * bc, j3 = j2 + Int(t.dx)
                 let axv: Float = (airX[j] * (1 - fx) + airX[j1] * fx) * (1 - fy) + (airX[j2] * (1 - fx) + airX[j3] * fx) * fy
                 let ayv: Float = (airY[j] * (1 - fx) + airY[j1] * fx) * (1 - fy) + (airY[j2] * (1 - fx) + airY[j3] * fx) * fy
                 wx = Double(axv); wy = Double(ayv)

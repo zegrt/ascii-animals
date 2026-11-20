@@ -92,16 +92,18 @@ extension MeadowFrame {
             INK_K = fk
             farPush(tuning.depth * (1 - 0.45 * f.lift))
             let accK: Double = 0.03 * sparkleK * sparkleRate, fleckK: Double = 0.05 * sparkleK * sparkleRate
-            // The recorded colours pushed back once for this push, not on every replay (the same `far`).
+            // The blocks' colours pushed back once for this push, not on every replay (the same `far`, kept as the
+            // block stores it, in the record's shimmer words). A glyph's is pushed back as it is replayed: it is
+            // flattened toward the block under it before it is stored, so it needs every bit `far` gives.
             let farKey = SIMD4<Double>(FAR, FAR_DIM, FAR_SAT, LIGHT ? 1 : 0)
             let pushed = FAR != 0
             if pushed && cache.farKey != farKey {
                 cache.farKey = farKey
                 cache.ops.withUnsafeMutableBufferPointer { ops in
-                    for k in 0..<ops.count {
+                    for k in 0..<ops.count where ops[k].kind == .block {
                         var r = Double(ops[k].r), g = Double(ops[k].g), b = Double(ops[k].b)
                         far(&r, &g, &b)
-                        ops[k].fr = r; ops[k].fg = g; ops[k].fb = b
+                        ops[k].fr = Float(r); ops[k].fg = Float(g); ops[k].fb = Float(b)
                     }
                 }
             }
@@ -116,11 +118,15 @@ extension MeadowFrame {
                     case .block:
                         C.touch(i, &tn)
                         if recOn { rec(i) }
-                        if pushed { C.block(i, ops[k].fr, ops[k].fg, ops[k].fb, Double(ops[k].a) * inkK) }
+                        if pushed { C.block(i, Double(ops[k].fr), Double(ops[k].fg), Double(ops[k].fb), Double(ops[k].a) * inkK) }
                         else { C.block(i, Double(ops[k].r), Double(ops[k].g), Double(ops[k].b), Double(ops[k].a) * inkK) }
                     case .glyph:
                         C.touch(i, &tn)
-                        if pushed { C.glyph(i, ops[k].gi, ops[k].fr, ops[k].fg, ops[k].fb, Double(ops[k].a), far: true, flat: flat, faint: faint, inkK: inkK) }
+                        if pushed {
+                            var r = Double(ops[k].r), g = Double(ops[k].g), b = Double(ops[k].b)
+                            far(&r, &g, &b)
+                            C.glyph(i, ops[k].gi, r, g, b, Double(ops[k].a), far: true, flat: flat, faint: faint, inkK: inkK)
+                        }
                         else { C.glyph(i, ops[k].gi, Double(ops[k].r), Double(ops[k].g), Double(ops[k].b), Double(ops[k].a), far: false, flat: flat, faint: faint, inkK: inkK) }
                     case .shimmerGlyph:
                         // `shimmer` (html:597–602), its roll kept until the cell's next tick.
@@ -141,7 +147,11 @@ extension MeadowFrame {
                             tn = touchedN
                         } else {
                             C.touch(i, &tn)
-                            if pushed { C.glyph(i, ops[k].gi, ops[k].fr, ops[k].fg, ops[k].fb, Double(ops[k].a), far: true, flat: flat, faint: faint, inkK: inkK) }
+                            if pushed {
+                                var r = Double(ops[k].r), g = Double(ops[k].g), b = Double(ops[k].b)
+                                far(&r, &g, &b)
+                                C.glyph(i, ops[k].gi, r, g, b, Double(ops[k].a), far: true, flat: flat, faint: faint, inkK: inkK)
+                            }
                             else { C.glyph(i, ops[k].gi, Double(ops[k].r), Double(ops[k].g), Double(ops[k].b), Double(ops[k].a), far: false, flat: flat, faint: faint, inkK: inkK) }
                         }
                     case .clearGlyph: C.touch(i, &tn); C.GI[i] = MG.none
