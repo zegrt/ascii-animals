@@ -366,3 +366,96 @@ Release `OceanTool` built at 965e8c9 (before any change) and at 6471be8, same co
   after it are allocation-free. It runs on a settings change, not per frame.
 
 Pushed and clean: not pushed (the brief says do not push); folder clean after the report commit.
+
+# Fix round 3 (2026-11-21): CI's 11 allocations in `meadowClicksAllocateNothingLater`
+
+Status: done with concerns
+Board commit: 0ec3e80
+Commit: see `git log meadow-mp` (the commit that adds this section)
+Files changed: Sources/OceanKit/Meadow/MeadowWorld.swift (`signedOutside`, a `walls` copy),
+Sources/OceanKit/Meadow/MeadowProbes.swift (one probe), Sources/OceanChecks/MeadowChecks.swift (the allocation
+helper now records where counted allocations came from), Sources/OceanChecks/MeadowFixChecks.swift (prints that
+record when the check fails), Sources/OceanChecks/MeadowFix3Checks.swift (new), Sources/OceanChecks/main.swift
+(registers it), reports/mp.md. All within mp's Files; none of m8's.
+
+## What I found
+
+The cause is not in round 2's Meadow code, and the failure does not reproduce under CI's compiler. The board now says
+the same from the other side: m8's CI on df860b7 (which contains eaad21f) passed this check, so it is intermittent.
+
+1. **Same trajectory as CI.** Every number the suite prints on CI's eaad21f run (188 crossings, 73.2 % in the air,
+   28 recordings, the air-flowers numbers, ...) matches a local run exactly. Only the CPU lines and this check's count
+   differ. The check uses no clocks or threads, and nothing in OceanKit's Meadow, Render or Domain reads the time, so
+   the counted window does the same work on CI as locally.
+2. **Swift 6.3.3 doesn't reproduce it.** I unpacked the swift.org 6.3.3 toolchain into a scratch folder (no
+   install) and built OceanChecks in release against the CLT's macOS 26.5 SDK, whose Foundation interface was made by
+   Swift 6.3.2. (The 27.0 SDK doesn't compile with 6.3.3.) With `OCEAN_SKIP_GPU=1`: **207 passed, 0 failed**, and
+   `12 clicks: 0 allocations in the clicks, 0 in the 1,800 frames after them`. The same at 965e8c9. Run alone or in
+   the full suite, the result is the same.
+3. **Round 2 added no allocator to the per-frame code.** I disassembled both 6.3.3 builds (965e8c9 and eaad21f) and
+   diffed the callees of every Meadow function, plus everything reachable from `MeadowWorld.step`,
+   `MeadowPainter.paint` and `pointerDown`. On the path this check runs, round 2 changed one thing: `stepFly` calls
+   the new `MeadowWorld.signedOutside`, which copied the `Terrain` struct (retains only) and called
+   `Terrain.contains`/`nearestInside`. It has no `swift_allocObject`, `malloc` or array growth.
+   `segmentEntersGap`/`covered` gained a retain, but the desk pair has no gaps, so they don't run here. The seeding,
+   group and `openingMoment` code runs only at load or relayout. `pointerMoved` doesn't run in this check.
+4. **The hook counts every thread.** `allocations()` installs the process-wide `malloc_logger`. By this check a
+   second thread is alive: a GCD worker (`start_wqthread`, parked in `__workq_kernreturn`), first present after
+   `webGlyphsMatchChrome`, which builds the CoreText glyph atlas. Anything a framework does later on that thread
+   (font-service replies, deferred cleanup) is counted when it lands in the ~1 s window. That is likelier on a freshly
+   booted runner. This is my best explanation for an intermittent 11. I can't prove it from CI's log, because the log
+   doesn't say which thread allocated.
+
+## What I changed
+
+- **Meadow, the changed hot path made allocation-proof under any optimizer.** `MeadowWorld.signedOutside` now reads
+  only the world's own copies: `screens`, and a new `walls` (the terrain's edges, copied once in `setScreens`). On the
+  screens it uses the same edge formula. Off the screens it finds the nearest screen by the rule of
+  `Terrain.rectIndex(near:)` (the first screen at the least squared distance) and clamps to it, which is
+  `Terrain.nearestInside`. It makes no terrain copy, no closure and no generic call. Under 6.3.3 its compiled body
+  calls nothing except in the cold no-screens branch (which falls back to `Terrain.signedOutside`).
+  Single-screen Meadow never calls it, and Ocean and Web are untouched.
+- **New check `meadowSignedOutsideMatchesTheTerrain`.** On the desk pair, side-by-side screens, a gap pair and one
+  screen, the world's number equals `Terrain.signedOutside` **bit for bit**. It covers a 174 × 132 grid from 300 pt
+  off the bounds, plus every rect corner, edge midpoint and centre at ±1, ±1e-9 and 0. The 22,968-call sweep also
+  allocates nothing. This check guards the rewrite; it would also pass on eaad21f, since the CI failure isn't
+  reproducible here.
+- **The allocation helper now says where.** The logger records the first 8 counted allocations since the last read
+  into a fixed buffer, without allocating: which thread (main or another), plus `backtrace()` frames. It also counts
+  how many were off the main thread. `meadowClicksAllocateNothingLater` prints this as `where:` when its count is not
+  0. Pass/fail is unchanged. I tested it by forcing allocations into the window (temporary, not committed): it
+  printed `1 off the main thread`, three main-thread sites with the closure's symbol, and one `another thread` site
+  through `__NSThread__block_start__`. The next CI failure will name its source.
+
+## Checks run
+
+- `swift build` (all products): Build complete (only the CLT's usual `ld` search-path warnings).
+- `swift run -c release OceanChecks`: **231 passed, 0 failed** (230 + the new check).
+- `OCEAN_SKIP_GPU=1 swift run -c release OceanChecks`: **208 passed, 0 failed**. `12 clicks: 0 allocations in the
+  clicks, 0 in the 1,800 frames after them`. Every printed simulation number is identical to eaad21f's (diffed;
+  only the CPU timings differ), so no trajectory moved.
+- Swift 6.3.3 (swift.org toolchain, macOS 26.5 SDK), release, `OCEAN_SKIP_GPU=1`: **208 passed, 0 failed**, same
+  `12 clicks` line. The disassembly of `MeadowWorld.signedOutside` shows calls only in the no-screens branch.
+
+## Rulings
+
+1. **I added diagnostics to the check's helper.** It now reports thread and call sites; it does not change what is
+   counted or what passes. Cost if wrong: a reviewer may want the check files untouched, and it is easy to drop.
+2. **I kept `Terrain.signedOutside` as the no-screens fallback** rather than inventing a number for a world with no
+   usable screen (steps don't fly butterflies there). It is cold and matches the old behaviour.
+
+## Concerns (for the manager to route)
+
+- If the cause is another thread, nothing in the Meadow can fix it, and the check can fail again on CI at random.
+  The fix would be in the check: count only allocations on the calling thread. The logger already knows the thread,
+  so it is a one-line test (`pthread_main_np()` or a stored thread id). That edits a check, so I haven't done it; it
+  needs your routing. Until then, the next failure's `where:` lines will show whether the allocations are on
+  "another thread" (confirms this) or on the main thread inside Meadow frames (refutes it, and names the site).
+- I couldn't use Apple's exact 6.3.3 build (swiftlang-6.3.3.1.3 with Xcode 26.1.1's SDK) or the runner's OS runtime.
+  The swift.org 6.3.3 build is the nearest I could get.
+
+## Noticed
+
+- None beyond the above.
+
+Pushed and clean: not pushed (the brief says do not push); folder clean after the commit.

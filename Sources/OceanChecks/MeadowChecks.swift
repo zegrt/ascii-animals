@@ -43,8 +43,62 @@ nonisolated(unsafe) private let mallocCount: UnsafeMutablePointer<Int> = {
     return p
 }()
 @inline(never) private func mallocCounter() -> UnsafeMutablePointer<Int> { mallocCount }
+
+// Where counted allocations came from, kept without allocating (a fixed buffer, filled from the logger): the first
+// `traceSlots` of them since the last `allocationSites()`, each with its thread and up to `traceDepth` return
+// addresses. Read only to explain a failure; it changes no count.
+private let traceSlots = 8, traceDepth = 24
+nonisolated(unsafe) private let traceState: UnsafeMutablePointer<Int> = {
+    // [0] traces kept, [1] logger busy, [2] counted off the main thread, then per slot: main?, depth.
+    let p = UnsafeMutablePointer<Int>.allocate(capacity: 3 + 2 * 8)
+    p.initialize(repeating: 0, count: 3 + 2 * 8)
+    return p
+}()
+nonisolated(unsafe) private let traceFrames: UnsafeMutablePointer<UnsafeMutableRawPointer?> = {
+    let p = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: 8 * 24)
+    p.initialize(repeating: nil, count: 8 * 24)
+    return p
+}()
+@inline(never) private func noteAllocation() {
+    let st = traceState
+    let main = pthread_main_np() != 0
+    if !main { st[2] += 1 }
+    let k = st[0]
+    guard k < traceSlots, st[1] == 0 else { return }
+    st[1] = 1
+    st[3 + 2 * k] = main ? 1 : 0
+    st[4 + 2 * k] = Int(backtrace(traceFrames + k * traceDepth, Int32(traceDepth)))
+    st[0] = k + 1
+    st[1] = 0
+}
 private let countingLogger: MallocLogger = { type, _, _, _, _, _ in
-    if type & 2 != 0 { mallocCounter().pointee += 1 }
+    if type & 2 != 0 { mallocCounter().pointee += 1; noteAllocation() }
+}
+
+/// The allocations counted since the last call: how many off the main thread, and where the first few were made
+/// (thread, then the frames past the allocator, as symbol+offset). Clears what it read.
+func allocationSites() -> String {
+    let st = traceState
+    var out = "\(st[2]) off the main thread"
+    for k in 0..<min(st[0], traceSlots) {
+        out += "\n    allocation \(k + 1) (\(st[3 + 2 * k] == 1 ? "main thread" : "another thread")):"
+        var shown = 0
+        for f in 0..<st[4 + 2 * k] where shown < 10 {
+            guard let pc = traceFrames[k * traceDepth + f] else { continue }
+            var info = Dl_info()
+            var name = "?"
+            if dladdr(pc, &info) != 0, let sym = info.dli_sname {
+                name = String(cString: sym) + "+\(Int(bitPattern: pc) - Int(bitPattern: info.dli_saddr))"
+            }
+            if name.contains("noteAllocation") || name.contains("countingLogger") || name.hasPrefix("malloc")
+                || name.hasPrefix("_malloc") { continue }
+            out += "\n      \(name)"
+            shown += 1
+        }
+    }
+    st[0] = 0
+    st[2] = 0
+    return out
 }
 
 /// Heap allocations `body` makes, or nil where the allocator can't be watched.
