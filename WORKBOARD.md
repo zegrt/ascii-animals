@@ -46,8 +46,8 @@ Director's profile: none
 
 ## Corrections
 - 2026-11-20, during sketch round 4: "leaves param at .9". Applies: task.change (round 4 is building on the same
-  file and its brief is frozen, so this waits until round 4 lands; then the manager sets the Leaves default from
-  1.24 to 0.9 as a Small change and refreshes localhost).
+  file and its brief is frozen, so this waited until round 4 landed; the manager set the Leaves default from
+  1.24 to 0.9 as a Small change, meadow-sketch @ f8811f6).
 - 2026-11-20, after playing with sketch round 3: "umm what happens when i keep clicking at the same point?" and new
   settings, the same as before except glide 0.44 → 0.1 (the new round-3 controls left at their defaults).
   Applies: new (the sketch's round 4: glide 0.1 is the default; what the manager found in the code: every click
@@ -189,7 +189,7 @@ Director's profile: none
 | t5v | A 30 s film of the butterflies flying, for the director to judge the motion | Content (small) | OceanTool/MeadowFrames.swift (new), OceanTool/main.swift | meadow-t5v (from meadow-t5r) | builder-t5v (Claude Opus, T3 child thread) | Codex | 0 | reviewed (review-t5v @ 94d9d2b); its 4 tool fixes moved into t3 (which rewrites meadow-frames) | briefs/t5v.md |
 | p1 | Throwaway prototype film of the Meadow seen from above, with depth | Prototype (never merged, no review) | new OceanTool files, OceanTool/main.swift | proto-top-down (from meadow-t5v) | builder-p1 (Claude Opus, T3 child thread) | none | 0 | built (proto-top-down @ de1f728); director's notes in Corrections | briefs/p1.md |
 | p2a | Look development 1: butterfly motion from above (the measured flight turned on its side) and wingbeat speed | Design (look development; approved; reviewed later in the plan's tasks) | new Meadow/OceanTool files, OceanTool/main.swift, additive Butterfly/ButterflySpecies | look-top-down (from proto-top-down) | builder-p2a (Claude Opus, T3 child thread) | later | 0 | held (the director: "take a step back"); notes only at look-top-down @ adc632f, no code changed | briefs/p2a.md |
-| s1 | The Meadow sketch: a live web original with sliders (published for the director) | Design (look development; approved; no review) | Tools/meadow-sketch/meadow.html (new) | meadow-sketch (from main) | builder-s1 (Claude Opus, T3 child thread) | none | 0 | built (meadow-sketch @ 0e2ecf7); round 2 built (meadow-sketch @ d893c50, done with concerns); round 3 built (meadow-sketch @ caca692, done with concerns); round 4 building (clicks, glide) | briefs/s1.md, briefs/s1r2.md, briefs/s1r3.md, briefs/s1r4.md |
+| s1 | The Meadow sketch: a live web original with sliders (published for the director) | Design (look development; approved; no review) | Tools/meadow-sketch/meadow.html (new) | meadow-sketch (from main) | builder-s1 (Claude Opus, T3 child thread) | none | 0 | built (meadow-sketch @ 0e2ecf7); round 2 built (meadow-sketch @ d893c50, done with concerns); round 3 built (meadow-sketch @ caca692, done with concerns); round 4 built (meadow-sketch @ ee6009b, done with concerns); leaves 0.9 set by the manager (f8811f6); served on localhost | briefs/s1.md, briefs/s1r2.md, briefs/s1r3.md, briefs/s1r4.md |
 | r1 | Research: what makes Ocean and Web look and feel alive, and the Meadow's gaps | Small (read-only research) | docs/plans/2026-11-20-family-details.md | main | research agent | none | 0 | done (saved on main) | none |
 | t5w | A new wingbeat (both wings together), wing shading and detail, and butterflies that turn to face where they fly, learning from the director's reference | Content | Meadow/MeadowPainter.swift, Meadow/Butterfly.swift (drawn heading, open), OceanChecks/MeadowChecks.swift | meadow-t5w (from meadow-t3) | | Codex | 0 | held (the view changed; replaced by look development) | briefs/t5w.md |
 | t3 | Meadow world and behaviours (plan T3), with the director's film verdict | Content | Meadow/{MeadowWorld,Behaviour}.swift (new), OceanChecks/MeadowChecks.swift, Meadow/MeadowPainter.swift (convenience paint, breeze trail), Meadow/Breeze.swift (pointer field), Meadow/{Butterfly,ButterflySpecies}.swift (roaming, spacing, stays), OceanTool/{MeadowStill,MeadowFrames,main}.swift | meadow-t3 (from meadow-t5v) | builder-t3 (Claude Opus, T3 child thread) | Codex | 0 | held (2026-11-20: the view may change to top-down); WIP saved at meadow-t3 @ 11394be (does not build yet; checks written, world not started) | briefs/t3.md |
@@ -289,6 +289,9 @@ Director's profile: none
   (fps usage text lists six values, any divisor of 60 works): align.
 
 ## Noticed
+- 2026-11-20, s1 round 4's builder: "New meadow" removes the flowers the director planted (only density and flower
+  size changes keep them); round 3's finished worktree still has `meadow-sketch` checked out with staged changes
+  that would put the sketch back to an older state (not to be committed; clean up with the stale worktrees).
 
 - From t1-2 (earlier review of plan T1, 2026-11-19), routed above on 2026-11-20:
   1. Long mixed-literal expressions at `Breeze.swift:328,329,382,412,421` and `Flowers.swift:646,653` may time out
