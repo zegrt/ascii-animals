@@ -70,3 +70,11 @@ only in the final message.
 ## Out of scope
 Offering the Meadow in the app, presets and settings UI (m8), the welcome and what's-new (t9), energy measured on
 the desktop (t8). Monarch life cycle and courtship (dropped from 3.1).
+
+## Fix round 1 (from the review, 2026-11-20)
+Read `git show origin/review-mp:reviews/mp.md` and the board's routing (Review routing, mp). Fix findings 1–10 and
+the review's "What is missing", on `meadow-mp`. Stay out of m8's Files (board, m8 row): `Domain/{HabitatKind,Settings}`,
+MeadowSim's settings hooks, and the app's Presets, SettingsView, StatusMenu, OceanStatus, SettingsStore. `Terrain.swift`
+may get a guard if finding 7 needs one, without changing Ocean or Web (prove with the digests and stills).
+Each fix comes with the check that would have caught it (the review's probes). Keep the Meadow within Web's CPU.
+Add a "Fix round 1" section to `reports/mp.md`.
