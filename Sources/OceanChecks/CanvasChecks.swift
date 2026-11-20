@@ -49,6 +49,27 @@ func canvasChecks() {
                    "clear")
         try expect(c.overGlyph.allSatisfy { $0 == CellCanvas.noGlyph } && c.overInk.allSatisfy { $0 == 0 }, "clear overlay")
     }
+    check("canvasGroundPut") {
+        let c = CellCanvas(cols: 4, rows: 3)
+        try expect(c.ground.isEmpty, "a new canvas has no ground (grow-only, so Ocean and Web never pay for it)")
+        c.clear()
+        try expect(c.ground.isEmpty, "clear grew the ground")
+        c.putGround(9, 0, ground: SIMD4<Float>(1, 1, 1, 1))
+        c.putGround(0, -1, ground: SIMD4<Float>(1, 1, 1, 1))
+        try expect(c.ground.allSatisfy { $0 == CellCanvas.noGround }, "out-of-range putGround wrote a cell")
+        c.putGround(1, 2, ground: SIMD4<Float>(0.2, 0.4, 0.6, 0.5))
+        let i = 2 * 4 + 1
+        try expect(c.ground.count == 12, "ground size \(c.ground.count)")
+        try expect(rgba(c.ground[i]) == (51, 102, 153, 128), "ground \(rgba(c.ground[i]))")
+        try expect(c.ground.filter { $0 != CellCanvas.noGround }.count == 1, "putGround wrote other cells")
+        // put leaves the ground alone; bulk writes reach the same array.
+        c.put(1, 2, glyph: "x", ink: SIMD4<Float>(1, 1, 1, 1), block: SIMD3<Float>(1, 0, 0))
+        try expect(rgba(c.ground[i]) == (51, 102, 153, 128), "put changed the ground")
+        c.withGround { g in g[0] = CellCanvas.pack(SIMD4<Float>(0, 1, 0, 1)) }
+        try expect(rgba(c.ground[0]) == (0, 255, 0, 255), "withGround")
+        c.clear()
+        try expect(c.ground.count == 12 && c.ground.allSatisfy { $0 == CellCanvas.noGround }, "clear left a ground")
+    }
     check("dissolveTiming") {
         let a = Dissolve.reveal(elapsed: 0)
         try expect(a.reveal == 1 && !a.swapNow && !a.done, "start \(a)")
@@ -213,6 +234,83 @@ func canvasRenderChecks() {
         for y in 0..<h { for x in 0..<w where !near(px(hidden, x, y), bg) {
             throw CheckFailure(detail: "reveal 0: pixel (\(x),\(y)) is \(px(hidden, x, y)), not background")
         } }
+    }
+    check("canvasGroundDraws") {
+        // A ground under a block (0,0), under a glyph (1,0), alone and half mixed (2,1); the rest plain background.
+        final class Ground: CellPainter {
+            static let under = SIMD3<Float>(20, 90, 40) / 255
+            static let half = SIMD3<Float>(120, 200, 60) / 255
+            var withGround = true
+            var kind: HabitatKind { .web }
+            var time: Double { 0 }
+            var stepCount: Int { 0 }
+            func layout(terrain: Terrain, cell: CGSize, settings: Settings) {}
+            func step(_ dt: Double) {}
+            func pointerMoved(_ x: Double, _ y: Double) {}
+            func pointerLeft() {}
+            func pointerDown(_ x: Double, _ y: Double) {}
+            func update(settings: Settings) {}
+            func settle() {}
+            func paint(viewport: CGRect, grid: GridSpec, theme: ThemeParams, into canvas: CellCanvas) {
+                canvas.background = TestPainter.background
+                canvas.gridColor = TestPainter.grid
+                canvas.put(0, 0, glyph: " ", ink: .zero, block: TestPainter.block)
+                canvas.put(1, 0, glyph: "x", ink: SIMD4<Float>(TestPainter.ink, 1))
+                guard withGround else { return }
+                canvas.putGround(0, 0, ground: SIMD4<Float>(Ground.under, 1))
+                canvas.putGround(1, 0, ground: SIMD4<Float>(Ground.under, 1))
+                canvas.putGround(2, 1, ground: SIMD4<Float>(Ground.half, 0.5))
+            }
+        }
+        let r = try OceanRenderer(device: device)
+        let vp = try r.makeViewport(pointSize: size, scale: scale, cell: cell)
+        let painter = Ground()
+        let p = try frame(r, vp, painter)
+        let cw = Int(cell.width * scale), ch = Int(cell.height * scale)
+        let bg: SIMD3<Float> = TestPainter.background
+        let gridRGB = SIMD3<Float>(TestPainter.grid.x, TestPainter.grid.y, TestPainter.grid.z)
+        let gridA: Float = TestPainter.grid.w
+        func over(_ base: SIMD3<Float>, _ top: SIMD3<Float>, _ a: Float) -> SIMD3<Float> { base + (top - base) * a }
+        // The half ground as packed: a = 128/255.
+        let halfA: Float = 128 / 255
+        let halfGround: SIMD3<Float> = over(bg, Ground.half, halfA)
+        func centre(_ c: Int, _ row: Int) -> SIMD3<Float> { px(p, c * cw + cw / 2, row * ch + ch / 2) }
+
+        // Under the block: the block itself, the ground in its inset strip, the grid line over the ground.
+        try expect(near(centre(0, 0), TestPainter.block), "block centre \(centre(0, 0))")
+        try expect(near(px(p, 1, ch / 2), Ground.under), "inset strip \(px(p, 1, ch / 2)) vs \(Ground.under * 255)")
+        try expect(near(px(p, cw / 2, 1), Ground.under), "inset top strip \(px(p, cw / 2, 1))")
+        let gridOverUnder: SIMD3<Float> = over(Ground.under, gridRGB, gridA)
+        try expect(near(px(p, 0, ch / 2), gridOverUnder), "grid over ground \(px(p, 0, ch / 2)) vs \(gridOverUnder * 255)")
+        // Under the glyph: ink pixels, and the ground (never the background) around them.
+        var inked = 0, grounded = 0
+        for y in 1..<ch { for x in (cw + 1)..<(2 * cw) {
+            let v = px(p, x, y)
+            if near(v, TestPainter.ink, 2) { inked += 1 }
+            if near(v, Ground.under) { grounded += 1 }
+            if near(v, bg) { throw CheckFailure(detail: "glyph cell shows the background at (\(x),\(y))") }
+        } }
+        try expect(inked > 4 && grounded > cw * ch / 2, "glyph cell: \(inked) ink, \(grounded) ground pixels")
+        // Alone, half mixed: the whole empty cell, the grid line drawn over it.
+        try expect(near(centre(2, 1), halfGround, 1.6), "half ground \(centre(2, 1)) vs \(halfGround * 255)")
+        try expect(near(px(p, 2 * cw + 1, ch + 1), halfGround, 1.6), "half ground corner \(px(p, 2 * cw + 1, ch + 1))")
+        let gridOverHalf: SIMD3<Float> = over(halfGround, gridRGB, gridA)
+        try expect(near(px(p, 2 * cw, ch + ch / 2), gridOverHalf, 1.6), "grid over half ground \(px(p, 2 * cw, ch + ch / 2))")
+        // Everywhere else: the plain background.
+        for (c, row) in [(2, 0), (3, 0), (0, 1), (1, 1), (3, 1), (0, 2), (1, 2), (2, 2), (3, 2)] {
+            try expect(near(centre(c, row), bg), "cell (\(c),\(row)) without ground \(centre(c, row))")
+        }
+        // The dissolve hides the ground with the rest of the cell: bare background.
+        let hidden = try frame(r, vp, painter, reveal: 0)
+        for y in 0..<h { for x in 0..<w where !near(px(hidden, x, y), bg) {
+            throw CheckFailure(detail: "reveal 0: pixel (\(x),\(y)) is \(px(hidden, x, y)), not background")
+        } }
+        // Cleared each frame: once the painter stops writing a ground, none shows.
+        painter.withGround = false
+        let gone = try frame(r, vp, painter)
+        let goneHalf = px(gone, 2 * cw + cw / 2, ch + ch / 2)
+        try expect(near(px(gone, 1, ch / 2), bg) && near(px(gone, cw + 2, ch - 2), bg) && near(goneHalf, bg),
+                   "ground left over: \(px(gone, 1, ch / 2)) \(goneHalf)")
     }
     check("canvasOverlayGlyph") {
         // A "-" overlay over a "|" base (as dew over silk): both show, the overlay on top where they cross; an

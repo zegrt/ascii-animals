@@ -641,12 +641,14 @@ fragment float4 compose_main(VOut in [[stage_in]],
 
 // ---------------------------------------------------------------- canvas
 // A CellCanvas habitat. Colours arrive final (no light-theme inversion).
+// Inputs (OceanRenderer.swift, CanvasUniforms): textures one texel per cell;
+// 6 is the ground, read only when misc.y is 1 (a == 0: plain background).
 
 struct CanvasUniforms {
     float4 grid;       // cols, rows, cell w, cell h (points)
     float4 background; // rgb, scale
     float4 gridColor;  // rgb, a (0: no grid)
-    float4 misc;       // reveal, 0, 0, 0
+    float4 misc;       // reveal, ground (1: read texture 6), 0, 0
 };
 
 fragment float4 canvas_main(VOut in [[stage_in]],
@@ -656,7 +658,8 @@ fragment float4 canvas_main(VOut in [[stage_in]],
                             texture2d<uint, access::read> glyphs [[texture(2)]],
                             texture2d<float, access::read> atlas [[texture(3)]],
                             texture2d<float, access::read> overInk [[texture(4)]],
-                            texture2d<uint, access::read> overGlyphs [[texture(5)]]) {
+                            texture2d<uint, access::read> overGlyphs [[texture(5)]],
+                            texture2d<float, access::read> ground [[texture(6)]]) {
     float2 grid = u.grid.xy;
     float2 cwh = u.grid.zw;
     float res = u.background.w;
@@ -671,6 +674,12 @@ fragment float4 canvas_main(VOut in [[stage_in]],
     float3 col = u.background.rgb;
     // Hidden by the dissolve: plain background, no grid (as compose_main).
     if (revealHash(cu) >= u.misc.x) { return float4(col, 1.0); }
+
+    // The cell's ground, in place of the background wherever it shows.
+    if (u.misc.y > 0.0) {
+        float4 gr = ground.read(cu);
+        if (gr.a > 0.0) { col = mix(col, gr.rgb, gr.a); }
+    }
 
     // Grid: one device pixel at the cell's top and left, as compose_main.
     if (u.gridColor.a > 0.0 && (floor(px.x) == round(cellF.x * slot.x) || floor(px.y) == round(cellF.y * slot.y))) {
