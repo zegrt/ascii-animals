@@ -4,8 +4,8 @@ import Foundation
 public enum HabitatKind: String, Codable, CaseIterable, Sendable {
     case ocean, web, meadow
 
-    /// The habitats the app offers (menu, Settings, welcome). The Meadow is not offered yet: OceanTool runs it.
-    public static let offered: [HabitatKind] = [.ocean, .web]
+    /// The habitats the app offers (menu, Settings, welcome), in that order.
+    public static let offered: [HabitatKind] = [.ocean, .web, .meadow]
 
     /// The name people see: "Ocean", "Web", "Meadow".
     public var title: String {

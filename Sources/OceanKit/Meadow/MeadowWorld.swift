@@ -353,8 +353,14 @@ public final class MeadowWorld {
         }
     }
 
-    /// The count on the meadow (`wantedCount`, html:1382; the director's settings have area scaling off).
-    var wantedCount: Int { tuning.count }
+    /// The count on the meadow (`wantedCount`, html:1382; the director's settings have area scaling off). With
+    /// `areaCount` on, each screen counts by its own area (`MeadowTuning.areaCount`) and the scene holds their sum.
+    var wantedCount: Int {
+        guard tuning.areaCount, !screens.isEmpty else { return tuning.count }
+        var n = 0
+        for s in screens { n += MeadowTuning.areaCount(tuning.count, width: s.w, height: s.h) }
+        return n
+    }
 
     /// `syncFlies(initial)` (html:1386–1446): keeps the number to the setting and the species mix even. At load they
     /// start on screen; later, newcomers fly in from a real edge and spare ones leave through the nearest.
@@ -482,7 +488,7 @@ public final class MeadowWorld {
                 pickWaypoint(b)
             }
         }
-        if flies.isEmpty { syncFlies(initial: true) }
+        if flies.isEmpty { syncFlies(initial: true) } else if tuning.areaCount { syncFlies() }   // html:3082
     }
 
     // ── the pointer (html:2683–2710), on the input stream ──

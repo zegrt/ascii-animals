@@ -179,8 +179,11 @@ if CommandLine.arguments.contains("--uninstall") {
     exit(0)
 }
 
-// Debug: render the welcome or About screen to a PNG and exit.
-for (flag, render) in [("--snapshot-onboarding", OnboardingController.snapshot(to:)), ("--snapshot-about", AboutWindow.snapshot(to:))] {
+// Debug: render the welcome or About screen to a PNG, or write the menu's outline, and exit.
+let snapshots: [(String, (URL) -> Void)] = [("--snapshot-onboarding", OnboardingController.snapshot(to:)),
+                                            ("--snapshot-about", AboutWindow.snapshot(to:)),
+                                            ("--snapshot-menu", StatusMenu.snapshot(to:))]
+for (flag, render) in snapshots {
     if let i = CommandLine.arguments.firstIndex(of: flag), i + 1 < CommandLine.arguments.count {
         app.setActivationPolicy(.prohibited)
         render(URL(fileURLWithPath: CommandLine.arguments[i + 1]))

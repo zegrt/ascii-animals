@@ -2,8 +2,8 @@ import CoreGraphics
 import Foundation
 
 /// The Meadow habitat: the sketch's meadow (`MeadowWorld`) and its painter (`MeadowPainter`) behind the
-/// `HabitatSim` protocol, as Web's `WebSim`. Not offered in the app yet (`HabitatKind.offered`); OceanTool's still,
-/// frames and bench run it.
+/// `HabitatSim` protocol, as Web's `WebSim`. The app's settings choose the species, the count on a laptop screen
+/// (scaled by area on bigger ones) and whether one lands on a still pointer; everything else is the director's tuning.
 public final class MeadowSim: CellPainter {
     public private(set) var world: MeadowWorld
     private let painter = MeadowPainter()
@@ -16,9 +16,22 @@ public final class MeadowSim: CellPainter {
 
     public init(settings: Settings, seed: UInt64, tuning: MeadowTuning = .director) {
         self.seed = Int32(truncatingIfNeeded: seed)
-        self.tuning = tuning
-        world = MeadowWorld(terrain: Terrain(rects: []), cell: CGSize(width: 13, height: 19), tuning: tuning, seed: self.seed)
+        let t = MeadowSim.tuning(tuning, settings)
+        self.tuning = t
+        world = MeadowWorld(terrain: Terrain(rects: []), cell: CGSize(width: 13, height: 19), tuning: t, seed: self.seed)
         world.speed = settings.speed
+    }
+
+    /// `base` with the app's settings in it: the species on, the laptop count scaled by area, and landing on a still
+    /// pointer only while the pointer plays (the app's "Play with the pointer").
+    public static func tuning(_ base: MeadowTuning, _ s: Settings) -> MeadowTuning {
+        var t = base
+        let c = s.sanitized()
+        t.species = ButterflyKind.allCases.map { c.meadowButterflies.contains($0) }
+        t.count = c.meadowCount
+        t.areaCount = true
+        t.cursorLand = s.interaction
+        return t
     }
 
     public var kind: HabitatKind { .meadow }
@@ -47,8 +60,16 @@ public final class MeadowSim: CellPainter {
     public func pointerLeft() { world.pointerLeft() }
     public func pointerDown(_ x: Double, _ y: Double) { world.pointerDown(x: x, y: y) }
 
-    /// The app's speed; the butterflies are rebuilt by the host when the habitat changes.
-    public func update(settings: Settings) { world.speed = settings.speed }
+    /// The app's settings, in place: the speed, and a new line-up the sketch's way (spares leave through the nearest
+    /// edge, newcomers fly in; nobody pops). The host rebuilds the sim only when the habitat changes.
+    public func update(settings: Settings) {
+        world.speed = settings.speed
+        let t = MeadowSim.tuning(tuning, settings)
+        guard t != tuning else { return }
+        tuning = t
+        world.tuning = t
+        if laidOut { world.syncFlies() }
+    }
 
     /// A still: the sketch's first frame, the opening moment as laid out (one butterfly nectaring, one basking, one
     /// coming in to land). Nothing to do once it has lived.

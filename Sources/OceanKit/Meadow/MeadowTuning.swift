@@ -35,6 +35,9 @@ public struct MeadowTuning: Equatable, Sendable {
     // Butterflies (html:201–210).
     /// `count`, 1…12: butterflies on the meadow at once (per scene; `areaCount` is off at the director's settings).
     public var count = 7
+    /// `areaCount` (html:204): scale the count by screen area (`wantedCount`, html:1382). Off at the director's
+    /// settings; the app turns it on (m8), so `count` is the number on a laptop screen.
+    public var areaCount = false
     /// `sizeLow`, 0.2…1.5, and `sizeHigh`, 0.4…2.5: drawn size at ground level and at the top of the flight
     /// (`depthScale`, html:2016). Size up is never below size down.
     public var sizeLow = 0.75
@@ -96,6 +99,20 @@ public struct MeadowTuning: Equatable, Sendable {
 
     /// The director's settings: the sketch's defaults.
     public static let director = MeadowTuning()
+
+    /// The screen the count is for (the sketch's 1440 × 900, html:1382).
+    public static let areaCountReference = 1440.0 * 900.0
+
+    /// `wantedCount` with `areaCount` on, for one screen of `width × height` points: the count in proportion to the
+    /// screen's area, rounded, at most 24 (html:1382). The port's difference: a screen smaller than the reference keeps
+    /// the count, so the small previews (Settings, About) show the line-up itself.
+    public static func areaCount(_ count: Int, width: Double, height: Double) -> Int {
+        let area: Double = width * height
+        guard area.isFinite, area > 0 else { return count }
+        let scale: Double = max(1, area / areaCountReference)
+        let n: Double = (Double(count) * scale).rounded()
+        return min(24, max(1, Int(n)))
+    }
 
     /// Every value finite and inside its slider's range (the sketch's `normalize`, html:345–351, less the rounding
     /// to the slider's step, which only matters to the sketch's panel).

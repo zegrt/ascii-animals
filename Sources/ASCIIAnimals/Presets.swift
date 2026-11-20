@@ -1,6 +1,6 @@
 import OceanKit
 
-/// Ready-made shark and spider line-ups, and the names people see for each species.
+/// Ready-made shark, spider and butterfly line-ups, and the names people see for each species.
 enum Presets {
     struct Preset {
         let title: String
@@ -75,4 +75,32 @@ enum Presets {
             return n == 1 ? "1 \(title(k))" : "\(n) \(title(k))s"
         }.joined(separator: separator)
     }
+
+    // MARK: Butterflies
+
+    /// The Meadow's line-ups live with the settings (`MeadowLineUp.all`), where the checks can see them.
+    static var meadowPresets: [MeadowLineUp] { MeadowLineUp.all }
+
+    static func title(_ k: ButterflyKind) -> String {
+        switch k {
+        case .monarch: return "Monarch"
+        case .morpho: return "Blue Morpho"
+        case .swallowtail: return "Swallowtail"
+        case .white: return "Cabbage White"
+        }
+    }
+
+    /// "Monarchs", "Blue Morphos": the switches' names.
+    static func plural(_ k: ButterflyKind) -> String { title(k) + "s" }
+
+    /// "2 Monarchs, 2 Blue Morphos, 2 Swallowtails, 1 Cabbage White": a laptop screen's share of each species on.
+    static func summary(butterflies: [ButterflyKind], count: Int, separator: String = ", ") -> String {
+        MeadowLineUp.shares(butterflies, count: count).map { share in
+            share.count == 1 ? "1 \(title(share.kind))" : "\(share.count) \(plural(share.kind))"
+        }.joined(separator: separator)
+    }
+
+    static func summary(_ lineUp: MeadowLineUp) -> String { summary(butterflies: lineUp.butterflies, count: lineUp.count) }
+
+    static func meadowSummary(_ s: OceanKit.Settings) -> String { summary(butterflies: s.meadowButterflies, count: s.meadowCount) }
 }

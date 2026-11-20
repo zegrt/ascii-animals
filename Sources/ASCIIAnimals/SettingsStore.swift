@@ -22,11 +22,20 @@ final class SettingsStore {
         persists = false
     }
 
-    /// The snapshots' settings: the saved ones, with `ASCII_ANIMALS_SNAPSHOT_HABITAT=ocean|web` picking the habitat.
+    /// The snapshots' settings: the saved ones, with `ASCII_ANIMALS_SNAPSHOT_HABITAT=ocean|web|meadow` picking the
+    /// habitat, `ASCII_ANIMALS_SNAPSHOT_LIGHT=1` the light appearance, and
+    /// `ASCII_ANIMALS_SNAPSHOT_BUTTERFLIES=monarch,white:7` the Meadow's species and count (a Custom line-up).
     static func snapshot() -> SettingsStore {
         var s = SettingsStore().settings
-        if let h = ProcessInfo.processInfo.environment["ASCII_ANIMALS_SNAPSHOT_HABITAT"].flatMap(HabitatKind.init(rawValue:)) {
+        let env = ProcessInfo.processInfo.environment
+        if let h = env["ASCII_ANIMALS_SNAPSHOT_HABITAT"].flatMap(HabitatKind.init(rawValue:)) {
             s.habitat = h
+        }
+        if env["ASCII_ANIMALS_SNAPSHOT_LIGHT"] != nil { s.appearance = .light }
+        if let b = env["ASCII_ANIMALS_SNAPSHOT_BUTTERFLIES"] {
+            let parts = b.split(separator: ":")
+            s.meadowButterflies = parts.first.map { $0.split(separator: ",").compactMap { ButterflyKind(key: String($0)) } } ?? []
+            if parts.count > 1, let n = Int(parts[1]) { s.meadowCount = n }
         }
         return SettingsStore(transient: s)
     }

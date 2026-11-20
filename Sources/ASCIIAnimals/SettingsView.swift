@@ -97,7 +97,7 @@ struct SettingsView: View {
                 case .web:
                     WebSection(model: model)
                 case .meadow:
-                    EmptyView()   // Not offered yet (HabitatKind.offered).
+                    MeadowSection(model: model)
                 }
                 LookSection(model: model)
                 BehaviourSection(model: model)
@@ -138,9 +138,7 @@ private struct PreviewHeader: View {
                         .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
                 )
                 .animation(.easeInOut(duration: 0.25), value: preview.image.map(ObjectIdentifier.init))
-                .accessibilityLabel(model.s.habitat == .web
-                    ? "Preview of the web with your spiders and look"
-                    : "Preview of the ocean with your sharks and look")
+                .accessibilityLabel(accessibilityLabel)
 
                 if preview.isRendering {
                     ProgressView()
@@ -172,6 +170,14 @@ private struct PreviewHeader: View {
             }
             .font(.callout)
             .lineLimit(1)
+        }
+    }
+
+    private var accessibilityLabel: String {
+        switch model.s.habitat {
+        case .ocean: return "Preview of the ocean with your sharks and look"
+        case .web: return "Preview of the web with your spiders and look"
+        case .meadow: return "Preview of the meadow with your butterflies and look"
         }
     }
 
@@ -424,6 +430,148 @@ private struct WebSection: View {
     }
 }
 
+// MARK: - Meadow
+
+/// The line-up picker, the four species, how many on a laptop screen, and Speed (design d1).
+private struct MeadowSection: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        let s = model.s
+        let presets = Presets.meadowPresets
+        let matched = MeadowLineUp.matching(s)
+        Section {
+            Picker(selection: Binding(
+                get: { matched.flatMap { m in presets.firstIndex(of: m) } ?? -1 },
+                set: { i in
+                    guard presets.indices.contains(i) else { return }
+                    model.update { presets[i].apply(to: &$0) }
+                }
+            )) {
+                ForEach(Array(presets.enumerated()), id: \.offset) { i, p in Text(p.title).tag(i) }
+                if matched == nil { Text("Custom").tag(-1) }
+            } label: {
+                Text("Butterflies")
+                Text(Presets.meadowSummary(s))
+            }
+            ForEach(ButterflyKind.allCases, id: \.self) { k in
+                ButterflyRow(model: model, kind: k)
+            }
+            LabeledContent {
+                CountStepper(value: s.meadowCount, range: OceanKit.Settings.meadowCountRange) { n in
+                    model.update { $0.meadowCount = n }
+                }
+            } label: {
+                Text("How many")
+                Text("On a laptop screen. A bigger display gets more in proportion.")
+            }
+            SpeedRow(model: model)
+        } header: {
+            Text("Meadow")
+        } footer: {
+            Text("Pick a line-up, or turn species on and off for your own. At least one stays on.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// One species: its swatch, its name and its switch. The last one on can't be turned off.
+private struct ButterflyRow: View {
+    @ObservedObject var model: SettingsModel
+    let kind: ButterflyKind
+
+    var body: some View {
+        let on = model.s.meadowButterflies.contains(kind)
+        let last = on && model.s.meadowButterflies.count == 1
+        Toggle(isOn: Binding(
+            get: { on },
+            set: { v in
+                model.update { s in
+                    if v {
+                        if !s.meadowButterflies.contains(kind) { s.meadowButterflies.append(kind) }
+                    } else if s.meadowButterflies.count > 1 {
+                        s.meadowButterflies.removeAll { $0 == kind }
+                    }
+                }
+            }
+        )) {
+            HStack(spacing: 10) {
+                ButterflySwatch(kind: kind, on: on)
+                Text(Presets.plural(kind))
+            }
+        }
+        .disabled(last)
+        .help(last ? "At least one stays on" : "")
+    }
+}
+
+/// A small tile in the species' wing colour with one of its glyphs, as the meadow draws it.
+private struct ButterflySwatch: View {
+    let kind: ButterflyKind
+    let on: Bool
+
+    var body: some View {
+        let c = kind.species.inks.ramp[2]
+        let fill = Color(red: c.x / 255, green: c.y / 255, blue: c.z / 255)
+        Text(Self.glyph(kind))
+            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+            .foregroundStyle(Color.black.opacity(0.7))
+            .frame(width: 22, height: 22)
+            .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(fill))
+            .opacity(on ? 1 : 0.4)
+            .accessibilityHidden(true)
+    }
+
+    static func glyph(_ k: ButterflyKind) -> String {
+        switch k {
+        case .monarch: return "%"
+        case .morpho: return "S"
+        case .swallowtail: return "t"
+        case .white: return "8"
+        }
+    }
+}
+
+/// "− 7 +": a whole number in a small box, one step at a time.
+private struct CountStepper: View {
+    let value: Int
+    let range: ClosedRange<Int>
+    let set: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            step("minus", "Fewer", value - 1, enabled: value > range.lowerBound)
+            Divider().frame(height: 16)
+            Text("\(value)")
+                .monospacedDigit()
+                .frame(width: 30)
+                .accessibilityLabel("\(value) butterflies on a laptop screen")
+            Divider().frame(height: 16)
+            step("plus", "More", value + 1, enabled: value < range.upperBound)
+        }
+        .frame(height: 22)
+        .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color.primary.opacity(0.05)))
+        .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Color.primary.opacity(0.15), lineWidth: 1))
+    }
+
+    private func step(_ symbol: String, _ help: String, _ to: Int, enabled: Bool) -> some View {
+        Button { set(to) } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .semibold))
+                .frame(width: 24, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.secondary)
+        .disabled(!enabled)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
 /// Matching end labels, so the two sliders line up.
 private struct SliderEnd: View {
     let text: String
@@ -483,13 +631,19 @@ private struct BehaviourSection: View {
     static let segmentedWidth = LookSection.segmentedWidth
     @ObservedObject var model: SettingsModel
 
+    static func pointerLine(_ h: HabitatKind) -> String {
+        switch h {
+        case .ocean: return "Fish flee the pointer and leave a wake. Clicking bare desktop makes a splash."
+        case .web: return "Moving through a web plucks the silk. Clicking bare desktop drops a fly."
+        case .meadow: return "Butterflies veer from the pointer, and one may land on it when it's still. Clicking bare desktop blooms a flower."
+        }
+    }
+
     var body: some View {
         Section {
             Toggle(isOn: model.binding(\.interaction)) {
                 Text("Play with the pointer")
-                Text(model.s.habitat == .web
-                     ? "Moving through a web plucks the silk. Clicking bare desktop drops a fly."
-                     : "Fish flee the pointer and leave a wake. Clicking bare desktop makes a splash.")
+                Text(Self.pointerLine(model.s.habitat))
             }
             LabeledContent("Frame rate") {
                 Picker("Frame rate", selection: model.binding(\.fps)) {

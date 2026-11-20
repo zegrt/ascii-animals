@@ -94,6 +94,95 @@ func settingsChecks() {
         let failed = DiagnosticFacts.mode(habitat: .web, run: nil, screens: 0, scenes: 0, failure: "no Metal device")
         try expect(failed.contains("Web") && failed.contains("no Metal device"), "failed start: \(failed)")
     }
+    check("meadowSettingsDefaults") {
+        let d = Settings.defaults
+        try expect(d.meadowButterflies == ButterflyKind.allCases && d.meadowCount == 7 && !d.meadowTried, "defaults \(d)")
+        try expect(MeadowLineUp.matching(d)?.title == "Mixed", "default is not Mixed")
+        try expect(HabitatKind.offered == [.ocean, .web, .meadow], "offered \(HabitatKind.offered)")
+    }
+    check("meadowSettingsOldFilesKeepEverythingElse") {
+        // A settings file from before 3.1 has no Meadow fields: the Meadow takes its defaults, nothing else moves.
+        let old = #"{"sharks":["mako","tiger"],"habitat":"web","webSpiders":["nephila"],"speed":1.2,"fps":60,"calm":true}"#
+        let s = SettingsCodec.decode(Data(old.utf8))
+        try expect(s.sharks == [.mako, .tiger] && s.habitat == .web && s.webSpiders == [.nephila], "family moved: \(s)")
+        try expect(s.speed == 1.2 && s.fps == 60 && s.calm, "family moved: \(s)")
+        try expect(s.meadowButterflies == ButterflyKind.allCases && s.meadowCount == 7 && !s.meadowTried, "meadow \(s)")
+    }
+    check("meadowSettingsDecodeTolerantly") {
+        let a = SettingsCodec.decode(Data(#"{"meadowButterflies":["white","dragonfly","monarch","white"],"meadowCount":9}"#.utf8))
+        try expect(a.meadowButterflies == [.monarch, .white] && a.meadowCount == 9, "unknown dropped, order kept: \(a.meadowButterflies)")
+        let b = SettingsCodec.decode(Data(#"{"meadowButterflies":["moth"],"meadowCount":"many","meadowTried":"yes"}"#.utf8))
+        try expect(b.meadowButterflies == ButterflyKind.allCases, "none left keeps the default: \(b.meadowButterflies)")
+        try expect(b.meadowCount == 7 && !b.meadowTried, "bad types keep defaults: \(b.meadowCount) \(b.meadowTried)")
+        let c = SettingsCodec.decode(Data(#"{"meadowButterflies":"monarch","meadowCount":40}"#.utf8))
+        try expect(c.meadowButterflies == ButterflyKind.allCases && c.meadowCount == 12, "\(c.meadowButterflies) \(c.meadowCount)")
+        try expect(SettingsCodec.decode(Data(#"{"meadowCount":-3}"#.utf8)).meadowCount == 1, "low count")
+    }
+    check("meadowSettingsAtLeastOneStaysOn") {
+        var s = Settings.defaults
+        s.meadowButterflies = []
+        try expect(s.sanitized().meadowButterflies == ButterflyKind.allCases, "none on")
+        s.meadowButterflies = [.white, .morpho, .white]
+        try expect(s.sanitized().meadowButterflies == [.morpho, .white], "order and repeats: \(s.sanitized().meadowButterflies)")
+    }
+    check("meadowSettingsRoundTrip") {
+        var s = Settings.defaults
+        s.habitat = .meadow; s.meadowButterflies = [.swallowtail]; s.meadowCount = 11
+        let t = SettingsCodec.decode(SettingsCodec.encode(s))
+        try expect(t.habitat == .meadow && t.meadowButterflies == [.swallowtail] && t.meadowCount == 11, "got \(t)")
+        try expect(t.meadowTried, "picking the Meadow is not remembered")
+        let json = String(decoding: SettingsCodec.encode(t), as: UTF8.self)
+        try expect(json.contains(#""meadowButterflies":["swallowtail"]"#), "saved by name: \(json)")
+        var u = t
+        u.habitat = .ocean
+        try expect(SettingsCodec.decode(SettingsCodec.encode(u)).meadowTried, "the New tag came back")
+    }
+    check("meadowLineUpsRoundTrip") {
+        let titles = MeadowLineUp.all.map(\.title)
+        try expect(titles == ["Mixed", "Just a Few", "Blue Morphos"], "line-ups \(titles)")
+        for p in MeadowLineUp.all {
+            var s = Settings.defaults
+            s.habitat = .meadow
+            p.apply(to: &s)
+            let t = SettingsCodec.decode(SettingsCodec.encode(s))
+            try expect(t.meadowButterflies == p.butterflies && t.meadowCount == p.count, "\(p.title) changed: \(t)")
+            try expect(MeadowLineUp.matching(t) == p, "\(p.title) does not match itself")
+        }
+        var custom = Settings.defaults
+        custom.meadowButterflies = [.monarch, .white]
+        try expect(MeadowLineUp.matching(custom.sanitized()) == nil, "Custom: species")
+        custom = Settings.defaults
+        custom.meadowCount = 8
+        try expect(MeadowLineUp.matching(custom.sanitized()) == nil, "Custom: count")
+    }
+    check("meadowSharesAsTheSketch") {
+        func line(_ on: [ButterflyKind], _ n: Int) -> String { MeadowLineUp.shares(on, count: n).map { "\($0.count)\($0.kind.key)" }.joined(separator: " ") }
+        try expect(line(ButterflyKind.allCases, 7) == "2monarch 2morpho 2swallowtail 1white", line(ButterflyKind.allCases, 7))
+        try expect(line([.monarch, .white], 7) == "4monarch 3white", line([.monarch, .white], 7))
+        try expect(line([.monarch, .morpho, .white], 3) == "1monarch 1morpho 1white", "just a few")
+        try expect(line(ButterflyKind.allCases, 2) == "1monarch 1morpho", "fewer than species")
+    }
+    check("meadowCountByArea") {
+        let laptop: Int = MeadowTuning.areaCount(7, width: 1440, height: 900)
+        let big: Int = MeadowTuning.areaCount(7, width: 2560, height: 1440)
+        let small: Int = MeadowTuning.areaCount(7, width: 900, height: 324)
+        let huge: Int = MeadowTuning.areaCount(12, width: 6016, height: 3384)
+        try expect(laptop == 7 && big == 20 && small == 7 && huge == 24, "laptop \(laptop) big \(big) small \(small) huge \(huge)")
+        // The app's sim: the settings reach the tuning, and a shared scene counts each screen by its own area.
+        var s = Settings.defaults
+        s.habitat = .meadow; s.meadowButterflies = [.morpho]; s.meadowCount = 5; s.interaction = false
+        let t = MeadowSim.tuning(.director, s)
+        try expect(t.species == [false, true, false, false] && t.count == 5 && t.areaCount && !t.cursorLand, "tuning \(t)")
+        let sim = MeadowSim(settings: s, seed: 3)
+        let screens = [CGRect(x: 0, y: 0, width: 2560, height: 1440), CGRect(x: 375, y: 1440, width: 1440, height: 900)]
+        sim.layout(terrain: Terrain(rects: screens), cell: CGSize(width: 13, height: 19), settings: s)
+        let n: Int = sim.world.flies.count
+        try expect(n == 14 + 5 && sim.world.flies.allSatisfy { $0.kind == .morpho }, "flies \(n)")
+        s.meadowButterflies = [.monarch, .white]
+        sim.update(settings: s)
+        let active = sim.world.flies.filter { !$0.leaving }
+        try expect(active.count == 19 && active.allSatisfy { $0.kind != .morpho }, "after a new line-up: \(active.map(\.kind))")
+    }
     check("settingsRoundTrip") {
         var s = Settings.defaults
         s.calm = true; s.appearance = .light; s.sharks = [.nurse, .zebra]
