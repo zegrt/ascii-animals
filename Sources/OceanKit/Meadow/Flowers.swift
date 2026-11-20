@@ -18,10 +18,27 @@ public enum FlowerKind: String, CaseIterable, Sendable {
     var rows: ClosedRange<Int> {
         switch self {
         case .milkweed, .fennel: return 5...7
-        case .coneflower: return 4...6
-        case .mustard: return 2...4
-        case .daisy, .dandelion: return 1...3
-        case .clover, .grass: return 1...2
+        case .coneflower: return 4...7
+        case .mustard: return 3...5
+        case .daisy, .dandelion: return 2...4
+        case .clover: return 1...3
+        case .grass: return 1...2
+        }
+    }
+
+    /// The open head's size in cells (research §4.1): a daisy's petal ring round its eye, a coneflower's drooping
+    /// petals round its cone, milkweed's ball, fennel's flat umbel, clover's round head, a mustard spike, a
+    /// dandelion's puff. `above` is how many of its rows stand above the head point (the rest hang below it).
+    public var head: (cols: Int, rows: Int, above: Int) {
+        switch self {
+        case .daisy: return (5, 3, 1)
+        case .coneflower: return (5, 2, 0)
+        case .milkweed: return (5, 3, 1)
+        case .fennel: return (7, 2, 0)
+        case .clover: return (3, 2, 0)
+        case .mustard: return (3, 2, 0)
+        case .dandelion: return (3, 2, 1)
+        case .grass: return (1, 1, 0)
         }
     }
 
@@ -101,9 +118,11 @@ public final class Meadowland {
         self.random = random
     }
 
-    /// Lay the meadow out along the bottom of every rect: a plant every 3–5 columns, grass tufts in the bottom
-    /// 1–2 rows, and 6–14 scattered taller stems up to 40 % of the rect's height (fewer on screens narrower than
-    /// 1440 pt). Replaces any flowers there were, clicked ones included.
+    /// Lay the meadow out along the bottom of every rect: grass tufts in the bottom 1–2 rows; plants in clumps, as a
+    /// meadow grows (2–4 plants, mostly of one kind, three or four columns apart at different heights, a few columns
+    /// between clumps); and 6–14 scattered taller stems in the gaps between clumps, more of them short than tall and
+    /// none over 40 % of the rect's height (fewer on screens narrower than 1440 pt). Replaces any flowers there were,
+    /// clicked ones included.
     public func layout(terrain: Terrain, cell: CGSize) {
         self.cell = CGSize(width: max(1, cell.width), height: max(1, cell.height))
         flowers.removeAll(keepingCapacity: true)
@@ -118,21 +137,38 @@ public final class Meadowland {
                 add(.grass, x: x, ground: ground, rows: min(maxRows, random.int(1, 2)), rect: ri)
                 x += cw * Double(random.int(1, 2))
             }
-            // Plants: one every 3–5 columns.
+            // Plants in clumps, with the gaps between them remembered.
             x = minX + cw * random.range(0.5, 2.5)
+            var gaps: [Double] = []
             while x < maxX - cw * 0.5 {
                 let kind = pick(FlowerKind.blooming)
-                add(kind, x: x, ground: ground, rows: min(maxRows, random.int(kind.rows.lowerBound, kind.rows.upperBound)), rect: ri)
-                x += cw * Double(random.int(3, 5))
+                let n = random.int(2, 4)
+                for _ in 0..<n where x < maxX - cw * 0.5 {
+                    let k: FlowerKind = random.unit() < 0.75 ? kind : pick(FlowerKind.blooming)
+                    add(k, x: x, ground: ground, rows: min(maxRows, random.int(k.rows.lowerBound, k.rows.upperBound)), rect: ri)
+                    x += cw * random.range(3, 4)
+                }
+                let gap: Double = cw * random.range(1.5, 4)
+                let mid: Double = x - cw * 1.5 + gap / 2
+                if mid > minX + cw && mid < maxX - cw { gaps.append(mid) }
+                x += gap
             }
-            // Scattered taller stems, more of them short than very tall.
-            let lo = min(8, maxRows), hi = max(lo, maxRows)
+            // Scattered taller stems, each in a gap between clumps (so the clumps' heads don't hide them), more of
+            // them short than tall: up to 60 % of the tallest allowed, so the strip stays a meadow rather than a row
+            // of lone stalks.
+            let lo = min(8, maxRows), hi = max(lo, Int(0.6 * Double(maxRows)))
             let scale: Double = min(1, (maxX - minX) / 1440)
             let count = max(1, Int((Double(random.int(6, 14)) * scale).rounded()))
-            for _ in 0..<count {
+            for k in 0..<count {
                 let u: Double = random.unit()
                 let rows = lo + Int((Double(hi - lo) * u * u).rounded())
-                add(pick(FlowerKind.tall), x: random.range(minX + cw, maxX - cw), ground: ground, rows: rows, rect: ri)
+                var at: Double = random.range(minX + cw, maxX - cw)
+                if !gaps.isEmpty {
+                    // One in each of `count` even runs of gaps.
+                    let slot: Double = (Double(k) + random.unit()) * Double(gaps.count) / Double(count)
+                    at = gaps[min(gaps.count - 1, Int(slot))] + cw * random.range(-0.4, 0.4)
+                }
+                add(pick(FlowerKind.tall), x: at, ground: ground, rows: rows, rect: ri)
             }
         }
     }

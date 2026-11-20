@@ -9,7 +9,9 @@ import Metal
 /// are for `CellCanvas` habitats. Append only: indices never move.
 public enum GlyphAtlas {
     public static let glyphs = [":", ";", "t", "%", "S", "X", "8", "#", "@", ".", "'", ",", "`", "o", "-", "*", "·",
-                                "¯", "_", "/", "\\", "|", "+", "x", "O", "°", "v", "0"]
+                                "¯", "_", "/", "\\", "|", "+", "x", "O", "°", "v", "0",
+                                // The Meadow's (milkweed leaves).
+                                "(", ")"]
 
     private static let indices: [Character: UInt8] = {
         var d: [Character: UInt8] = [:]

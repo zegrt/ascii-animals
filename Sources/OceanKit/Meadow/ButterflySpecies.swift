@@ -23,8 +23,13 @@ public enum PupaKind: Equatable, Sendable { case hanging, girdled }
 /// size (13 × 19 pt cells); `Butterfly` scales them by `cell.width / 13`. Angles are radians.
 public struct ButterflySpecies: Sendable {
     // ── Size ──
-    /// Wingspan × height, cells.
+    /// Wingspan × height, cells: the size the flight model works in (its wall margins, waypoints and climbs are
+    /// measured in wingspans, tuned by t1-2's checks).
     public let span: Double, height: Double
+    /// Wingspan × height as drawn, cells: the director's bigger butterflies (2026-11-20), about 1.7 × the flight
+    /// size. Kept apart from it because the flight model's margins grow with the wingspan: at any monarch span from
+    /// 19 cells up, `freeFlightCoversTheField` finds it kept off the field's edges.
+    public let drawnSpan: Double, drawnHeight: Double
     /// The swallowtail's hindwing tails add a row below the wings.
     public let tailRow: Bool
     /// Individual size spread: ±12 %.
@@ -135,7 +140,7 @@ public struct ButterflySpecies: Sendable {
     }
 
     static let monarch = ButterflySpecies(
-        span: 13, height: 5, tailRow: false, sizeSpread: 0.12,
+        span: 13, height: 5, drawnSpan: 22, drawnHeight: 9, tailRow: false, sizeSpread: 0.12,
         realBeat: 9.5, beat: 2.6, strokeMid: 20 * deg, strokeAmp: 60 * deg,
         cruise: 170, forage: 80, surge: 0, escapeSpeed: 2, escapeBeat: 1.25, escapeSeconds: 0.6...1.2,
         escapeClimb: (15 * deg)...(15 * deg), escapeJinks: 0,
@@ -150,7 +155,7 @@ public struct ButterflySpecies: Sendable {
         thrust: 0.9)
 
     static let morpho = ButterflySpecies(
-        span: 15, height: 5, tailRow: false, sizeSpread: 0.12,
+        span: 15, height: 5, drawnSpan: 26, drawnHeight: 9, tailRow: false, sizeSpread: 0.12,
         realBeat: 6, beat: 1.7, strokeMid: 15 * deg, strokeAmp: 65 * deg,
         cruise: 150, forage: 70, surge: 0, escapeSpeed: 2, escapeBeat: 1.25, escapeSeconds: 0.6...1.2,
         escapeClimb: (13 * deg)...(22 * deg), escapeJinks: 0,
@@ -165,7 +170,7 @@ public struct ButterflySpecies: Sendable {
         thrust: 0.9)
 
     static let swallowtail = ButterflySpecies(
-        span: 13, height: 5, tailRow: true, sizeSpread: 0.12,
+        span: 13, height: 5, drawnSpan: 22, drawnHeight: 9, tailRow: true, sizeSpread: 0.12,
         realBeat: 7, beat: 2.0, strokeMid: 20 * deg, strokeAmp: 55 * deg,
         cruise: 170, forage: 80, surge: 0, escapeSpeed: 2, escapeBeat: 1.25, escapeSeconds: 0.6...1.2,
         escapeClimb: (15 * deg)...(15 * deg), escapeJinks: 0,
@@ -180,7 +185,7 @@ public struct ButterflySpecies: Sendable {
         thrust: 0.9)
 
     static let cabbageWhite = ButterflySpecies(
-        span: 9, height: 4, tailRow: false, sizeSpread: 0.12,
+        span: 9, height: 4, drawnSpan: 15, drawnHeight: 7, tailRow: false, sizeSpread: 0.12,
         realBeat: 11.8, beat: 3.0, strokeMid: 25 * deg, strokeAmp: 55 * deg,
         cruise: 140, forage: 70, surge: 0.45, escapeSpeed: 2, escapeBeat: 1.25, escapeSeconds: 0.6...1.2,
         escapeClimb: (20 * deg)...(20 * deg), escapeJinks: 2,

@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import Metal
 import OceanKit
 import simd
 
@@ -283,6 +284,9 @@ func meadowChecks() {
     check("weatherAndLeanScaleWithCell", weatherAndLeanScaleWithCell)
 
     butterflyChecks()
+    meadowPainterChecks()
+    // CI runners have no GPU: OCEAN_SKIP_GPU=1 skips the Metal checks (main.swift skips its own the same way).
+    if ProcessInfo.processInfo.environment["OCEAN_SKIP_GPU"] == nil { meadowRenderChecks() }
 }
 
 // ── Butterfly flight (Task 2) ──
@@ -782,3 +786,604 @@ func butterflyChecks() {
     check("flightPathsMatchMeasurements", flightPathsMatchMeasurements)
 }
 
+
+// ── The meadow painter (Task 5) ──
+
+private func meadowTheme(light: Bool = false, calm: Bool = false) -> ThemeParams {
+    var s = Settings.defaults
+    s.appearance = light ? .light : .dark
+    s.calm = calm
+    return ThemeParams.make(s, systemIsDark: true, accent: SIMD3<Float>(0, 0, 0))
+}
+
+/// A butterfly held in a pose: full size at 13 × 19 pt cells, body upright (heading straight up), not banked, wings
+/// level (stroke 0, both wings fully open).
+private func posed(_ kind: ButterflyKind, x: Double, y: Double) -> Butterfly {
+    let b = Butterfly(kind: kind, x: x, y: y, random: WebRandom(seed: 1))
+    b.size = 1
+    b.scale = 1
+    b.heading = 1.5 * Double.pi
+    b.bank = 0
+    b.pitch = 0
+    b.phase = 0
+    b.stroke = 0
+    b.gliding = false
+    return b
+}
+
+/// Paints one frame of the meadow over `size` (viewport at the origin) into `canvas` (a new one when nil).
+private func paintMeadow(_ painter: MeadowPainter, land: Meadowland, flies: [Butterfly], breeze: Breeze, time: Double = 0,
+                         size: CGSize, theme: ThemeParams, into canvas: CellCanvas? = nil) -> CellCanvas {
+    let grid = GridSpec.make(viewportSize: size, cell: meadowCell)
+    let c: CellCanvas = canvas ?? CellCanvas(cols: grid.cols, rows: grid.rows)
+    c.clear()
+    painter.paint(land: land, butterflies: flies, breeze: breeze, time: time, viewport: CGRect(origin: .zero, size: size),
+                  grid: grid, theme: theme, into: c)
+    return c
+}
+
+/// The colour channels of a packed RGBA8, 0…255.
+private func unpack(_ v: UInt32) -> SIMD4<Double> {
+    SIMD4<Double>(Double(v & 0xff), Double((v >> 8) & 0xff), Double((v >> 16) & 0xff), Double(v >> 24))
+}
+
+private func luminance(_ v: UInt32) -> Double {
+    let c: SIMD4<Double> = unpack(v)
+    return 0.2126 * c.x + 0.7152 * c.y + 0.0722 * c.z
+}
+
+/// A cell holds something: a glyph or a block.
+private func drawn(_ c: CellCanvas, _ i: Int) -> Bool { c.glyph[i] != CellCanvas.noGlyph || c.block[i] >> 24 != 0 }
+
+/// A meadow laid out on one screen, with the weather off.
+private func meadowScene(_ size: CGSize, seed: UInt64) -> (land: Meadowland, breeze: Breeze) {
+    let land = Meadowland(random: WebRandom(seed: seed))
+    land.layout(terrain: .single(width: Double(size.width), height: Double(size.height)), cell: meadowCell)
+    return (land, calmBreeze(CGRect(origin: .zero, size: size)))
+}
+
+/// One butterfly hovering in calm air, beating and bobbing, painted at 30 fps for `frames` frames, with its body
+/// `dx`, `dy` pt off a cell's centre and banked by `bank`. Returns the most switches between empty and full any one
+/// cell made inside one beat window (the frames whose `floor(t · beat)` agree), with the cell and the window, and how
+/// many full cells it drew in all. Edge frames (a glyph, no block) count as neither.
+private func flickerInBeatWindows(_ kind: ButterflyKind, dx: Double, dy: Double, bank: Double, frames: Int = 120)
+    -> (most: Int, cell: Int, window: Int, full: Int, cols: Int) {
+    let size = CGSize(width: 640, height: 400)
+    let land = Meadowland(random: WebRandom(seed: 2))
+    let breeze = calmBreeze(CGRect(origin: .zero, size: size))
+    let b = posed(kind, x: 318.5 + dx, y: 199.5 + dy)
+    b.bank = bank
+    let y0: Double = b.y
+    let sp = b.species
+    let painter = MeadowPainter()
+    let theme = meadowTheme()
+    let grid = GridSpec.make(viewportSize: size, cell: meadowCell)
+    let canvas = CellCanvas(cols: grid.cols, rows: grid.rows)
+    let n = grid.cols * grid.rows
+    let dt: Double = 1.0 / 30.0
+    var last = [Int8](repeating: 0, count: n)
+    var window = [Int](repeating: -1, count: n), inWindow = [Int](repeating: 0, count: n)
+    var most = 0, mostCell = -1, mostWindow = -1, full = 0
+    for k in 0..<frames {
+        let t: Double = Double(k) * dt
+        let theta: Double = fmod(TAU * sp.beat * t, TAU)
+        b.phase = theta
+        b.stroke = sp.strokeMid + sp.strokeAmp * cos(theta)
+        b.y = y0 - sp.bobRows * Double(meadowCell.height) * sin(theta)
+        _ = paintMeadow(painter, land: land, flies: [b], breeze: breeze, time: t, size: size, theme: theme, into: canvas)
+        let w = Int(floor(t * sp.beat + 1e-9))
+        for i in 0..<n {
+            let isFull: Bool = canvas.block[i] >> 24 != 0
+            let empty: Bool = !drawn(canvas, i)
+            let now: Int8 = isFull ? 1 : (empty ? 0 : last[i])
+            if isFull { full += 1 }
+            if k > 0 && now != last[i] {
+                if window[i] != w { window[i] = w; inWindow[i] = 0 }
+                inWindow[i] += 1
+                if inWindow[i] > most { most = inWindow[i]; mostCell = i; mostWindow = w }
+            }
+            last[i] = now
+        }
+    }
+    return (most, mostCell, mostWindow, full, grid.cols)
+}
+
+func meadowPainterChecks() {
+    func wingsDoNotFlicker() throws {
+        // A monarch hovering in calm air, its wings beating at 2.6 Hz and its body bobbing, painted at 30 fps for
+        // 120 frames. A cell may go from empty to full and back once a beat (the wings open and close), never more:
+        // any three switches of one cell span at least a beat (less a frame, for where the frames fall). Edge frames
+        // in between count as neither, so a cell only switches when it really empties or fills.
+        let size = CGSize(width: 520, height: 380)
+        let land = Meadowland(random: WebRandom(seed: 2))
+        let breeze = calmBreeze(CGRect(origin: .zero, size: size))
+        let b = posed(.monarch, x: 266.5, y: 199.5)
+        let y0: Double = b.y
+        let sp = b.species
+        let painter = MeadowPainter()
+        let theme = meadowTheme()
+        let grid = GridSpec.make(viewportSize: size, cell: meadowCell)
+        let canvas = CellCanvas(cols: grid.cols, rows: grid.rows)
+        let n = grid.cols * grid.rows
+        let dt: Double = 1.0 / 30.0
+        let beat: Double = 1 / sp.beat
+        // 0 empty, 1 full: the last of those each cell was in, and the frames of its last two switches.
+        var last = [Int8](repeating: 0, count: n)
+        var before = [Int](repeating: -1_000, count: n), latest = [Int](repeating: -1_000, count: n)
+        var total = 0, everFull = 0, closest: Double = .infinity, closestCell = -1
+        for k in 0..<120 {
+            let t: Double = Double(k) * dt
+            let theta: Double = fmod(TAU * sp.beat * t, TAU)
+            b.phase = theta
+            b.stroke = sp.strokeMid + sp.strokeAmp * cos(theta)
+            b.y = y0 - sp.bobRows * Double(meadowCell.height) * sin(theta)
+            _ = paintMeadow(painter, land: land, flies: [b], breeze: breeze, time: t, size: size, theme: theme, into: canvas)
+            for i in 0..<n {
+                let full: Bool = canvas.block[i] >> 24 != 0
+                let empty: Bool = !drawn(canvas, i)
+                let now: Int8 = full ? 1 : (empty ? 0 : last[i])
+                if full { everFull += 1 }
+                if k > 0 && now != last[i] {
+                    total += 1
+                    // This switch and the two before it.
+                    let span: Double = Double(k - before[i]) * dt
+                    if span < closest { closest = span; closestCell = i }
+                    before[i] = latest[i]
+                    latest[i] = k
+                }
+                last[i] = now
+            }
+        }
+        try expect(everFull > 120 * 10, "the monarch hardly drew: \(everFull) full cells over 120 frames")
+        try expect(total > 20, "nothing beat: \(total) switches")
+        try expect(closest >= beat - dt,
+                   "cell (\(closestCell % grid.cols), \(closestCell / grid.cols)) switched empty↔full three times in \(closest) s (a beat is \(beat) s)")
+        // The same rule measured in the beat's own windows (the frames whose floor(t · 2.6) agree): at most two
+        // switches of any cell in any window, for every species, from several places within a cell, level and
+        // banked (review t5, finding 2).
+        let offsets: [(Double, Double)] = [(0, 0), (5, 0), (2.5, 4), (-4, 7), (6.2, -3.1)]
+        for kind in ButterflyKind.allCases {
+            for (dx, dy) in offsets {
+                for bank in [0.0, 0.45] {
+                    let r = flickerInBeatWindows(kind, dx: dx, dy: dy, bank: bank)
+                    try expect(r.full > 120 * 10, "\(kind) at (\(dx), \(dy)) hardly drew: \(r.full) full cells")
+                    try expect(r.most <= 2,
+                               "\(kind) at (\(dx), \(dy)) bank \(bank): cell (\(r.cell % r.cols), \(r.cell / r.cols)) switched \(r.most) times in beat window \(r.window)")
+                }
+            }
+        }
+    }
+    check("wingsDoNotFlicker", wingsDoNotFlicker)
+
+    func wingsUseSignedWidth() throws {
+        // Review t5, finding 3: the painter draws the model's signed projected width, cos(stroke ± bank). At the bottom
+        // of the downstroke (stroke −35°, s = 0.82) the open wings span fewer columns than level (s = 1), and banked
+        // there the two wings differ.
+        let size = CGSize(width: 640, height: 400)
+        let land = Meadowland(random: WebRandom(seed: 2))
+        let breeze = calmBreeze(CGRect(origin: .zero, size: size))
+        /// Columns holding a block on either side of the body, over the whole butterfly.
+        func reach(_ kind: ButterflyKind, stroke: Double, bank: Double) -> (left: Int, right: Int) {
+            let b = posed(kind, x: 318.5, y: 199.5)
+            b.stroke = stroke
+            b.bank = bank
+            let c = paintMeadow(MeadowPainter(), land: land, flies: [b], breeze: breeze, size: size, theme: meadowTheme())
+            let body = Int(floor(b.x / Double(meadowCell.width)))
+            var lo = body, hi = body
+            for i in 0..<(c.cols * c.rows) where c.block[i] >> 24 != 0 {
+                lo = min(lo, i % c.cols)
+                hi = max(hi, i % c.cols)
+            }
+            return (body - lo, hi - body)
+        }
+        let down: Double = -35 * Double.pi / 180
+        for kind in ButterflyKind.allCases {
+            let level = reach(kind, stroke: 0, bank: 0)
+            let bottom = reach(kind, stroke: down, bank: 0)
+            try expect(bottom.left < level.left && bottom.right < level.right,
+                       "\(kind): at the bottom of the downstroke the wings reach \(bottom), level \(level)")
+            let banked = reach(kind, stroke: down, bank: 0.3)
+            try expect(banked.left != banked.right, "\(kind): banked at the bottom of the downstroke the wings reach \(banked)")
+        }
+    }
+    check("wingsUseSignedWidth", wingsUseSignedWidth)
+
+    func edgeOnIsALine() throws {
+        // The left wing forced edge-on (s = cos(bank + stroke) = 0.1), the right one open (bank = stroke): every cell
+        // left of the body is a line glyph from | / \ and has no block; the open wing still has its blocks.
+        let size = CGSize(width: 520, height: 380)
+        let land = Meadowland(random: WebRandom(seed: 2))
+        let breeze = calmBreeze(CGRect(origin: .zero, size: size))
+        let painter = MeadowPainter()
+        let lines: Set<UInt8> = Set("|/\\".map { (c: Character) -> UInt8 in GlyphAtlas.index(c)! })
+        for kind in ButterflyKind.allCases {
+            let b = posed(kind, x: 266.5, y: 199.5)
+            let half: Double = acos(0.1) / 2
+            b.bank = half
+            b.stroke = half
+            let left: Double = b.wings().left
+            try expectClose(left, 0.1, tol: 1e-9, "\(kind) left wing s")
+            let c = paintMeadow(painter, land: land, flies: [b], breeze: breeze, size: size, theme: meadowTheme())
+            let bodyCol = Int(floor(b.x / Double(meadowCell.width)))
+            var leftCells = 0, rightBlocks = 0
+            for i in 0..<(c.cols * c.rows) where drawn(c, i) {
+                let col = i % c.cols
+                if col < bodyCol {
+                    leftCells += 1
+                    let g: String = c.glyph[i] == CellCanvas.noGlyph ? "nothing" : GlyphAtlas.glyphs[Int(c.glyph[i])]
+                    try expect(lines.contains(c.glyph[i]), "\(kind): edge-on cell (\(col), \(i / c.cols)) holds \(g)")
+                    try expect(c.block[i] >> 24 == 0, "\(kind): edge-on cell (\(col), \(i / c.cols)) has a block")
+                } else if col > bodyCol && c.block[i] >> 24 != 0 {
+                    rightBlocks += 1
+                }
+            }
+            try expect(leftCells >= 2, "\(kind): the edge-on wing drew \(leftCells) cells")
+            try expect(rightBlocks >= 5, "\(kind): the open wing drew \(rightBlocks) block cells")
+        }
+    }
+    check("edgeOnIsALine", edgeOnIsALine)
+
+    func whiteVisibleOnPaper() throws {
+        // Review Focus 4: on paper a cabbage white is a pale graphite block, not white on white. Through a whole
+        // beat every block it draws is at least 12/255 darker or lighter than the paper.
+        let size = CGSize(width: 520, height: 380)
+        let land = Meadowland(random: WebRandom(seed: 2))
+        let breeze = calmBreeze(CGRect(origin: .zero, size: size))
+        let painter = MeadowPainter()
+        let b = posed(.cabbageWhite, x: 266.5, y: 199.5)
+        let sp = b.species
+        let paper: Double = 0.2126 * 247 + 0.7152 * 246 + 0.0722 * 243
+        var blocks = 0
+        for k in 0..<12 {
+            b.phase = TAU * Double(k) / 12
+            b.stroke = sp.strokeMid + sp.strokeAmp * cos(b.phase)
+            let c = paintMeadow(painter, land: land, flies: [b], breeze: breeze, size: size, theme: meadowTheme(light: true))
+            try expect(c.background == SIMD3<Float>(247, 246, 243) / 255, "light background \(c.background)")
+            for i in 0..<(c.cols * c.rows) where c.block[i] >> 24 != 0 {
+                blocks += 1
+                let l: Double = luminance(c.block[i])
+                try expect(abs(l - paper) >= 12, "phase \(k): block \(String(c.block[i], radix: 16)) luminance \(l) vs paper \(paper)")
+            }
+        }
+        try expect(blocks >= 12 * 8, "the white drew \(blocks) blocks over a beat")
+        // The same on paper in Calm, where everything mixes toward the paper (review t5, finding 9).
+        var calmBlocks = 0
+        for k in 0..<12 {
+            b.phase = TAU * Double(k) / 12
+            b.stroke = sp.strokeMid + sp.strokeAmp * cos(b.phase)
+            let c = paintMeadow(MeadowPainter(), land: land, flies: [b], breeze: breeze, size: size,
+                                theme: meadowTheme(light: true, calm: true))
+            for i in 0..<(c.cols * c.rows) where c.block[i] >> 24 != 0 {
+                calmBlocks += 1
+                let l: Double = luminance(c.block[i])
+                try expect(abs(l - paper) >= 12, "Calm, phase \(k): block \(String(c.block[i], radix: 16)) luminance \(l) vs paper \(paper)")
+            }
+        }
+        try expect(calmBlocks >= 12 * 8, "in Calm the white drew \(calmBlocks) blocks over a beat")
+    }
+    check("whiteVisibleOnPaper", whiteVisibleOnPaper)
+
+    func meadowCalmIsDimmer() throws {
+        // Dark Calm: the same scene's ink is dimmer, mean luminance under 0.8 of normal's; the glyphs stay.
+        let size = CGSize(width: 900, height: 600)
+        let scene = meadowScene(size, seed: 6)
+        var flies: [Butterfly] = []
+        for (k, kind) in ButterflyKind.allCases.enumerated() {
+            let b = posed(kind, x: 120 + 220 * Double(k), y: 180 + 40 * Double(k % 2))
+            b.stroke = 0.3
+            flies.append(b)
+        }
+        let normal = paintMeadow(MeadowPainter(), land: scene.land, flies: flies, breeze: scene.breeze, time: 3, size: size,
+                                 theme: meadowTheme())
+        let calm = paintMeadow(MeadowPainter(), land: scene.land, flies: flies, breeze: scene.breeze, time: 3, size: size,
+                               theme: meadowTheme(calm: true))
+        var sumN: Double = 0, sumC: Double = 0, n = 0
+        for i in 0..<(normal.cols * normal.rows) where normal.glyph[i] != CellCanvas.noGlyph && calm.glyph[i] != CellCanvas.noGlyph {
+            sumN += luminance(normal.ink[i])
+            sumC += luminance(calm.ink[i])
+            n += 1
+        }
+        try expect(n > 300, "ink cells \(n)")
+        try expect(normal.background == SIMD3<Float>(0, 0, 0) && calm.background == normal.background, "calm changed the background")
+        try expect(sumC / Double(n) < 0.8 * sumN / Double(n), "calm ink \(sumC / Double(n)) vs normal \(sumN / Double(n))")
+        // The glyphs stay: Calm draws a glyph in exactly the cells normal does (review t5, finding 9).
+        for i in 0..<(normal.cols * normal.rows) {
+            let a: Bool = normal.glyph[i] != CellCanvas.noGlyph, c: Bool = calm.glyph[i] != CellCanvas.noGlyph
+            try expect(a == c, "cell (\(i % normal.cols), \(i / normal.cols)): a glyph in normal \(a), in Calm \(c)")
+        }
+    }
+    check("meadowCalmIsDimmer", meadowCalmIsDimmer)
+
+    func stemsLeanWithTheBreeze() throws {
+        // A steady 60 pt/s breeze to the right (written at every sample node, weather off, never decayed): once the
+        // stems settle, most stem cells between the ground and the head lean right, `/`, and almost none left.
+        let size = CGSize(width: 1300, height: 600)
+        let scene = meadowScene(size, seed: 8)
+        let land = scene.land, breeze = scene.breeze
+        let sx: Double = 4 * Double(meadowCell.width), sy: Double = 3 * Double(meadowCell.height)
+        var y: Double = 0
+        while y <= Double(size.height) + sy {
+            var x: Double = 0
+            while x <= Double(size.width) + sx {
+                breeze.write(x, y, vx: 100, vy: 0)
+                x += sx
+            }
+            y += sy
+        }
+        let wind: SIMD2<Double> = breeze.sample(400, 560)
+        try expectClose(wind.x, 60, tol: 0.5, "the breeze at the stems")
+        for _ in 0..<480 { land.step(1.0 / 60.0, breeze: breeze) }
+        let c = paintMeadow(MeadowPainter(), land: land, flies: [], breeze: breeze, size: size, theme: meadowTheme())
+        let slash = GlyphAtlas.index("/")!, back = GlyphAtlas.index("\\")!
+        let cw = Double(meadowCell.width), ch = Double(meadowCell.height)
+        var stem = 0, right = 0, left = 0
+        for (i, f) in land.flowers.enumerated() where f.kind != .grass && f.rows >= 3 {
+            let head: SIMD2<Double> = land.head(i)
+            let len: Double = Double(f.rows) * ch
+            let headRow = Int(floor(head.y / ch)), baseRow = Int(floor((f.base.y - 0.01) / ch))
+            // Between the row under the head (leaves, drooping petals) and the grass in the bottom two rows.
+            guard headRow + 2 <= baseRow - 2 else { continue }
+            for row in (headRow + 2)...(baseRow - 2) {
+                let yc: Double = (Double(row) + 0.5) * ch
+                let t: Double = (f.base.y - yc) / len
+                let xc: Double = f.base.x + f.tip.x * t * t
+                let i = row * c.cols + Int(floor(xc / cw))
+                stem += 1
+                if c.glyph[i] == slash { right += 1 }
+                if c.glyph[i] == back { left += 1 }
+            }
+        }
+        try expect(stem > 40, "stem cells sampled \(stem)")
+        try expect(right * 2 > stem, "\(right) of \(stem) stem cells lean right")
+        try expect(left * 10 < stem, "\(left) of \(stem) stem cells lean left")
+    }
+    check("stemsLeanWithTheBreeze", stemsLeanWithTheBreeze)
+
+    func paintAllocatesNothing() throws {
+        // After a warm-up frame, 30 more frames of a moving meadow (stems swaying, butterflies flying, one leaving a
+        // flower) leave every reusable buffer the painter keeps at the capacity it had.
+        let size = CGSize(width: 1300, height: 700)
+        let scene = meadowScene(size, seed: 9)
+        let land = scene.land
+        let breeze = Breeze(bounds: CGRect(origin: .zero, size: size), cell: meadowCell)
+        let terrain = Terrain.single(width: Double(size.width), height: Double(size.height))
+        let random = WebRandom(seed: 9)
+        var flies: [Butterfly] = []
+        for (k, kind) in ButterflyKind.allCases.enumerated() {
+            flies.append(Butterfly(kind: kind, x: 200 + 260 * Double(k), y: 300, random: random))
+        }
+        flies[0].state = .nectar
+        let painter = MeadowPainter()
+        let grid = GridSpec.make(viewportSize: size, cell: meadowCell)
+        let canvas = CellCanvas(cols: grid.cols, rows: grid.rows)
+        var t: Double = 0
+        func frame() {
+            for _ in 0..<2 {
+                breeze.step(1.0 / 60.0, random: random)
+                land.step(1.0 / 60.0, breeze: breeze)
+                for b in flies where b.state != .nectar {
+                    b.fly(1.0 / 60.0, target: nil, breeze: breeze, terrain: terrain, random: random)
+                }
+                t += 1.0 / 60.0
+            }
+            _ = paintMeadow(painter, land: land, flies: flies, breeze: breeze, time: t, size: size, theme: meadowTheme(), into: canvas)
+        }
+        frame()
+        let warm: [Int] = painter.bufferCapacities
+        try expect(!warm.isEmpty && warm.allSatisfy { $0 > 0 }, "buffers \(warm)")
+        flies[0].state = .fly
+        for _ in 0..<30 { frame() }
+        try expect(painter.bufferCapacities == warm, "buffers grew: \(warm) -> \(painter.bufferCapacities)")
+        // Review t5, finding 4: a full screen in ordinary weather, painted every step once warm, its heads rising
+        // and falling across rows as gusts pass, and two flowers clicked into bloom.
+        let big = CGSize(width: 2560, height: 1440)
+        let land2 = Meadowland(random: WebRandom(seed: 2))
+        let terrain2 = Terrain.single(width: 2560, height: 1440)
+        land2.layout(terrain: terrain2, cell: meadowCell)
+        let breeze2 = Breeze(bounds: CGRect(origin: .zero, size: big), cell: meadowCell)
+        let random2 = WebRandom(seed: 2)
+        let painter2 = MeadowPainter()
+        let grid2 = GridSpec.make(viewportSize: big, cell: meadowCell)
+        let canvas2 = CellCanvas(cols: grid2.cols, rows: grid2.rows)
+        var t2: Double = 0
+        for _ in 0..<60 {
+            breeze2.step(1.0 / 60.0, random: random2)
+            land2.step(1.0 / 60.0, breeze: breeze2)
+            t2 += 1.0 / 60.0
+        }
+        _ = paintMeadow(painter2, land: land2, flies: [], breeze: breeze2, time: t2, size: big, theme: meadowTheme(), into: canvas2)
+        let warm2: [Int] = painter2.bufferCapacities
+        for step in 0..<600 {
+            if step == 500 || step == 550 { _ = land2.bloom(atX: 400 + Double(step), y: 1400, terrain: terrain2, time: land2.time) }
+            breeze2.step(1.0 / 60.0, random: random2)
+            land2.step(1.0 / 60.0, breeze: breeze2)
+            t2 += 1.0 / 60.0
+            _ = paintMeadow(painter2, land: land2, flies: [], breeze: breeze2, time: t2, size: big, theme: meadowTheme(), into: canvas2)
+            try expect(painter2.bufferCapacities == warm2, "step \(step): buffers grew: \(warm2) -> \(painter2.bufferCapacities)")
+        }
+    }
+    check("paintAllocatesNothing", paintAllocatesNothing)
+
+    func groundRedrawsOnlyWhatMoved() throws {
+        // Review t5, finding 5: the cached ground is reused where nothing changed. In still air a warm meadow redraws
+        // no column; one plant knocked redraws only the columns around it; and whatever was redrawn, the canvas is
+        // what a fresh painter draws.
+        let size = CGSize(width: 2560, height: 1440)
+        let scene = meadowScene(size, seed: 3)
+        let land = scene.land, breeze = scene.breeze
+        let painter = MeadowPainter()
+        let grid = GridSpec.make(viewportSize: size, cell: meadowCell)
+        let canvas = CellCanvas(cols: grid.cols, rows: grid.rows)
+        _ = paintMeadow(painter, land: land, flies: [], breeze: breeze, time: 0, size: size, theme: meadowTheme(), into: canvas)
+        try expect(painter.groundColumnsRedrawn == grid.cols, "the first frame redrew \(painter.groundColumnsRedrawn) columns")
+        for _ in 0..<3 {
+            land.step(1.0 / 60.0, breeze: breeze)
+            _ = paintMeadow(painter, land: land, flies: [], breeze: breeze, time: 0, size: size, theme: meadowTheme(), into: canvas)
+            try expect(painter.groundColumnsRedrawn == 0, "still air redrew \(painter.groundColumnsRedrawn) columns")
+        }
+        guard let i = land.flowers.indices.first(where: { land.flowers[$0].kind == .daisy && land.flowers[$0].base.x > 1000 }) else {
+            throw CheckFailure(detail: "no daisy in the middle")
+        }
+        land.dip(i, impulse: SIMD2<Double>(60, 0))
+        var most = 0
+        for frame in 0..<60 {
+            land.step(1.0 / 60.0, breeze: breeze)
+            _ = paintMeadow(painter, land: land, flies: [], breeze: breeze, time: 0, size: size, theme: meadowTheme(), into: canvas)
+            most = max(most, painter.groundColumnsRedrawn)
+            let fresh = paintMeadow(MeadowPainter(), land: land, flies: [], breeze: breeze, time: 0, size: size, theme: meadowTheme())
+            for k in 0..<(grid.cols * grid.rows) {
+                let same: Bool = canvas.glyph[k] == fresh.glyph[k] && canvas.ink[k] == fresh.ink[k] && canvas.block[k] == fresh.block[k]
+                    && canvas.overGlyph[k] == fresh.overGlyph[k]
+                if !same {
+                    // A cell may differ only where a plant moved less than the 0.05-cell redraw threshold.
+                    try expect(abs(Double(k % grid.cols) * Double(meadowCell.width) - land.flowers[i].base.x) < 200,
+                               "frame \(frame): cell (\(k % grid.cols), \(k / grid.cols)) differs from a fresh paint")
+                }
+            }
+        }
+        try expect(most > 0 && most <= 30, "a knocked daisy redrew up to \(most) of \(grid.cols) columns")
+    }
+    check("groundRedrawsOnlyWhatMoved", groundRedrawsOnlyWhatMoved)
+
+    func relayoutRedrawsTheGarden() throws {
+        // Review t5, finding 7: the same land laid out again on the same screen (same count, same top row, perhaps)
+        // never keeps the old garden. The land is laid out twice between paints (as a display change can), and each
+        // time the painter that drew the garden before last draws what a fresh one does.
+        let size = CGSize(width: 2560, height: 1440)
+        let land = Meadowland(random: WebRandom(seed: 2))
+        let terrain = Terrain.single(width: 2560, height: 1440)
+        let breeze = calmBreeze(CGRect(origin: .zero, size: size))
+        let painter = MeadowPainter()
+        let grid = GridSpec.make(viewportSize: size, cell: meadowCell)
+        let canvas = CellCanvas(cols: grid.cols, rows: grid.rows)
+        for trial in 0..<12 {
+            land.layout(terrain: terrain, cell: meadowCell)
+            land.layout(terrain: terrain, cell: meadowCell)
+            _ = paintMeadow(painter, land: land, flies: [], breeze: breeze, size: size, theme: meadowTheme(), into: canvas)
+            let fresh = paintMeadow(MeadowPainter(), land: land, flies: [], breeze: breeze, size: size, theme: meadowTheme())
+            var differ = 0
+            for k in 0..<(grid.cols * grid.rows) where canvas.glyph[k] != fresh.glyph[k] || canvas.ink[k] != fresh.ink[k] {
+                differ += 1
+            }
+            try expect(differ == 0, "layout \(trial): \(differ) cells kept from the last garden")
+        }
+    }
+    check("relayoutRedrawsTheGarden", relayoutRedrawsTheGarden)
+
+    func plantsStayOnTheirScreen() throws {
+        // Review t5, finding 6: a meadow laid out on the upper screen draws nothing on the screen directly below it.
+        let upper = Terrain.single(width: 2560, height: 1440)
+        let land = Meadowland(random: WebRandom(seed: 5))
+        land.layout(terrain: upper, cell: meadowCell)
+        let breeze = calmBreeze(CGRect(x: 0, y: 0, width: 2560, height: 2880))
+        let size = CGSize(width: 2560, height: 1440)
+        let grid = GridSpec.make(viewportSize: size, cell: meadowCell)
+        let c = CellCanvas(cols: grid.cols, rows: grid.rows)
+        c.clear()
+        MeadowPainter().paint(land: land, butterflies: [], breeze: breeze, time: 0, viewport: CGRect(x: 0, y: 1440, width: 2560, height: 1440),
+                              grid: grid, theme: meadowTheme(), into: c)
+        var drawnCells = 0
+        for i in 0..<(c.cols * c.rows) where drawn(c, i) || c.overGlyph[i] != CellCanvas.noGlyph { drawnCells += 1 }
+        try expect(drawnCells == 0, "the lower screen holds \(drawnCells) plant cells")
+    }
+    check("plantsStayOnTheirScreen", plantsStayOnTheirScreen)
+}
+
+/// The painter as a habitat, for drawing through the renderer before the meadow world exists (t3 wraps it for real).
+private final class MeadowScene: CellPainter {
+    let land: Meadowland
+    let flies: [Butterfly]
+    let breeze: Breeze
+    let painter = MeadowPainter()
+    /// The canvas last painted, as the renderer handed it over.
+    private(set) var canvas: CellCanvas?
+
+    init(land: Meadowland, flies: [Butterfly], breeze: Breeze) {
+        self.land = land
+        self.flies = flies
+        self.breeze = breeze
+    }
+
+    var kind: HabitatKind { .web }
+    var time: Double { 0 }
+    var stepCount: Int { 0 }
+    func layout(terrain: Terrain, cell: CGSize, settings: Settings) {}
+    func step(_ dt: Double) {}
+    func pointerMoved(_ x: Double, _ y: Double) {}
+    func pointerLeft() {}
+    func pointerDown(_ x: Double, _ y: Double) {}
+    func update(settings: Settings) {}
+    func settle() {}
+
+    func paint(viewport: CGRect, grid: GridSpec, theme: ThemeParams, into canvas: CellCanvas) {
+        painter.paint(land: land, butterflies: flies, breeze: breeze, time: 0, viewport: viewport, grid: grid, theme: theme,
+                      into: canvas)
+        self.canvas = canvas
+    }
+}
+
+func meadowRenderChecks() {
+    guard let device = MTLCreateSystemDefaultDevice() else { return }
+
+    func meadowComposeDraws() throws {
+        // A fixed scene through `encode(habitat:)`: the monarch's body cell shows its block colour, and a flower head
+        // cell has pixels in the head's ink.
+        let size = CGSize(width: 400, height: 300)
+        let scale: CGFloat = 2
+        let w = Int(size.width * scale), h = Int(size.height * scale)
+        let scene = meadowScene(size, seed: 4)
+        let monarch = posed(.monarch, x: 201.5, y: 66.5)
+        let sim = MeadowScene(land: scene.land, flies: [monarch], breeze: scene.breeze)
+        let r = try OceanRenderer(device: device)
+        let vp = try r.makeViewport(pointSize: size, scale: scale, cell: meadowCell)
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: OceanRenderer.outputFormat, width: w, height: h, mipmapped: false)
+        d.usage = [.renderTarget, .shaderRead]
+        d.storageMode = .managed
+        guard let target = r.device.makeTexture(descriptor: d), let cb = r.queue.makeCommandBuffer() else {
+            throw CheckFailure(detail: "no frame target")
+        }
+        vp.encode(habitat: sim, theme: meadowTheme(), target: target, commandBuffer: cb)
+        let blit = cb.makeBlitCommandEncoder()!
+        blit.synchronize(resource: target)
+        blit.endEncoding()
+        cb.commit()
+        cb.waitUntilCompleted()
+        var bytes = [UInt8](repeating: 0, count: w * h * 4)
+        target.getBytes(&bytes, bytesPerRow: w * 4, from: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0)
+        guard let canvas = sim.canvas else { throw CheckFailure(detail: "the scene was never painted") }
+
+        let cw = Int(meadowCell.width * scale), ch = Int(meadowCell.height * scale)
+        // Pixels of cell (col, row) within 2/255 of a packed colour (BGRA bytes).
+        func pixels(_ col: Int, _ row: Int, near v: UInt32) -> Int {
+            let want: SIMD4<Double> = unpack(v)
+            var n = 0
+            for y in (row * ch)..<((row + 1) * ch) {
+                for x in (col * cw)..<((col + 1) * cw) {
+                    let i = (y * w + x) * 4
+                    let dr: Double = abs(Double(bytes[i + 2]) - want.x)
+                    let dg: Double = abs(Double(bytes[i + 1]) - want.y)
+                    let db: Double = abs(Double(bytes[i]) - want.z)
+                    if dr <= 2 && dg <= 2 && db <= 2 { n += 1 }
+                }
+            }
+            return n
+        }
+        let bc = Int(floor(monarch.x / Double(meadowCell.width))), br = Int(floor(monarch.y / Double(meadowCell.height)))
+        let body = canvas.block[br * canvas.cols + bc]
+        try expect(body >> 24 != 0, "no block on the body cell (\(bc), \(br))")
+        let onBlock = pixels(bc, br, near: body)
+        try expect(onBlock * 5 > cw * ch, "body cell: \(onBlock) of \(cw * ch) pixels in the block colour \(String(body, radix: 16))")
+
+        let heads: [FlowerKind] = [.clover, .dandelion, .mustard, .coneflower, .milkweed, .fennel]
+        guard let fi = scene.land.flowers.indices.first(where: { heads.contains(scene.land.flowers[$0].kind) }) else {
+            throw CheckFailure(detail: "no flower with a plain head")
+        }
+        let head: SIMD2<Double> = scene.land.head(fi)
+        let hc = Int(floor(head.x / Double(meadowCell.width))), hr = Int(floor(head.y / Double(meadowCell.height)))
+        let hi = hr * canvas.cols + hc
+        try expect(canvas.glyph[hi] != CellCanvas.noGlyph, "\(scene.land.flowers[fi].kind) head cell (\(hc), \(hr)) is empty")
+        let inked = pixels(hc, hr, near: canvas.ink[hi] | 0xff00_0000)
+        try expect(inked > 4, "head cell: \(inked) pixels in the ink \(String(canvas.ink[hi], radix: 16))")
+    }
+    check("meadowComposeDraws", meadowComposeDraws)
+}

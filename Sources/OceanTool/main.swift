@@ -9,6 +9,11 @@
 //   OceanTool paths <out.png> [--seconds S] [--seed N]
 //     Meadow butterfly flight paths (Paths.swift): each species flown freely for S s (default 60) over an
 //     1800x1169 field in calm air with one gust, drawn in species colours with a tick at every wingbeat.
+//   OceanTool meadow-still <out.png> <W>x<H> [--light] [--calm] [--seconds S] [--seed N] [--scale N] [--poses]
+//     A first Meadow still (MeadowStill.swift): the land on one screen, two of each species flown toward random
+//     flowers for S s (default 20) in the natural breeze, then one frame painted through the renderer (--scale
+//     default 1: a W x H pixel PNG). --poses: instead of the flown butterflies, each species (a row) held in
+//     seven poses, open to closed (MeadowStill.poseSheet), over the same meadow.
 //   OceanTool bench [--habitat ocean|web]
 //   OceanTool bench --desk [--habitat ocean|web] [--separate] [--laptop WxH] [--density D] [--seconds S]
 //     CPU per second on the owner's desk (Bench.swift): both viewports drawn as the app draws them, at 30 and 15 fps.
@@ -111,6 +116,27 @@ case "paths":
     let seed = UInt64(option("--seed") ?? "1") ?? 1
     guard args.count == 1 else { fail("usage: OceanTool paths <out.png> [--seconds S] [--seed N]") }
     try FlightPaths.run(out: URL(fileURLWithPath: args[0]), seconds: seconds, seed: seed)
+
+case "meadow-still":
+    let light = flag("--light"), calm = flag("--calm"), poses = flag("--poses")
+    let usage = "usage: OceanTool meadow-still <out.png> <W>x<H> [--light] [--calm] [--seconds S] [--seed N] [--scale N] [--poses]"
+    // Every number is checked before it reaches the layout, the steps or the texture: finite and in range.
+    let secondsText = option("--seconds") ?? "20", seedText = option("--seed") ?? "1", scaleText = option("--scale") ?? "1"
+    guard let seconds = Double(secondsText), seconds.isFinite, seconds >= 0, seconds <= 3600 else {
+        fail("bad --seconds \(secondsText): 0 to 3600")
+    }
+    guard let seed = UInt64(seedText) else { fail("bad --seed \(seedText): a whole number from 0") }
+    guard let scaleValue = Double(scaleText), scaleValue.isFinite, scaleValue >= 1, scaleValue <= 4 else {
+        fail("bad --scale \(scaleText): 1 to 4")
+    }
+    guard args.count == 2 else { fail(usage) }
+    let dims = args[1].split(separator: "x").compactMap { Double($0) }
+    guard dims.count == 2, dims.allSatisfy({ $0.isFinite && $0 >= 64 && $0 <= 8192 }),
+          dims[0] * scaleValue <= 16384, dims[1] * scaleValue <= 16384 else {
+        fail("bad size \(args[1]): W and H 64 to 8192 pt, at most 16384 pixels at the scale")
+    }
+    try MeadowStill.run(out: URL(fileURLWithPath: args[0]), size: CGSize(width: dims[0], height: dims[1]),
+                        scale: CGFloat(scaleValue), light: light, calm: calm, seconds: seconds, seed: seed, poses: poses)
 
 case "iconset":
     guard args.count == 1 else { fail("usage: OceanTool iconset <dir.iconset>") }
