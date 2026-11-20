@@ -63,6 +63,8 @@ public final class Butterfly {
     private var wasPushing = false
     private var wander: Double
     private var time: Double = 0
+    /// This beat's wanted speed as a share of the species' (`ButterflySpecies.surge`), redrawn at every clap.
+    private var pace: Double = 1
     // The morpho's bounds: +1 climbing, -1 dropping.
     private var bound: Double = 0
     private var boundLeft: Int = 0
@@ -284,7 +286,8 @@ public final class Butterfly {
         let drag: Double = ButterflySpecies.drag
 
         // ── How fast, and how fast it beats ──
-        var speed: Double = (state == .approach || state == .cursor ? sp.forage : sp.cruise) * scale
+        let base: Double = state == .approach || state == .cursor ? sp.forage : sp.cruise
+        var speed: Double = base * scale * pace
         var beatMul: Double = beatFactor
         var climb: Double = 0
         if state == .flush {
@@ -388,6 +391,7 @@ public final class Butterfly {
                 uy += thrust * hy
                 beatsLeft -= 1
                 if beatsLeft <= 0 { armed = true }
+                if sp.surge > 0 { pace = clamp(1 + sp.surge * gauss(random), 0.4, 1.6) }
                 let near: Double = target == nil || far ? 1 : 0.3
                 if random.unit() < sp.jinkChance { jink += gauss(random) * sp.jinkSigma * jinkFactor * near }
                 if sp.boundAngle > 0 {

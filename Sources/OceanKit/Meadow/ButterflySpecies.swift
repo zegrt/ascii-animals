@@ -39,6 +39,11 @@ public struct ButterflySpecies: Sendable {
 
     // ── Speed ──
     public let cruise: Double, forage: Double
+    /// Beat-to-beat change of the wanted speed: σ as a share of it, drawn at every clap. The white surges as
+    /// much as it turns (Jantzen & Eisner 2008: 8.5 m/s² along the path, 7.6 across it; free-flight speed
+    /// 2.37 ± 0.44 m/s); the others hold their pace. The white's 0.45 is tuned so its per-beat a_n / a_t lands
+    /// on the measured 0.9 (`flightPathsMatchMeasurements`); the pace is held to 0.4–1.6 × the species' speed.
+    public let surge: Double
     /// Escape burst: speed × 2 and beat × 1.25 (still ≤ 3 Hz) for 0.6–1.2 s, climbing at `escapeClimb`.
     public let escapeSpeed: Double, escapeBeat: Double
     public let escapeSeconds: ClosedRange<Double>
@@ -132,7 +137,7 @@ public struct ButterflySpecies: Sendable {
     static let monarch = ButterflySpecies(
         span: 13, height: 5, tailRow: false, sizeSpread: 0.12,
         realBeat: 9.5, beat: 2.6, strokeMid: 20 * deg, strokeAmp: 60 * deg,
-        cruise: 170, forage: 80, escapeSpeed: 2, escapeBeat: 1.25, escapeSeconds: 0.6...1.2,
+        cruise: 170, forage: 80, surge: 0, escapeSpeed: 2, escapeBeat: 1.25, escapeSeconds: 0.6...1.2,
         escapeClimb: (15 * deg)...(15 * deg), escapeJinks: 0,
         boutBeats: 3...8, glideSeconds: 1.5...5, glideAngle: 15.5 * deg, glideWidth: 0.95,
         jinkChance: 0.12, jinkSigma: 12 * deg, boundBeats: 0...0, boundAngle: 0,
@@ -147,7 +152,7 @@ public struct ButterflySpecies: Sendable {
     static let morpho = ButterflySpecies(
         span: 15, height: 5, tailRow: false, sizeSpread: 0.12,
         realBeat: 6, beat: 1.7, strokeMid: 15 * deg, strokeAmp: 65 * deg,
-        cruise: 150, forage: 70, escapeSpeed: 2, escapeBeat: 1.25, escapeSeconds: 0.6...1.2,
+        cruise: 150, forage: 70, surge: 0, escapeSpeed: 2, escapeBeat: 1.25, escapeSeconds: 0.6...1.2,
         escapeClimb: (13 * deg)...(22 * deg), escapeJinks: 0,
         boutBeats: 4...10, glideSeconds: 0.6...2, glideAngle: 11 * deg, glideWidth: 1,
         jinkChance: 0.30, jinkSigma: 30 * deg, boundBeats: 2...4, boundAngle: 22 * deg,
@@ -162,7 +167,7 @@ public struct ButterflySpecies: Sendable {
     static let swallowtail = ButterflySpecies(
         span: 13, height: 5, tailRow: true, sizeSpread: 0.12,
         realBeat: 7, beat: 2.0, strokeMid: 20 * deg, strokeAmp: 55 * deg,
-        cruise: 170, forage: 80, escapeSpeed: 2, escapeBeat: 1.25, escapeSeconds: 0.6...1.2,
+        cruise: 170, forage: 80, surge: 0, escapeSpeed: 2, escapeBeat: 1.25, escapeSeconds: 0.6...1.2,
         escapeClimb: (15 * deg)...(15 * deg), escapeJinks: 0,
         boutBeats: 3...6, glideSeconds: 1...3, glideAngle: 12 * deg, glideWidth: 1,
         jinkChance: 0.25, jinkSigma: 25 * deg, boundBeats: 0...0, boundAngle: 0,
@@ -177,7 +182,7 @@ public struct ButterflySpecies: Sendable {
     static let cabbageWhite = ButterflySpecies(
         span: 9, height: 4, tailRow: false, sizeSpread: 0.12,
         realBeat: 11.8, beat: 3.0, strokeMid: 25 * deg, strokeAmp: 55 * deg,
-        cruise: 140, forage: 70, escapeSpeed: 2, escapeBeat: 1.25, escapeSeconds: 0.6...1.2,
+        cruise: 140, forage: 70, surge: 0.45, escapeSpeed: 2, escapeBeat: 1.25, escapeSeconds: 0.6...1.2,
         escapeClimb: (20 * deg)...(20 * deg), escapeJinks: 2,
         boutBeats: 30...90, glideSeconds: 0.15...0.4, glideAngle: 20 * deg, glideWidth: 1,
         jinkChance: 0.40, jinkSigma: 40 * deg, boundBeats: 0...0, boundAngle: 0,
