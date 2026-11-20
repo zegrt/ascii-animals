@@ -180,11 +180,14 @@ const SPECIES_LIST = [
   { key: 'white', label: 'Cabbage white', swatch: '#dcdacb' },
 ];
 
-const f2 = v => (+v).toFixed(2), x2 = v => (+v).toFixed(2) + ' ×';
+const f2 = v => (+v).toFixed(2), x2 = v => (+v).toFixed(2) + ' ×', sec = v => (+v).toFixed(1) + ' s';
+// Defaults: the director's settings of 2026-11-20 ("for now"): more travel and more vigour. Every ↺ goes back to them.
 const CONTROLS = [
   { group: 'Butterflies', items: [
-    { k: 'count', label: 'How many', min: 1, max: 12, step: 1, def: 4, fmt: v => String(v),
-      hint: 'Butterflies on screen at once. You asked for few.' },
+    { k: 'count', label: 'How many', min: 1, max: 12, step: 1, def: 7, fmt: v => String(v),
+      hint: 'Butterflies on screen at once. New ones fly in from an edge; spare ones fly out through the nearest edge.' },
+    { k: 'areaCount', type: 'toggle', label: 'Scale the count by screen area', def: false,
+      hint: 'On: "How many" is for a 1440 × 900 laptop screen, and a bigger screen gets more in proportion.' },
     { k: 'sizeLow', label: 'Size down on the flowers', min: 0.2, max: 1.5, step: 0.01, def: 0.75, fmt: x2,
       hint: 'Drawn size at ground level, as a share of the species size (a monarch is 22 cells across at 1 ×).' },
     { k: 'sizeHigh', label: 'Size up close', min: 0.4, max: 2.5, step: 0.01, def: 1.4, fmt: x2,
@@ -195,45 +198,83 @@ const CONTROLS = [
     { k: 'wingbeat', label: 'Wingbeat speed', min: 0.1, max: 1, step: 0.01, def: 0.5,
       fmt: v => f2(v) + ' × real · monarch ' + beatHz('monarch', v).toFixed(1) + ' Hz',
       hint: 'Share of the real wingbeat (the app today: 0.28, capped at 3 Hz). Capped at 7.5 Hz, 4 frames a beat at 30 fps.' },
-    { k: 'lurch', label: 'Lurch on the downstroke', min: 0, max: 2, step: 0.01, def: 1, fmt: x2,
+    { k: 'lurch', label: 'Lurch on the downstroke', min: 0, max: 3, step: 0.01, def: 2, fmt: x2,
       hint: 'The push forward each downstroke gives: the jerky, beat-by-beat pace of a real butterfly.' },
-    { k: 'zigzag', label: 'Zig-zag', min: 0, max: 3, step: 0.01, def: 1, fmt: x2,
+    { k: 'zigzag', label: 'Zig-zag', min: 0, max: 3, step: 0.01, def: 1.29, fmt: x2,
       hint: 'Jinks and side-slips at each wingbeat (the cabbage white most, the monarch least).' },
-    { k: 'glide', label: 'Gliding', min: 0, max: 3, step: 0.01, def: 1, fmt: x2,
+    { k: 'glide', label: 'Gliding', min: 0, max: 3, step: 0.01, def: 0.44, fmt: x2,
       hint: 'How often and how long they stop beating and sail with wings flat, sinking toward the flowers.' },
-    { k: 'speed', label: 'Travel speed', min: 0.3, max: 2.5, step: 0.01, def: 1, fmt: x2,
+    { k: 'speed', label: 'Travel speed', min: 0.3, max: 3, step: 0.01, def: 2, fmt: x2,
       hint: 'How fast they cross the screen (1 × is the measured cruise at screen scale).' },
-    { k: 'turning', label: 'Turning', min: 0.2, max: 2, step: 0.01, def: 1, fmt: x2,
+    { k: 'turning', label: 'Turning', min: 0.2, max: 2, step: 0.01, def: 1.23, fmt: x2,
       hint: 'How quickly they swing round to face where they fly.' },
     { k: 'bob', label: 'Bob', min: 0, max: 3, step: 0.01, def: 1, fmt: x2,
       hint: 'The rise on each downstroke, seen from above as a pulse in size and shadow.' },
     { k: 'height', label: 'Time spent high vs low', min: 0, max: 1, step: 0.01, def: 0.5,
       fmt: v => v < 0.34 ? f2(v) + ' · mostly low' : v > 0.66 ? f2(v) + ' · mostly high' : f2(v) + ' · both',
       hint: '0 keeps them down among the flowers, 1 up close to you.' },
+    { k: 'ease', label: 'Soft take-off and landing', min: 0, max: 3, step: 0.01, def: 1, fmt: x2,
+      hint: 'Nothing snaps: at take-off the wings blend from the landed pose into the beat (0.15 s at 1 ×) and the body turns on its spring; landing brakes over the last beats and eases the wings into the pose (0.35 s). 0 is round 2\'s snap.' },
   ] },
-  { group: 'Visits', items: [
+  { group: 'Visits and wants', items: [
     { k: 'visits', label: 'Flower visits', min: 0, max: 1, step: 0.01, def: 0.35, fmt: f2,
-      hint: 'Chance they head for a flower when they arrive somewhere, rather than travel on.' },
+      hint: 'Chance they head for a flower when they arrive somewhere, rather than travel on. A hungry one is likelier, a full one less.' },
     { k: 'stay', label: 'How long they stay', min: 0, max: 1.5, step: 0.01, def: 0.25,
       fmt: v => x2(v) + ' · monarch ' + Math.round(10 * v) + '–' + Math.round(40 * v) + ' s',
-      hint: 'Share of the real time spent on a flower or basking (monarch 10–40 s at 1 ×).' },
-    { k: 'bask', label: 'Basking', min: 0, max: 1, step: 0.01, def: 0.1, fmt: f2,
-      hint: 'Chance they settle on the ground with wings open flat instead of travelling on.' },
+      hint: 'Share of the real time spent on a flower or basking (monarch 10–40 s at 1 ×), × each one\'s boldness.' },
+    { k: 'bask', label: 'Basking', min: 0, max: 1, step: 0.01, def: 0.2, fmt: f2,
+      hint: 'Chance they settle on the ground with wings open flat instead of travelling on. A cold one is likelier.' },
+    { k: 'hunger', label: 'Hunger', min: 0, max: 3, step: 0.01, def: 1, fmt: v => v < 0.005 ? 'off' : x2(v) + ' · ' + (v * 1).toFixed(1) + ' %/s',
+      hint: 'Nectar runs down 1 %/s in flight and fills while nectaring. A hungry one turns aside for a flower it senses. 0: fixed chances, as round 2.' },
+    { k: 'warmth', label: 'Warmth', min: 0, max: 3, step: 0.01, def: 1, fmt: v => v < 0.005 ? 'off' : x2(v),
+      hint: 'After a minute in the air they cool; a cold one is likelier to bask, and basking warms it. 0: fixed chances.' },
+    { k: 'sense', label: 'Flower sensing', min: 3, max: 30, step: 0.5, def: 12, fmt: v => (+v).toFixed(1) + ' wingspans',
+      hint: 'They sense flowers only this far, and not behind them (cos ≥ −0.2): senses, not knows. Round 2 saw the whole screen (30).' },
+    { k: 'touchGo', label: 'Touch-and-go', min: 0, max: 0.8, step: 0.01, def: 0.25, fmt: f2,
+      hint: 'Chance a landing is broken off at the last moment: it rises, circles the bloom once and tries again, or picks another.' },
+  ] },
+  { group: 'Temperament and the air', items: [
+    { k: 'boldness', label: 'Boldness spread', min: 0, max: 1, step: 0.01, def: 1, fmt: v => (1 - 0.4 * v).toFixed(2) + '–' + (1 + 0.4 * v).toFixed(2),
+      hint: 'Each butterfly gets a boldness: a bold one sits through stronger air, stays a little longer and flies a little higher. 0: all alike.' },
+    { k: 'airClose', label: 'Wings close in air of', min: 20, max: 200, step: 1, def: 60, fmt: v => Math.round(v) + ' pt/s',
+      hint: 'A landed butterfly feels the moving air in its cell, gusts and your pointer alike: above this it leans downwind and starts closing its wings.' },
+    { k: 'airFlush', label: 'Flushed by air of', min: 40, max: 400, step: 1, def: 120, fmt: v => Math.round(v) + ' pt/s',
+      hint: 'Above this it takes off (× its boldness). Stir the air near one to flush it; a flying one veers off and beats harder.' },
+    { k: 'relay', label: 'Alarm to neighbours', min: 0, max: 1, step: 0.01, def: 0.6, fmt: f2,
+      hint: 'A flushed butterfly startles landed ones within 3 wingspans after 0.15–0.4 s, timid ones likelier. A small relay, never a whole-screen scatter.' },
+    { k: 'spaceByHeight', type: 'toggle', label: 'Spacing only at similar heights', def: true,
+      hint: 'On: they keep apart only from butterflies at about their height, so a high one may cross over a low one. Off: apart at any height (round 2).' },
+  ] },
+  { group: 'Your pointer', items: [
+    { k: 'cursorLand', type: 'toggle', label: 'Land on a still pointer', def: true,
+      hint: 'Hold the pointer still and one spirals in and settles on it, up at the glass, opening and closing now and then. Any move sends it off in an escape burst.' },
+    { k: 'holdTime', label: 'Still for', min: 1, max: 10, step: 0.1, def: 3, fmt: sec,
+      hint: 'How long the pointer has to stay still (within 2 pt) before one comes.' },
+  ] },
+  { group: 'Small life', items: [
+    { k: 'life', label: 'Life when landed', min: 0, max: 3, step: 0.01, def: 1, fmt: x2,
+      hint: 'Breathing, an antenna twitch now and then, a small shuffle on the flower, a lean in a gust. 0: still as round 2.' },
+  ] },
+  { group: 'Traces', items: [
+    { k: 'downwash', label: 'Wing downwash', min: 0, max: 3, step: 0.01, def: 1, fmt: x2,
+      hint: 'A low butterfly\'s downstrokes push the air out under it: the grass flickers and lies over beneath it, then settles.' },
+    { k: 'nod', label: 'Flowers nod', min: 0, max: 3, step: 0.01, def: 1, fmt: x2,
+      hint: 'A landing dips the flower along the butterfly\'s way; a take-off kicks it half as much back.' },
   ] },
   { group: 'Flowers', items: [
-    { k: 'density', label: 'Flower density', min: 0.2, max: 3, step: 0.01, def: 1, fmt: x2,
+    { k: 'density', label: 'Flower density', min: 0.2, max: 3, step: 0.01, def: 0.85, fmt: x2,
       hint: 'How many planted patches across the screen.' },
-    { k: 'flowerSize', label: 'Flower size', min: 0.4, max: 2, step: 0.01, def: 1.15, fmt: x2,
+    { k: 'flowerSize', label: 'Flower size', min: 0.4, max: 2, step: 0.01, def: 1.32, fmt: x2,
       hint: 'Size of the blooms (a daisy is about 11 cells across at 1 ×).' },
-    { k: 'leaves', label: 'Leaves', min: 0, max: 2, step: 0.01, def: 1, fmt: x2,
+    { k: 'leaves', label: 'Leaves', min: 0, max: 2, step: 0.01, def: 1.24, fmt: x2,
       hint: 'The dark rosettes of leaves under each bloom.' },
   ] },
   { group: 'Air and ground', items: [
-    { k: 'breeze', label: 'Breeze', min: 0, max: 3, step: 0.01, def: 1, fmt: x2,
+    { k: 'breeze', label: 'Breeze', min: 0, max: 3, step: 0.01, def: 1.7, fmt: x2,
       hint: 'Gusts that ripple through the grass, sway the flowers and drift the butterflies.' },
     { k: 'shadow', label: 'Shadows', min: 0, max: 1.5, step: 0.01, def: 1, fmt: x2,
       hint: 'How dark the shadows are; a high butterfly casts a fainter, farther one.' },
-    { k: 'green', label: 'Green in the ground', min: 0, max: 2.5, step: 0.01, def: 1, fmt: x2,
+    { k: 'green', label: 'Green in the ground', min: 0, max: 2.5, step: 0.01, def: 0.69, fmt: x2,
       hint: 'The hints of green in the black ground.' },
     { k: 'grass', label: 'Grass', min: 0, max: 2, step: 0.01, def: 1, fmt: x2,
       hint: 'How many grass marks, and how bright.' },
@@ -254,7 +295,8 @@ const CONTROLS = [
 
 const DEFAULTS = { species: { monarch: true, morpho: true, swallowtail: true, white: true } };
 for (const g of CONTROLS) for (const c of g.items) if (c.k !== 'species') DEFAULTS[c.k] = c.def;
-const STORE = 'meadow-sketch-settings-v1';
+// v3: round 3's defaults are the director's settings, so values saved by round 2 are not read back.
+const STORE = 'meadow-sketch-settings-v3';
 let set = JSON.parse(JSON.stringify(DEFAULTS));
 try {
   const saved = JSON.parse(localStorage.getItem(STORE) || 'null');
@@ -264,7 +306,7 @@ try {
 } catch (e) { /* storage blocked: defaults */ }
 if (params.get('defaults') === '1') set = JSON.parse(JSON.stringify(DEFAULTS));
 if (params.has('theme')) set.theme = params.get('theme') === 'light' ? 'light' : 'dark';
-for (const [k, v] of params) if (k.startsWith('s.') && k.slice(2) in DEFAULTS) set[k.slice(2)] = +v;
+for (const [k, v] of params) if (k.startsWith('s.') && k.slice(2) in DEFAULTS) set[k.slice(2)] = typeof DEFAULTS[k.slice(2)] === 'boolean' ? v === '1' || v === 'true' : +v;
 function save() { try { localStorage.setItem(STORE, JSON.stringify(set)); } catch (e) { /* ignore */ } }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -522,15 +564,17 @@ function shade(i, k) {
 //  Breeze: a slowly turning wind with gust bands that travel downwind, plus the air the pointer stirs
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-const wind = { cx: 1, cy: 0, base: 0, x: 0, y: 0, g: 0, m: 0 };
-let PG = 48, pgc = 0, pgr = 0, PFX = new Float32Array(0), PFY = new Float32Array(0);
-function pfInit() { PG = 48 * S; pgc = Math.ceil(W / PG) + 1; pgr = Math.ceil(H / PG) + 1; PFX = new Float32Array(pgc * pgr); PFY = new Float32Array(pgc * pgr); }
+// wind.x/y: all the air (what grass, flowers, pollen and flight drift feel); ax/ay: the air a landed butterfly feels
+// (the breeze and the pointer's stir, not other wings' downwash); px/py: the pointer's stir alone.
+const wind = { cx: 1, cy: 0, base: 0, x: 0, y: 0, g: 0, m: 0, ax: 0, ay: 0, px: 0, py: 0 };
+let PG = 48, pgc = 0, pgr = 0, PFX = new Float32Array(0), PFY = new Float32Array(0), DWX = new Float32Array(0), DWY = new Float32Array(0);
+function pfInit() { PG = 48 * S; pgc = Math.ceil(W / PG) + 1; pgr = Math.ceil(H / PG) + 1; PFX = new Float32Array(pgc * pgr); PFY = new Float32Array(pgc * pgr); DWX = new Float32Array(pgc * pgr); DWY = new Float32Array(pgc * pgr); }
 function updateWind(t, dt) {
   const dir = 0.35 + 1.1 * n1(t * 0.013, 91);
   wind.cx = Math.cos(dir); wind.cy = Math.sin(dir);
   wind.base = 26 * S * set.breeze * (0.75 + 0.35 * n1(t * 0.05, 17));
   const k = Math.exp(-1.6 * dt);
-  for (let i = 0; i < PFX.length; i++) { PFX[i] *= k; PFY[i] *= k; }
+  for (let i = 0; i < PFX.length; i++) { PFX[i] *= k; PFY[i] *= k; DWX[i] *= k; DWY[i] *= k; }
 }
 /** Gust strength at a point, 0 … 1: bands that roll downwind across the meadow. */
 function gustAt(x, y, t) {
@@ -543,14 +587,18 @@ function gustAt(x, y, t) {
 function windAt(x, y, t) {
   const g = gustAt(x, y, t);
   const m = wind.base * (0.2 + 1.7 * g);
-  let px = 0, py = 0;
+  let px = 0, py = 0, dx = 0, dy = 0;
   const gx = clamp(x / PG, 0, pgc - 1.001), gy = clamp(y / PG, 0, pgr - 1.001);
   const ix = gx | 0, iy = gy | 0, fx = gx - ix, fy = gy - iy, i = iy * pgc + ix;
   if (PFX.length) {
-    px = (PFX[i] * (1 - fx) + PFX[i + 1] * fx) * (1 - fy) + (PFX[i + pgc] * (1 - fx) + PFX[i + pgc + 1] * fx) * fy;
-    py = (PFY[i] * (1 - fx) + PFY[i + 1] * fx) * (1 - fy) + (PFY[i + pgc] * (1 - fx) + PFY[i + pgc + 1] * fx) * fy;
+    const a = (1 - fx) * (1 - fy), b = fx * (1 - fy), c = (1 - fx) * fy, d = fx * fy;
+    px = PFX[i] * a + PFX[i + 1] * b + PFX[i + pgc] * c + PFX[i + pgc + 1] * d;
+    py = PFY[i] * a + PFY[i + 1] * b + PFY[i + pgc] * c + PFY[i + pgc + 1] * d;
+    dx = DWX[i] * a + DWX[i + 1] * b + DWX[i + pgc] * c + DWX[i + pgc + 1] * d;
+    dy = DWY[i] * a + DWY[i + 1] * b + DWY[i + pgc] * c + DWY[i + pgc + 1] * d;
   }
-  wind.x = wind.cx * m + px; wind.y = wind.cy * m + py; wind.g = g; wind.m = Math.hypot(wind.x, wind.y);
+  wind.px = px; wind.py = py; wind.ax = wind.cx * m + px; wind.ay = wind.cy * m + py;
+  wind.x = wind.ax + dx; wind.y = wind.ay + dy; wind.g = g; wind.m = Math.hypot(wind.x, wind.y);
 }
 function stir(x, y, vx, vy) {
   const rad = 3, cx = x / PG, cy = y / PG;
@@ -658,8 +706,8 @@ function bloomAt(x, y) {
   }
   // A fresh bloom is an offer: the nearest butterfly that is travelling may come.
   let best = null, bd = 1e9;
-  for (const b of flies) if (b.state === 'fly') { const d = Math.hypot(b.x - x, b.y - y); if (d < bd) { bd = d; best = b; } }
-  if (best && rnd() < 0.7) { best.goal = 'nectar'; best.flower = f.id; f.busy = best.id; best.state = 'approach'; best.timer = 16; }
+  for (const b of flies) if (b.state === 'fly' && !b.leaving && !b.entering) { const d = Math.hypot(b.x - x, b.y - y); if (d < bd) { bd = d; best = b; } }
+  if (best && rnd() < 0.7) { goToFlower(best, f); best.timer = 16; }
 }
 
 function stepFlowers(dt) {
@@ -958,33 +1006,112 @@ let flies = [];
 let flyId = 1;
 let simT = 0;
 const dust = [];
+let cursorCd = 0;   // seconds before another butterfly may come to a still pointer
 
-function makeFly(kind) {
+const isLanded = b => b.state === 'nectar' || b.state === 'bask' || b.state === 'cursor';
+/** Boldness, 0.6 … 1.4 at the default spread: each butterfly keeps its own draw, the slider scales the spread. */
+const boldOf = b => 1 + b.boldU * 0.4 * set.boldness;
+/** Wingspan used for the flight's distances, pt (about the mid-height drawn size). */
+const spanRef = b => b.sp.span * 13 * S * b.size * 0.6;
+/** How far past its centre a butterfly can be drawn, pt (wings and tails), at its height. */
+const drawReach = b => b.sp.span * 13 * S * b.size * depthScale(b.z) * 0.5 * 1.15 + 2 * cw;
+const ease01 = t => t * t * (3 - 2 * t);
+
+function makeFly(kind, mode) {
   const sp = SPECIES[kind];
   const b = { id: flyId++, kind, sp, x: R(0.1, 0.9) * W, y: R(0.1, 0.9) * H, ux: 0, uy: 0, vx: 0, vy: 0,
     heading: R(0, TAU), turn: 0, jink: 0, phase: R(0, TAU), stroke: 0, bank: 0, z: 0.5, zs: R(0.35, 0.75), zv: 0, bobAmp: 1,
     size: 1 + R(-0.12, 0.12), beatF: 1 + R(-0.1, 0.1), jinkF: 1 + R(-0.3, 0.3), seed: RI(1, 1e6),
     gliding: false, glideLeft: 0, glideHeading: 0, beatsLeft: RI(sp.bout[0], sp.bout[1]), armed: false, pace: 1,
-    bound: 1, boundLeft: RI(2, 4), boost: 0, state: 'fly', goal: '', flower: 0, gx: 0, gy: 0, wx: 0, wy: 0, wpLeft: 0,
-    timer: 0, landHeading: 0, slow: R(0, 10), flash: R(10, 30), flashT: 0, t: R(0, 100) };
-  const sp0 = b.heading; b.ux = Math.cos(sp0) * sp.cruise * S * 0.6; b.uy = Math.sin(sp0) * sp.cruise * S * 0.6;
+    bound: 1, boundLeft: RI(2, 4), boost: 0, boostK: 1.8, state: 'fly', goal: '', flower: 0, gx: 0, gy: 0, wx: 0, wy: 0, wpLeft: 0,
+    timer: 0, landHeading: 0, slow: R(0, 10), flash: R(10, 30), flashT: 0, t: R(0, 100),
+    // Round 3: temperament, wants, soft transitions, senses, small life.
+    boldU: R(-1, 1), energy: R(0.4, 0.95), warmth: R(0.45, 1), airT: R(0, 50),
+    blendK: 1, blendFrom: 0, landK: 1, landFrom: 0, brake: 0, ampK: 1,
+    alert: 0, leanX: 0, leanY: 0, flushIn: 0, fleeX: 0, fleeY: 0, relayDepth: 0, startleCd: 0, senseT: R(0, 0.7),
+    tag: 0, tagTries: 0, circleT: 0, circleDir: 1, spiral: null,
+    antT: [0, 0], antS: [1, -1], stillT: 0, shuffleT: R(4, 9), leaving: false, entering: false, dead: false, wait: 0 };
   b.stroke = sp.mid + sp.amp * Math.cos(b.phase);
+  b.zs = clamp(b.zs + 0.375 * (boldOf(b) - 1), 0.06, 0.96);
+  b.z = b.zs;
   pickWaypoint(b);
+  const sp0 = b.heading; b.ux = Math.cos(sp0) * sp.cruise * S * 0.6; b.uy = Math.sin(sp0) * sp.cruise * S * 0.6;
+  if (mode === 'edge') enterFromEdge(b);
+  else {
+    // On screen at load: the best of 12 spots for room from the others, so they don't start in a heap.
+    let bs = -1;
+    for (let i = 0; i < 12; i++) { const x = R(0.08, 0.92) * W, y = R(0.08, 0.92) * H; let d = 1e9; for (const o of flies) d = Math.min(d, Math.hypot(o.x - x, o.y - y)); if (d > bs) { bs = d; b.x = x; b.y = y; } }
+  }
   return b;
 }
-/** Wingspan used for the flight's distances, pt (about the mid-height drawn size). */
-const spanRef = b => b.sp.span * 13 * S * b.size * 0.6;
 
-function syncFlies() {
+/** A newcomer enters from a real edge, as the family's fish schools and flies do: picked by length, 0.15–0.85 along
+ *  it, just out of sight, heading inward ± 0.6 rad at cruise (Flies.swift:245–270, World.swift:631–666). */
+function enterFromEdge(b) {
+  const out = drawReach(b) + 20 * S;
+  // The best of 6 entry points for room from the others (so several newcomers don't arrive together).
+  let best = null, bs = -1;
+  for (let i = 0; i < 6; i++) {
+    const u = rnd() * 2 * (W + H), t = R(0.15, 0.85); let x, y, a;
+    if (u < W) { x = t * W; y = -out; a = Math.PI / 2; }
+    else if (u < 2 * W) { x = t * W; y = H + out; a = -Math.PI / 2; }
+    else if (u < 2 * W + H) { x = -out; y = t * H; a = 0; }
+    else { x = W + out; y = t * H; a = Math.PI; }
+    let d = 1e9; for (const o of flies) if (o !== b) d = Math.min(d, Math.hypot(o.x - x, o.y - y), Math.hypot(o.wx - x, o.wy - y) * 1.5);
+    if (d > bs) { bs = d; best = { x, y, a }; }
+  }
+  b.x = best.x; b.y = best.y;
+  const a = best.a + R(-0.6, 0.6);
+  b.heading = a; b.turn = 0; b.jink = 0;
+  const v = b.sp.cruise * S * set.speed; b.ux = Math.cos(a) * v; b.uy = Math.sin(a) * v;
+  pickWaypoint(b);
+  b.entering = true;
+}
+
+/** A spare butterfly leaves through the nearest real edge and is gone once it is out of sight. */
+function sendAway(b) {
+  if (b.leaving) return;
+  if (isLanded(b)) takeOff(b); else { releaseFlower(b); b.state = 'fly'; b.goal = ''; b.spiral = null; }
+  b.leaving = true; b.entering = false;
+  aimAtExit(b);
+}
+function aimAtExit(b) {
+  const dl = b.x, dr = W - b.x, dtp = b.y, db = H - b.y, m = Math.min(dl, dr, dtp, db), out = 400 * S;
+  if (m === dl) { b.wx = -out; b.wy = b.y; } else if (m === dr) { b.wx = W + out; b.wy = b.y; }
+  else if (m === dtp) { b.wx = b.x; b.wy = -out; } else { b.wx = b.x; b.wy = H + out; }
+}
+
+function wantedCount() { return set.areaCount ? clamp(Math.round(set.count * W * H / (1440 * 900)), 1, 24) : set.count; }
+
+/** Keeps the number on screen to the setting. Raising it brings butterflies in from an edge; lowering it (or turning a
+ *  species off) sends the spare ones out through the nearest edge. At load (`initial`) they start on screen. */
+function syncFlies(initial) {
   const on = SPECIES_LIST.map(s => s.key).filter(k => set.species[k]);
-  flies = flies.filter(b => on.includes(b.kind));
-  if (!on.length) { flies = []; return; }
-  while (flies.length > set.count) { const b = flies.pop(); releaseFlower(b); }
-  while (flies.length < set.count) {
+  if (initial) flies = flies.filter(b => on.includes(b.kind));
+  for (const b of flies) if (!on.includes(b.kind)) sendAway(b);
+  const want = on.length ? wantedCount() : 0;
+  let active = flies.filter(b => !b.leaving);
+  while (active.length > want) {
+    // The one that leaves: a flying one, nearest an edge (landed ones and the one on the pointer stay put).
+    let best = null, bs = 1e18;
+    for (const b of active) {
+      const e = Math.min(b.x, W - b.x, b.y, H - b.y) + (isLanded(b) ? 1e6 : 0) + (b.goal === 'cursor' ? 1e7 : 0) + (b.state === 'approach' ? 600 : 0);
+      if (e < bs) { bs = e; best = b; }
+    }
+    if (initial) { releaseFlower(best); flies.splice(flies.indexOf(best), 1); } else sendAway(best);
+    active = flies.filter(b => !b.leaving);
+  }
+  // Raising it again turns leavers back before anyone new comes in.
+  for (const b of flies) if (active.length < want && b.leaving && on.includes(b.kind)) { b.leaving = false; pickWaypoint(b); active.push(b); }
+  let wait = 0;
+  while (active.length < want) {
     // The species with the fewest on screen, so 4 butterflies are one of each.
     let best = null, bc = 1e9; const order = on.slice().sort(() => rnd() - 0.5);
-    for (const k of order) { const c = flies.filter(b => b.kind === k).length; if (c < bc) { bc = c; best = k; } }
-    flies.push(makeFly(best));
+    for (const k of order) { const c = active.filter(b => b.kind === k).length; if (c < bc) { bc = c; best = k; } }
+    const b = makeFly(best, initial ? 'inside' : 'edge');
+    // Newcomers trickle in, one every 0.4–0.9 s, rather than all at once.
+    if (!initial) { b.wait = wait; wait += R(0.4, 0.9); }
+    flies.push(b); active.push(b);
   }
 }
 
@@ -993,6 +1120,7 @@ function releaseFlower(b) { if (b.flower) { const f = flowerById(b.flower); if (
 /** The next place to travel to: the best of a few random points for being far from here, away from the other
  *  butterflies and their goals, and roughly ahead (a correlated random walk over the whole screen). */
 function pickWaypoint(b) {
+  if (b.leaving) { aimAtExit(b); b.wpLeft = 1e9; return; }
   const m = 0.07 * Math.min(W, H), diag = Math.hypot(W, H);
   let best = null, bs = -1e9;
   for (let i = 0; i < 9; i++) {
@@ -1008,14 +1136,20 @@ function pickWaypoint(b) {
   b.wx = best.x; b.wy = best.y; b.wpLeft = R(4, 9);
 }
 
+/** A flower it can sense: within `sense` wingspans and not behind it (cos ≥ −0.2), weighted by the species'
+ *  favourites and by how far it is from the others. Senses, doesn't know: what it can't sense it doesn't pick. */
 function pickFlower(b) {
-  const diag = Math.hypot(W, H);
+  const diag = Math.hypot(W, H), range = set.sense * spanRef(b), hx = Math.cos(b.heading), hy = Math.sin(b.heading);
   let tot = 0; const cand = [];
   for (const f of flowers) {
     if (f.busy || f.age < 0.6) continue;
-    const d = Math.hypot(f.x - b.x, f.y - b.y);
-    if (d < 120 * S || f.x < 0 || f.y < 0 || f.x > W || f.y > H) continue;
-    let w = (b.sp.flowers[f.kind] || 0.5) * (d < 0.6 * diag ? 1 : 0.4);
+    const dx = f.x - b.x, dy = f.y - b.y, d = Math.hypot(dx, dy);
+    if (d < 1.2 * spanRef(b) || d > range || f.x < 0 || f.y < 0 || f.x > W || f.y > H) continue;
+    if ((dx * hx + dy * hy) / d < -0.2) continue;
+    // Not a bloom right beside one already taken: seen from above, two sets of wings on top of each other are a muddle.
+    let crowded = false; for (const o of flies) if (o !== b && isLanded(o) && Math.hypot(o.x - f.x, o.y - f.y) < 0.9 * (spanRef(b) + spanRef(o))) { crowded = true; break; }
+    if (crowded) continue;
+    let w = (b.sp.flowers[f.kind] || 0.5) * (1.2 - 0.6 * d / range);
     let sep = 1e9; for (const o of flies) if (o !== b) sep = Math.min(sep, Math.hypot(o.x - f.x, o.y - f.y));
     w *= 0.25 + Math.min(1, sep / (0.25 * diag));
     if (w > 0) { cand.push([f, w]); tot += w; }
@@ -1025,50 +1159,91 @@ function pickFlower(b) {
   return cand[cand.length - 1][0];
 }
 
+/** Wants: a hungry one is likelier to visit, a cold one to bask (round 2's fixed chances when the drive is off). */
+const visitChance = b => set.visits * (set.hunger > 0.005 ? clamp(0.2 + 1.6 * (1 - b.energy), 0.2, 1.8) : 1);
+const baskChance = b => set.bask * (set.warmth > 0.005 ? clamp(0.45 + 1.4 * (1 - b.warmth), 0.45, 1.8) : 1);
+
+function goToFlower(b, f) { releaseFlower(b); b.state = 'approach'; b.goal = 'nectar'; b.flower = f.id; f.busy = b.id; b.timer = 18; b.tag = 0; b.tagTries = 0; b.circleT = 0; }
+
 function chooseNext(b) {
   releaseFlower(b);
-  const u = rnd();
-  if (u < set.visits) {
+  const u = rnd(), pv = clamp(visitChance(b), 0, 1);
+  if (u < pv) {
     const f = pickFlower(b);
-    if (f) { b.state = 'approach'; b.goal = 'nectar'; b.flower = f.id; f.busy = b.id; b.timer = 18; return; }
-  } else if (u < set.visits + set.bask * (1 - set.visits)) {
+    if (f) { goToFlower(b, f); return; }
+  } else if (u < pv + baskChance(b) * (1 - pv)) {
     const m = 0.1 * Math.min(W, H);
-    b.state = 'approach'; b.goal = 'bask'; b.flower = 0; b.timer = 18;
+    b.state = 'approach'; b.goal = 'bask'; b.flower = 0; b.timer = 18; b.tag = 1;
     let best = null, bs = -1;
     for (let i = 0; i < 6; i++) { const x = R(m, W - m), y = R(m, H - m); let sep = 1e9; for (const o of flies) if (o !== b) sep = Math.min(sep, Math.hypot(o.x - x, o.y - y));
       const d = Math.hypot(x - b.x, y - b.y); const s = Math.min(sep, 400 * S) + (d > 200 * S ? 200 : 0); if (s > bs) { bs = s; best = { x, y }; } }
     b.gx = best.x; b.gy = best.y; return;
   }
-  b.state = 'fly'; pickWaypoint(b);
+  b.state = 'fly'; b.goal = ''; pickWaypoint(b);
+}
+
+/** Where on the pointer it sits: the proboscis tip at the pointer, the body behind it along its heading. */
+function cursorSpot(b) {
+  const hh = b.sp.span * 13 * S * b.size * depthScale(b.z) * b.sp.aspect / 2;
+  const off = 0.4 * hh + 1.0 * cw;
+  return [ptr.x - Math.cos(b.heading) * off, ptr.y - Math.sin(b.heading) * off];
 }
 
 function target(b) {
+  if (b.goal === 'cursor') return cursorSpot(b);
   if (b.flower) { const f = flowerById(b.flower); if (f) return [f.x + f.ox, f.y + f.oy]; }
   return [b.gx, b.gy];
 }
 
-function takeOff(b, awayX, awayY) {
+/** The flower nods: an impulse to its head's spring along `(hx, hy)` that peaks near 0.12 R × size (× k). */
+function nodFlower(f, hx, hy, b, k) {
+  if (!f || set.nod <= 0) return;
+  const v = 0.12 * f.R * b.size * TAU * f.f0 * set.nod * k;
+  f.vx += hx * v; f.vy += hy * v;
+}
+
+function takeOff(b, awayX, awayY, escape) {
+  const sp = b.sp, was = b.state;
   if (b.flower) {
     const f = flowerById(b.flower);
     // The visit shows on the flower: its disc dims for 20–40 s (pollen taken).
-    if (f && b.state === 'nectar') { f.dimMax = R(20, 40); f.dimT = f.dimMax; }
+    if (f && was === 'nectar') { f.dimMax = R(20, 40); f.dimT = f.dimMax; }
     if (f) for (let i = 0; i < 7; i++) dust.push({ x: f.x + f.ox + R(-6, 6) * S, y: f.y + f.oy + R(-6, 6) * S, vx: R(-15, 15) * S, vy: R(-15, 15) * S, life: R(2.5, 4.5), max: 4.5, spark: false });
+    // Pushing off kicks the bloom half as much back.
+    if (f) nodFlower(f, -Math.cos(b.heading), -Math.sin(b.heading), b, 0.5);
   }
   releaseFlower(b);
-  b.state = 'fly'; b.boost = R(0.6, 1.0); b.zv = 0.45; b.bobAmp = 1; b.gliding = false; b.armed = false;
-  b.beatsLeft = Math.max(RI(b.sp.bout[0], b.sp.bout[1]), 6);
+  if (was === 'bask') b.airT = 0;
+  b.state = 'fly'; b.goal = ''; b.spiral = null; b.tag = 0; b.tagTries = 0; b.circleT = 0; b.alert = 0; b.flushIn = 0;
+  b.boost = escape ? R(0.6, 1.2) : R(0.6, 1.0); b.boostK = escape ? 2 : 1.8;
+  b.zv = was === 'cursor' ? 0.05 : 0.45; b.bobAmp = 1; b.gliding = false; b.armed = false; b.brake = 0;
+  b.beatsLeft = Math.max(RI(sp.bout[0], sp.bout[1]), 6);
   pickWaypoint(b);
-  if (awayX !== undefined) { const a = Math.atan2(b.y - awayY, b.x - awayX); b.wx = clamp(b.x + Math.cos(a) * 500 * S, 40, W - 40); b.wy = clamp(b.y + Math.sin(a) * 500 * S, 40, H - 40); b.heading = a; }
-  b.phase = 0;
+  if (awayX !== undefined) {
+    const a = Math.atan2(b.y - awayY, b.x - awayX) + (escape ? R(-0.5, 0.5) : 0);
+    if (!b.leaving) { b.wx = clamp(b.x + Math.cos(a) * 500 * S, 40, W - 40); b.wy = clamp(b.y + Math.sin(a) * 500 * S, 40, H - 40); }
+    // Round 2 set the heading at once; now the heading spring turns it (a kick to the turn rate, not to the angle).
+    if (set.ease > 0) b.turn = clamp(b.turn + angDiff(b.heading, a) * 3.5, -6, 6); else b.heading = a;
+  }
+  if (set.ease > 0) {
+    // Start the beat where it matches the landed pose: wings held high (closed, a vee) go straight into the
+    // downstroke, wings held low (open flat) first rise. Whatever is left is blended over 0.15 s.
+    const th = Math.acos(clamp((b.stroke - sp.mid) / sp.amp, -1, 1));
+    b.phase = b.stroke >= sp.mid ? th : TAU - th;
+    b.blendFrom = b.stroke; b.blendK = 0;
+  } else { b.phase = 0; b.blendK = 1; }
 }
 
 function land(b) {
   b.state = b.goal;
   const sp = b.sp;
-  const range = b.goal === 'nectar' ? sp.nectar : sp.bask;
-  b.timer = Math.max(0.8, R(range[0], range[1]) * set.stay);
-  b.landHeading = b.heading + gauss() * 0.5;
-  b.gliding = false; b.zv = 0; b.ux = b.uy = 0;
+  if (b.goal === 'cursor') { b.timer = R(25, 45); b.flash = R(1.5, 3.5); b.flashT = 0; }
+  else { const range = b.goal === 'nectar' ? sp.nectar : sp.bask; b.timer = Math.max(0.8, R(range[0], range[1]) * set.stay * boldOf(b)); }
+  b.landHeading = b.goal === 'cursor' ? b.heading : b.heading + gauss() * 0.5;
+  b.gliding = false; b.zv = 0; b.spiral = null; b.relayDepth = 0; b.stillT = 0; b.alert = 0; b.flushIn = 0;
+  // The airspeed is braked away in stepLanded, not zeroed; the wings ease from the beat into the pose.
+  b.landFrom = b.stroke; b.landK = set.ease > 0 ? 0 : 1; b.brake = 0;
+  if (b.flower) nodFlower(flowerById(b.flower), Math.cos(b.heading), Math.sin(b.heading), b, 1);
 }
 
 function startGlide(b) {
@@ -1081,6 +1256,7 @@ function endGlide(b) {
   b.gliding = false;
   const k = Math.max(0.3, set.glide);
   b.beatsLeft = Math.max(2, Math.round(RI(b.sp.bout[0], b.sp.bout[1]) / k));
+  if (set.ease > 0) { b.blendFrom = b.stroke; b.blendK = 0; }
 }
 
 /** The clap, wings together at the top: one beat done. Jinks (the hindwings' zig-zag), side-slips, the white's
@@ -1097,48 +1273,129 @@ function clap(b, speed, hx, hy) {
   if (sp.bound) { if (--b.boundLeft <= 0) { b.bound = -b.bound; b.boundLeft = RI(2, 4); b.zv += b.bound * 0.22 * Math.min(2, set.bob); } }
 }
 
+/** A flushed butterfly startles landed neighbours within 3 wingspans after 0.15–0.4 s, timid ones likelier, and the
+ *  alarm passes on once more at half the chance: a small relay, never a whole-screen scatter. */
+function relayAlarm(src) {
+  if (set.relay <= 0 || src.relayDepth >= 2) return;
+  for (const o of flies) {
+    if (o === src || !isLanded(o) || o.state === 'cursor' || o.flushIn > 0) continue;
+    const d = Math.hypot(o.x - src.x, o.y - src.y);
+    if (d > 1.5 * (spanRef(src) + spanRef(o))) continue;
+    if (rnd() < set.relay * clamp(1.5 - boldOf(o), 0, 1) * (src.relayDepth ? 0.5 : 1)) {
+      o.flushIn = R(0.15, 0.4); o.relayDepth = src.relayDepth + 1; o.fleeX = src.x; o.fleeY = src.y;
+    }
+  }
+}
+
+/** The wings' downwash: each downstroke of a low butterfly pushes the air out under it (a second air field that
+ *  moves grass and flowers but is not felt as alarm and leaves no gold motes). */
+function wash(x, y, v, rad) {
+  const cx = x / PG, cy = y / PG, rr = rad / PG;
+  for (let r = Math.floor(cy - rr); r <= Math.ceil(cy + rr); r++) for (let c = Math.floor(cx - rr); c <= Math.ceil(cx + rr); c++) {
+    if (c < 0 || r < 0 || c >= pgc || r >= pgr) continue;
+    const ox = c - cx, oy = r - cy, d = Math.hypot(ox, oy); if (d >= rr || d < 1e-3) continue;
+    const w = 1 - d / rr, i = r * pgc + c;
+    DWX[i] = clamp(DWX[i] + ox / d * v * w, -200, 200); DWY[i] = clamp(DWY[i] + oy / d * v * w, -200, 200);
+  }
+}
+
 function stepFly(b, dt) {
   const sp = b.sp;
   b.t += dt;
-  if (b.state === 'nectar' || b.state === 'bask') { stepLanded(b, dt); return; }
+  if (b.startleCd > 0) b.startleCd -= dt;
+  if (b.wait > 0) { b.wait -= dt; return; }   // still out of sight, waiting its turn to come in
+  if (isLanded(b)) { stepLanded(b, dt); return; }
+  // ── wants: nectar runs down in flight; after a minute in the air it cools ──
+  b.energy = Math.max(0, b.energy - 0.01 * set.hunger * dt);
+  b.airT += dt; if (b.airT > 60) b.warmth = Math.max(0, b.warmth - 0.012 * set.warmth * dt);
+  const span = spanRef(b);
   // ── where it is going ──
   let tx, ty;
-  if (b.state === 'approach') {
-    if (b.flower && !flowerById(b.flower)) { b.state = 'fly'; pickWaypoint(b); }
-    [tx, ty] = b.state === 'approach' ? target(b) : [b.wx, b.wy];
+  if (b.leaving) {
+    tx = b.wx; ty = b.wy;
+    const out = drawReach(b);
+    if (b.x < -out || b.y < -out || b.x > W + out || b.y > H + out) { b.dead = true; return; }
+  } else if (b.state === 'approach') {
+    if (b.goal === 'nectar' && !flowerById(b.flower)) { b.state = 'fly'; b.goal = ''; b.flower = 0; pickWaypoint(b); }
+    if (b.state === 'approach') [tx, ty] = target(b); else { tx = b.wx; ty = b.wy; }
   } else { tx = b.wx; ty = b.wy; }
+  if (b.entering && b.x > 0.6 * span && b.y > 0.6 * span && b.x < W - 0.6 * span && b.y < H - 0.6 * span) b.entering = false;
   let dx = tx - b.x, dy = ty - b.y, dist = Math.hypot(dx, dy);
-  const span = spanRef(b);
-  if (b.state === 'fly') { b.wpLeft -= dt; if (dist < 1.1 * span || b.wpLeft <= 0) { chooseNext(b); return; } }
-  else { b.timer -= dt; if (b.timer <= 0) { releaseFlower(b); b.state = 'fly'; pickWaypoint(b); return; } }
+  // The pointer spiral: 1.5–2.2 loose, shrinking circles round the pointer, then in to sit on it.
+  if (b.goal === 'cursor' && b.state === 'approach' && b.spiral) {
+    const S_ = b.spiral, cx = ptr.x, cy = ptr.y, ang = Math.atan2(b.y - cy, b.x - cx), dc = Math.hypot(b.x - cx, b.y - cy);
+    if (!S_.on && dc < S_.r0 * 1.25) { S_.on = true; S_.last = ang; }
+    if (S_.on) {
+      S_.swept += Math.max(0, angDiff(S_.last, ang) * S_.dir); S_.last = ang; S_.t += dt;
+      // Progress by the circles flown, or by time (2.4 s a loop) if jinks keep throwing it wide.
+      const done = Math.min(1, Math.max(S_.swept / (S_.loops * TAU), S_.t / (S_.loops * 2.4))), r = S_.r0 * (1 - done);
+      S_.done = done;
+      if (done < 1 && r > 0.45 * span) { const g = ang + S_.dir * 0.75; tx = cx + Math.cos(g) * r; ty = cy + Math.sin(g) * r; dx = tx - b.x; dy = ty - b.y; dist = Math.max(Math.hypot(dx, dy), 1.3 * span); }
+      else b.spiral = null;
+    } else { tx = cx; ty = cy; dx = tx - b.x; dy = ty - b.y; dist = Math.hypot(dx, dy); }
+  }
+  // Touch-and-go: a broken-off landing circles the bloom once at about a wingspan, then tries again.
+  if (b.circleT > 0) {
+    b.circleT -= dt;
+    const ang = Math.atan2(b.y - ty, b.x - tx), g = ang + b.circleDir * 0.9, r = 1.1 * span;
+    tx += Math.cos(g) * r; ty += Math.sin(g) * r; dx = tx - b.x; dy = ty - b.y; dist = Math.max(Math.hypot(dx, dy), 2.2 * span);
+    if (b.circleT <= 0) b.tag = 0;
+  }
+  if (!b.leaving) {
+    if (b.state === 'fly') { b.wpLeft -= dt; if (dist < 1.1 * span || b.wpLeft <= 0) { chooseNext(b); return; } }
+    else { b.timer -= dt; if (b.timer <= 0) { releaseFlower(b); b.state = 'fly'; b.goal = ''; b.spiral = null; pickWaypoint(b); return; } }
+    // A hungry one turns aside for a flower it senses on its way.
+    if (b.state === 'fly' && set.hunger > 0.005 && b.energy < 0.3 && (b.senseT -= dt) <= 0) {
+      b.senseT = 0.7;
+      if (rnd() < 0.5 * Math.min(1, set.visits / 0.35)) { const f = pickFlower(b); if (f) { goToFlower(b, f); return; } }
+    }
+  }
 
   // ── how fast, and how fast it beats ──
   let speed = sp.cruise * S * set.speed * b.pace;
   let near = 1;
-  if (b.state === 'approach') { near = clamp(dist / (2.2 * span), 0, 1); speed = lerp(sp.forage * S * set.speed, speed, near); }
+  if (b.state === 'approach') {
+    near = clamp(dist / (2.2 * span), 0, 1); speed = lerp(sp.forage * S * set.speed, speed, near);
+    if (b.goal === 'cursor' && b.spiral && b.spiral.on) speed = lerp(sp.forage, sp.cruise, 0.6) * S * Math.min(set.speed, 1.8);
+  }
   let f = sp.realBeat * set.wingbeat * b.beatF;
-  if (b.boost > 0) { b.boost -= dt; speed *= 1.8; f *= 1.25; }
+  if (b.boost > 0) { b.boost -= dt; speed *= b.boostK; f *= 1.25; }
   windAt(b.x, b.y, simT);
-  const wx = wind.x, wy = wind.y;
+  const wx = wind.x, wy = wind.y, pxs = wind.px, pys = wind.py;
   if (wind.m > 0.3 * speed) f *= 1.15;   // gusts: beat faster
   f = Math.min(BEAT_CAP, f);
+  // Air stirred by the pointer: a flying one feels it and veers off across the flow, beating harder.
+  const pm = Math.hypot(pxs, pys);
+  if (pm > set.airFlush * S * (0.7 + 0.3 * boldOf(b)) && b.startleCd <= 0 && b.goal !== 'cursor') {
+    b.startleCd = 1.5; b.boost = Math.max(b.boost, 0.7); b.boostK = 1.8;
+    const across = Math.atan2(pys, pxs) + (Math.sin(b.heading - Math.atan2(pys, pxs)) >= 0 ? 1 : -1) * R(0.6, 1.3);
+    b.jink += angDiff(b.heading, across) * 0.8;
+    if (b.state === 'approach' && b.goal !== 'cursor') { releaseFlower(b); b.state = 'fly'; b.goal = ''; pickWaypoint(b); }
+  }
 
   // ── the heading it wants ──
   let want = Math.atan2(dy, dx);
-  if (b.state === 'fly') want += 0.45 * n1(b.t * 0.16, b.seed);
+  if (b.state === 'fly' && !b.leaving) want += 0.45 * n1(b.t * 0.16, b.seed);
   let px = 0, py = 0;
   for (const o of flies) {
     if (o === b) continue;
+    // Spacing among similar heights (|Δz| < 0.25) in full; across heights a softer steer and a light push, so a high
+    // one and a low one may cross over each other but don't linger stacked (switchable).
+    const hk = set.spaceByHeight ? smooth(0.35, 0.15, Math.abs(b.z - o.z)) : 1;
     const ox = b.x - o.x, oy = b.y - o.y, d = Math.hypot(ox, oy), lim = 2.4 * (span + spanRef(o)) / 2;
-    // Seen from above, two butterflies over each other read as one muddle at any height: keep them apart.
-    if (d < lim && d > 0.1) { const w = (1 - d / lim) * (o.state === 'nectar' || o.state === 'bask' ? 0.6 : 1); px += ox / d * w * w * 2; py += oy / d * w * w * 2; }
+    // A landed neighbour stops pushing over the last stretch of a landing, so a bloom beside it can still be reached.
+    const lk = isLanded(o) ? 0.6 * (b.state === 'approach' ? smooth(0.25, 0.9, near) : 1) : 1;
+    if (d < lim && d > 0.1) { const w = (1 - d / lim) * lk * (0.7 + 0.3 * hk); px += ox / d * w * w * 2; py += oy / d * w * w * 2; }
     const touch = 0.8 * (span + spanRef(o));
-    if (d < touch && d > 0.1) { const push = (1 - d / touch) * 260 * S * dt; b.ux += ox / d * push; b.uy += oy / d * push; }
+    if (d < touch && d > 0.1) { const push = (1 - d / touch) * 260 * S * dt * (0.25 + 0.75 * hk); b.ux += ox / d * push; b.uy += oy / d * push; }
   }
-  const m = -0.25 * span;   // they may flutter a little off screen, then turn back
+  // They may flutter a little off screen, then turn back (not when entering or leaving through an edge).
+  const m = -0.25 * span;
   let ex = 0, ey = 0;
-  if (b.x < m) ex = 1; else if (b.x > W - m) ex = -1;
-  if (b.y < m) ey = 1; else if (b.y > H - m) ey = -1;
+  if (!b.leaving && !b.entering) {
+    if (b.x < m) ex = 1; else if (b.x > W - m) ex = -1;
+    if (b.y < m) ey = 1; else if (b.y > H - m) ey = -1;
+  }
   if (px || py || ex || ey) want = Math.atan2(Math.sin(want) + 2.6 * py + 2 * ey, Math.cos(want) + 2.6 * px + 2 * ex);
 
   // ── heading on a spring (full stiffness, so a jink is a flick) ──
@@ -1156,24 +1413,33 @@ function stepFly(b, dt) {
   // the wanted pace between pushes, so the pace pulses every beat. Height is two parts: a slow height that flapping
   // climbs toward and glides sink from, and the bob, the rise and fall within each beat (lift on the downstroke
   // against gravity: its fundamental puts the body lowest mid-downstroke and highest mid-upstroke).
+  // The brake: over the last beats of a landing the push and the stroke halve, so it settles instead of stopping.
+  const brakeT = set.ease > 0 && b.state === 'approach' && b.circleT <= 0 && !b.spiral && dist < 0.9 * span ? 1 : 0;
+  b.brake += (brakeT - b.brake) * Math.min(1, 5 * dt);
   const drag = 8;
-  const impulse = sp.thrust * speed * set.lurch;
+  const impulse = sp.thrust * speed * set.lurch * (1 - 0.7 * b.brake);
   const w = TAU * f;
-  const zBase = clamp(set.height + 0.3 * n1(b.t * 0.045, b.seed + 3), 0.06, 0.96);
-  const zc = b.state === 'approach' ? lerp(0.0, zBase, smooth(0.1, 1, near)) : (b.boost > 0 ? Math.max(zBase, 0.55) : zBase);
+  const zBase = clamp(set.height + 0.3 * n1(b.t * 0.045, b.seed + 3) + 0.375 * (boldOf(b) - 1), 0.06, 0.96);
+  let zc = b.state === 'approach' ? lerp(0.0, zBase, smooth(0.1, 1, near)) : (b.boost > 0 ? Math.max(zBase, 0.55) : zBase);
+  if (b.goal === 'cursor') zc = b.spiral && b.spiral.on ? lerp(zBase, 0.92, Math.min(1, b.spiral.done + 0.3)) : (b.spiral ? zBase : 0.92);
+  if (b.circleT > 0) zc = Math.max(zc, 0.2);
   if (!b.gliding) {
     const prev = b.phase;
     b.phase += w * dt;
     const s = Math.sin(b.phase);
-    if (s > 0) { const a = impulse * Math.PI * f * s; b.ux += a * hx * dt; b.uy += a * hy * dt; }
+    if (s > 0) {
+      const a = impulse * Math.PI * f * s; b.ux += a * hx * dt; b.uy += a * hy * dt;
+      // Downwash under a low butterfly, outward, 40 pt/s at the ground (× the slider).
+      if (b.z < 0.35 && set.downwash > 0) wash(b.x, b.y, 520 * S * set.downwash * (1 - b.z / 0.35) * s * dt, 1.2 * span);
+    }
     if (b.phase >= TAU) { b.phase -= TAU; clap(b, speed, hx, hy); }
     const v = Math.max(0.12 * speed, speed - impulse * f / drag);
     b.ux += -drag * (b.ux - v * hx) * dt; b.uy += -drag * (b.uy - v * hy) * dt;
-    b.stroke = sp.mid + sp.amp * Math.cos(b.phase);
+    b.stroke = sp.mid + sp.amp * (1 - 0.5 * b.brake) * Math.cos(b.phase);
     const kz = 1.4;
     b.zv += (kz * (zc - b.zs) - 2 * Math.sqrt(kz) * b.zv) * dt;
     b.bobAmp += (1 - b.bobAmp) * Math.min(1, 6 * dt);
-    const canGlide = set.glide > 0.01 && b.boost <= 0 && b.zs > zc - 0.1 && (b.state === 'fly' || near > 0.7);
+    const canGlide = set.glide > 0.01 && b.boost <= 0 && b.zs > zc - 0.1 && (b.state === 'fly' || near > 0.7) && b.goal !== 'cursor';
     if (b.armed && canGlide && prev < sp.glidePhase && b.phase >= sp.glidePhase) startGlide(b);
   } else {
     b.glideLeft -= dt;
@@ -1185,10 +1451,12 @@ function stepFly(b, dt) {
     b.bobAmp *= Math.exp(-5 * dt);
     b.stroke = sp.glideStroke + 4 * DEG * Math.sin(b.t * 2.3 + b.seed);
   }
+  // Nothing snaps: right after a take-off (or a glide) the wings blend from where they were into the beat.
+  if (b.blendK < 1) { b.blendK = Math.min(1, b.blendK + dt / (0.15 * Math.max(0.05, set.ease))); b.stroke = lerp(b.blendFrom, b.stroke, ease01(b.blendK)); }
   b.zs += b.zv * dt;
   if (b.zs < 0.02) { b.zs = 0.02; if (b.zv < 0) b.zv = 0; }
   if (b.zs > 0.97) { b.zs = 0.97; if (b.zv > 0) b.zv = 0; }
-  const bobZ = 0.045 * set.bob * (sp.bob / 0.25) * b.bobAmp;
+  const bobZ = 0.045 * set.bob * (sp.bob / 0.25) * b.bobAmp * (1 - 0.5 * b.brake);
   b.z = clamp(b.zs - bobZ * Math.sin(b.phase), 0, 1);
 
   // ── bank into turns (a small difference between the wings' widths) ──
@@ -1199,46 +1467,162 @@ function stepFly(b, dt) {
   b.vx = b.ux + wx * 0.55; b.vy = b.uy + wy * 0.55;
   b.x += b.vx * dt; b.y += b.vy * dt;
 
-  // ── settling onto the flower or the ground ──
-  if (b.state === 'approach') {
+  // ── settling onto the flower, the ground or the pointer ──
+  if (b.state === 'approach' && b.circleT <= 0 && !b.spiral) {
     [tx, ty] = target(b); dx = tx - b.x; dy = ty - b.y; dist = Math.hypot(dx, dy);
     if (dist < 0.6 * span) {
+      // Touch-and-go: some landings are broken off at the last moment, then tried once more.
+      if (b.goal === 'nectar' && !b.tag) {
+        b.tag = 1;
+        if (rnd() < set.touchGo) {
+          if (++b.tagTries > 1) { const f2_ = pickFlower(b); releaseFlower(b); if (f2_) goToFlower(b, f2_); else { b.state = 'fly'; b.goal = ''; pickWaypoint(b); } b.tagTries = 2; b.tag = 1; }
+          else { b.circleT = R(1.0, 1.6); b.circleDir = rnd() < 0.5 ? 1 : -1; b.zv += 0.4; }
+          return;
+        }
+      }
       const pull = Math.min(1, (1 - dist / (0.6 * span)) * 6 * dt);
       b.x += dx * pull; b.y += dy * pull;
-      b.zv = Math.min(b.zv, -0.35 - 0.6 * (1 - dist / (0.6 * span)));
-      if (dist < 0.12 * span && b.zs < 0.1) land(b);
+      if (b.goal === 'cursor') {
+        b.zv = Math.max(b.zv, 0.2 + 0.4 * (1 - dist / (0.6 * span)));
+        if (dist < 0.15 * span && b.zs > 0.8) land(b);
+      } else {
+        b.zv = Math.min(b.zv, -0.35 - 0.6 * (1 - dist / (0.6 * span)));
+        if (dist < 0.12 * span && b.zs < 0.1) land(b);
+      }
     }
   }
 }
 
-function stepLanded(b, dt) {
+/** The pose its wings hold when landed (before the small life and the alert). */
+function landedPose(b, dt) {
   const sp = b.sp;
+  if (b.state === 'cursor') {
+    // On the pointer: wings up in a vee, opening flat and closing again every 4–10 s.
+    b.flash -= dt;
+    if (b.flash <= 0) { b.flashT = 1.6; b.flash = R(4, 10); }
+    if (b.flashT > 0) { b.flashT -= dt; const k = Math.sin(Math.PI * clamp(1 - b.flashT / 1.6, 0, 1)); return (64 - 56 * k) * DEG; }
+    return (64 + 6 * Math.sin(b.slow * 0.7)) * DEG;
+  }
+  if (b.state === 'nectar') {
+    if (sp.flutterOnFlower) { b.phase += TAU * Math.min(BEAT_CAP, sp.realBeat * set.wingbeat * 0.8) * dt; return (34 + 16 * Math.cos(b.phase)) * DEG; }
+    // Wings held half-open, opening and closing slowly now and then.
+    const slow = 0.5 + 0.5 * Math.sin(b.slow * 1.3 + b.seed);
+    return (28 + 46 * Math.pow(slow, 1.5)) * DEG;
+  }
+  if (sp.baskPose === 'open') return (4 + 6 * Math.max(0, Math.sin(b.slow * 0.9))) * DEG;
+  if (sp.baskPose === 'vee') return (52 + 8 * Math.sin(b.slow * 0.8)) * DEG;
+  // The morpho rests wings closed and flashes them open now and then.
+  b.flash -= dt;
+  if (b.flash <= 0) { b.flashT = 0.6; b.flash = R(5, 14); }
+  if (b.flashT > 0) { b.flashT -= dt; return (10 + 76 * Math.abs(Math.cos(Math.PI * (b.flashT / 0.6)))) * DEG; }
+  return 86 * DEG;
+}
+
+function stepLanded(b, dt) {
+  const sp = b.sp, life = set.life;
   b.timer -= dt;
+  b.slow += dt; b.stillT += dt;
+  if (b.state === 'cursor' && !ptr.has) { takeOff(b); return; }
+  // Wants: nectar fills while it drinks; basking (and a little, sitting in the sun on a flower) warms it.
+  if (b.state === 'nectar') b.energy = Math.min(1, b.energy + 0.08 * dt);
+  if (b.state === 'bask') b.warmth = Math.min(1, b.warmth + 0.12 * dt);
+  else b.warmth = Math.min(1, b.warmth + 0.02 * dt);
+  // The air it sits in, gusts and the pointer's stir alike (not other wings' downwash).
+  windAt(b.x, b.y, simT);
+  const am = Math.hypot(wind.ax, wind.ay), bold = boldOf(b);
+  const closeAt = set.airClose * S * (0.7 + 0.3 * bold), flushAt = set.airFlush * S * (0.7 + 0.3 * bold);
+  const alertT = b.state === 'cursor' ? 0 : smooth(0.6 * closeAt, Math.max(closeAt + 1, 0.9 * flushAt), am);
+  b.alert += (alertT - b.alert) * Math.min(1, (alertT > b.alert ? 8 : 1.5) * dt);
+  if (am > flushAt && b.flushIn <= 0 && b.state !== 'cursor') { b.flushIn = R(0.05, 0.15); b.fleeX = b.x - wind.ax / am * 100; b.fleeY = b.y - wind.ay / am * 100; }
+  if (b.flushIn > 0) { b.flushIn -= dt; if (b.flushIn <= 0) { takeOff(b, b.fleeX, b.fleeY); relayAlarm(b); return; } }
+  // The leftover airspeed brakes away; it settles onto its spot and, in moving air, leans downwind.
+  b.ux *= Math.exp(-7 * dt); b.uy *= Math.exp(-7 * dt);
+  const lean = 0.1 * spanRef(b) * Math.min(2, life) * smooth(0.5 * closeAt, flushAt, am);
+  const lx = am > 1 ? wind.ax / am * lean : 0, ly = am > 1 ? wind.ay / am * lean : 0;
+  b.leanX += (lx - b.leanX) * Math.min(1, 6 * dt); b.leanY += (ly - b.leanY) * Math.min(1, 6 * dt);
   const [tx, ty] = target(b);
-  b.x += (tx - b.x) * Math.min(1, 10 * dt); b.y += (ty - b.y) * Math.min(1, 10 * dt);
-  b.zs += (0 - b.zs) * Math.min(1, 6 * dt); b.z = b.zs; b.zv = 0;
+  b.x += b.ux * dt + (tx + b.leanX - b.x) * Math.min(1, 10 * dt); b.y += b.uy * dt + (ty + b.leanY - b.y) * Math.min(1, 10 * dt);
+  b.vx = b.ux; b.vy = b.uy;
+  const zT = b.state === 'cursor' ? 0.92 : 0;
+  b.zs += (zT - b.zs) * Math.min(1, 6 * dt); b.z = b.zs; b.zv = 0;
+  // A small shuffle on its perch now and then (±0.15 rad), easing round.
+  if (life > 0 && (b.shuffleT -= dt) <= 0) { b.shuffleT = R(4, 9); b.landHeading += R(-0.15, 0.15) * Math.min(2, life); }
   b.heading += angDiff(b.heading, b.landHeading) * Math.min(1, 2 * dt);
   b.bank *= Math.exp(-4 * dt);
-  b.slow += dt;
-  if (b.state === 'nectar') {
-    if (sp.flutterOnFlower) { b.phase += TAU * Math.min(BEAT_CAP, sp.realBeat * set.wingbeat * 0.8) * dt; b.stroke = (34 + 16 * Math.cos(b.phase)) * DEG; }
-    else {
-      // Wings held half-open, opening and closing slowly now and then.
-      const slow = 0.5 + 0.5 * Math.sin(b.slow * 1.3 + b.seed);
-      b.stroke = (28 + 46 * Math.pow(slow, 1.5)) * DEG;
-    }
-  } else {
-    if (sp.baskPose === 'open') b.stroke = (4 + 6 * Math.max(0, Math.sin(b.slow * 0.9))) * DEG;
-    else if (sp.baskPose === 'vee') b.stroke = (52 + 8 * Math.sin(b.slow * 0.8)) * DEG;
-    else {
-      // The morpho rests wings closed and flashes them open now and then.
-      b.flash -= dt;
-      if (b.flash <= 0) { b.flashT = 0.6; b.flash = R(5, 14); }
-      if (b.flashT > 0) { b.flashT -= dt; b.stroke = (10 + 76 * Math.abs(Math.cos(Math.PI * (b.flashT / 0.6)))) * DEG; }
-      else b.stroke = 86 * DEG;
+  // An antenna twitch: after 1.5 s still, now and then one antenna swings out and back over 0.3 s.
+  for (let s = 0; s < 2; s++) if (b.antT[s] > 0) b.antT[s] = Math.max(0, b.antT[s] - dt);
+  if (life > 0 && b.stillT > 1.5 && rnd() < 0.3 * Math.min(2, life) * dt) { const s = rnd() < 0.5 ? 0 : 1; if (b.antT[s] <= 0) { b.antT[s] = 0.3; b.antS[s] = rnd() < 0.5 ? 1 : -1; } }
+  // The wings: the pose, breathing a little, closing part-way in moving air, eased in from the beat on landing.
+  let pose = landedPose(b, dt);
+  pose += 1.5 * DEG * life * Math.sin(1.6 * b.slow + b.seed);
+  pose = lerp(pose, 86 * DEG, 0.7 * b.alert * Math.min(1, life + 0.5));
+  if (b.landK < 1) { b.landK = Math.min(1, b.landK + dt / (0.35 * Math.max(0.05, set.ease))); b.stroke = lerp(b.landFrom, pose, ease01(b.landK)); }
+  else b.stroke = pose;
+  // A swallowtail fluttering on a flower washes the air under it too.
+  if (b.state === 'nectar' && sp.flutterOnFlower && set.downwash > 0) { const s = Math.sin(b.phase); if (s > 0) wash(b.x, b.y, 300 * S * set.downwash * s * dt, 1.0 * spanRef(b)); }
+  if (b.timer <= 0) takeOff(b);
+}
+
+/** Hold the pointer still and one comes: the choice weighted by species (swallowtail and white 2, monarch 1,
+ *  morpho 0.5) and by nearness; it spirals in and sits on the pointer. Any move sends it off (pointer handler). */
+function stepPointer(dt) {
+  cursorCd -= dt;
+  if (!ptr.has) { ptr.still = 0; return; }
+  ptr.still += dt;
+  if (!set.cursorLand || ptr.still < set.holdTime || cursorCd > 0) return;
+  if (flies.some(b => b.goal === 'cursor' || b.state === 'cursor')) return;
+  const diag = Math.hypot(W, H), SW = { swallowtail: 2, white: 2, monarch: 1, morpho: 0.5 };
+  let tot = 0; const cand = [];
+  for (const b of flies) {
+    if (b.leaving || b.entering || isLanded(b)) continue;
+    const w = SW[b.kind] / (1 + Math.hypot(b.x - ptr.x, b.y - ptr.y) / (0.35 * diag));
+    cand.push([b, w]); tot += w;
+  }
+  if (!cand.length) return;
+  let u = rnd() * tot, pick = cand[cand.length - 1][0];
+  for (const [b, w] of cand) { u -= w; if (u <= 0) { pick = b; break; } }
+  releaseFlower(pick); pick.state = 'approach'; pick.goal = 'cursor'; pick.timer = 30; pick.gliding = false; pick.circleT = 0;
+  const span = spanRef(pick);
+  pick.spiral = { on: false, swept: 0, last: 0, t: 0, done: 0, loops: R(1.5, 2.2), r0: R(1.3, 1.9) * span, dir: rnd() < 0.5 ? 1 : -1 };
+  cursorCd = 2;
+}
+/** The pointer moved more than 2.5 pt: the one on it bursts away; one on its way gives up. */
+function pointerMoved(x, y) {
+  ptr.still = 0;
+  for (const b of flies) {
+    if (b.state === 'cursor') { takeOff(b, x, y, true); cursorCd = 3; }
+    else if (b.goal === 'cursor') { b.state = 'fly'; b.goal = ''; b.spiral = null; b.boost = Math.max(b.boost, 0.4); b.boostK = 1.8; pickWaypoint(b); cursorCd = 3; }
+  }
+}
+
+/** The opening moment, as Web staggers its start: one already nectaring, one basking, one about to land on a flower,
+ *  the rest flying. */
+function openingMoment() {
+  const fl = flies.slice().sort(() => rnd() - 0.5);
+  const onScreen = f => f.x > 0.08 * W && f.x < 0.92 * W && f.y > 0.08 * H && f.y < 0.92 * H && !f.busy;
+  let i = 0;
+  const nect = fl[i];
+  if (nect) {
+    const opts = flowers.filter(onScreen);
+    const f = opts.sort((a, c) => (nect.sp.flowers[c.kind] || 0.5) - (nect.sp.flowers[a.kind] || 0.5))[0];
+    if (f) { nect.x = f.x; nect.y = f.y; nect.flower = f.id; f.busy = nect.id; nect.goal = 'nectar'; nect.z = nect.zs = 0; land(nect); nect.timer *= R(0.5, 0.9); nect.landK = 1; nect.heading = nect.landHeading; nect.stroke = landedPose(nect, 0); i++; }
+  }
+  const bask = fl[i];
+  if (bask) {
+    let best = null, bs = -1;
+    for (let k = 0; k < 12; k++) { const x = R(0.12, 0.88) * W, y = R(0.12, 0.88) * H; let sep = 1e9; for (const o of flies) if (o !== bask && isLanded(o)) sep = Math.min(sep, Math.hypot(o.x - x, o.y - y)); for (const f of flowers) sep = Math.min(sep, 1.5 * Math.hypot(f.x - x, f.y - y)); if (sep > bs) { bs = sep; best = { x, y }; } }
+    bask.x = bask.gx = best.x; bask.y = bask.gy = best.y; bask.goal = 'bask'; bask.flower = 0; bask.z = bask.zs = 0; land(bask); bask.timer *= R(0.5, 0.9); bask.landK = 1; bask.heading = bask.landHeading; bask.stroke = landedPose(bask, 0); i++;
+  }
+  const come = fl[i];
+  if (come) {
+    const opts = flowers.filter(f => onScreen(f) && !flies.some(o => isLanded(o) && Math.hypot(o.x - f.x, o.y - f.y) < 0.9 * (spanRef(come) + spanRef(o))));
+    if (opts.length) {
+      const f = opts[RI(0, opts.length - 1)], a = R(0, TAU), d = R(3, 4.5) * spanRef(come);
+      come.x = clamp(f.x + Math.cos(a) * d, 0.05 * W, 0.95 * W); come.y = clamp(f.y + Math.sin(a) * d, 0.05 * H, 0.95 * H);
+      come.heading = Math.atan2(f.y - come.y, f.x - come.x); come.ux = Math.cos(come.heading) * 60 * S; come.uy = Math.sin(come.heading) * 60 * S;
+      goToFlower(come, f); come.tag = 1; come.zs = come.z = 0.3;
     }
   }
-  if (b.timer <= 0) takeOff(b);
 }
 
 function stepDust(dt) {
@@ -1253,8 +1637,10 @@ function stepDust(dt) {
 function step(dt) {
   simT += dt;
   updateWind(simT, dt);
+  stepPointer(dt);
   stepFlowers(dt);
   for (const b of flies) stepFly(b, dt);
+  if (flies.some(b => b.dead)) flies = flies.filter(b => { if (b.dead) releaseFlower(b); return !b.dead; });
   stepDust(dt);
 }
 
@@ -1270,7 +1656,7 @@ function setPose(b, shadow) {
   const k = depthScale(z) * b.size;
   const span = sp.span * 13 * S * k;
   // A slight yaw with the beat, as the body rocks.
-  const h = b.heading + (b.state === 'nectar' || b.state === 'bask' ? 0 : 0.05 * Math.sin(b.phase));
+  const h = b.heading + (isLanded(b) ? 0 : 0.05 * Math.sin(b.phase));
   POSE.fx = Math.cos(h); POSE.fy = Math.sin(h); POSE.rx = -POSE.fy; POSE.ry = POSE.fx;
   POSE.hs = span / 2; POSE.hh = span * sp.aspect / 2;
   const sl = b.stroke - b.bank, sr = b.stroke + b.bank;
@@ -1543,7 +1929,9 @@ function drawButterfly(b) {
 
 function drawBody(b, ink, dim, stamp) {
   const fx = POSE.fx, fy = POSE.fy, rx = POSE.rx, ry = POSE.ry, hh = POSE.hh;
-  const head = 0.4 * hh, tail = -0.78 * hh;
+  // Landed, the abdomen breathes (Web's spiders: 1 + 0.035 sin(1.9 t)); here 1 + 0.05 sin(1.6 t) × the Life slider.
+  const breath = isLanded(b) ? 1 + 0.05 * Math.min(2, set.life) * Math.sin(1.6 * b.slow + b.seed) : 1;
+  const head = 0.4 * hh, tail = -0.78 * hh * breath;
   const step = 0.45 * Math.min(cw, ch);
   const cellOf = (x, y) => {
     const c = Math.floor(x / cw), r = Math.floor(y / ch);
@@ -1575,7 +1963,7 @@ function drawBody(b, ink, dim, stamp) {
   const fe = ink.feeler, fl = Math.max(1, lum(fe[0], fe[1], fe[2]));
   // Legs, when it has landed with its wings closed or in a vee: stroke glyphs on dim blocks, as Web's legs (glyph
   // l × 1.12, block l × 0.34), only where no wing covers them. The front pair reach forward past the forewings.
-  if ((b.state === 'nectar' || b.state === 'bask') && b.stroke > 45 * DEG) {
+  if (isLanded(b) && b.stroke > 45 * DEG) {
     const len = Math.max(1.6 * cw, 0.36 * hh), lv = 118 * dim;
     for (const [at, ang] of [[0.26, 0.55], [0.14, 1.5], [0.02, 2.35]]) for (const sg of [-1, 1]) {
       const dxL = fx * Math.cos(ang) + rx * Math.sin(ang) * sg, dyL = fy * Math.cos(ang) + ry * Math.sin(ang) * sg;
@@ -1594,7 +1982,9 @@ function drawBody(b, ink, dim, stamp) {
   // Antennae: out and forward from the head, clubbed; drawn as silk.
   const len = Math.max(1.6 * cw, 0.62 * hh);
   for (const sgn of [-1, 1]) {
-    const ang = 0.42 + 0.06 * Math.sin(b.phase);
+    // A landed one's antenna twitches out and back now and then (0.3 s, eased).
+    const at = b.antT[sgn < 0 ? 0 : 1], tw = at > 0 ? b.antS[sgn < 0 ? 0 : 1] * 0.25 * Math.sin(Math.PI * (1 - at / 0.3)) : 0;
+    const ang = (isLanded(b) ? 0.42 : 0.42 + 0.06 * Math.sin(b.phase)) + tw;
     const dxA = fx * Math.cos(ang) + rx * Math.sin(ang) * sgn, dyA = fy * Math.cos(ang) + ry * Math.sin(ang) * sgn;
     const ax = POSE.cx + fx * head, ay = POSE.cy + fy * head;
     let last = -1;
@@ -1603,6 +1993,17 @@ function drawBody(b, ink, dim, stamp) {
       if (i < 0 || i === last) continue; last = i;
       const cx = (i % cols + 0.5) * cw, cy = (Math.floor(i / cols) + 0.5) * ch;
       lGlyph(i, s + step > len ? G['°'] : lineGlyph(dxA, dyA, lineRow(ax, ay, dxA, dyA, cx, cy)), fe[0] * dim, fe[1] * dim, fe[2] * dim, 0.85);
+    }
+  }
+  // Drinking (on a flower or on your pointer): the proboscis, a fine line straight ahead of the head.
+  if ((b.state === 'nectar' || b.state === 'cursor') && b.landK >= 1) {
+    const ax = POSE.cx + fx * head, ay = POSE.cy + fy * head;
+    let last = -1;
+    for (let s = 0.55 * cw; s <= 1.05 * cw; s += 0.25 * cw) {
+      const x = ax + fx * s, y = ay + fy * s, i = cellOf(x, y);
+      if (i < 0 || i === last || wingStamp[i] === stamp) continue; last = i;
+      const cx = (i % cols + 0.5) * cw, cy = (Math.floor(i / cols) + 0.5) * ch;
+      lGlyph(i, lineGlyph(fx, fy, lineRow(ax, ay, fx, fy, cx, cy)), fe[0] * dim, fe[1] * dim, fe[2] * dim, 0.8);
     }
   }
 }
@@ -1795,26 +2196,19 @@ function blit() {
 //  Pointer: stir the breeze, flush the butterflies near a fast pointer, click to bloom
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-const ptr = { x: 0, y: 0, t: 0, down: false, moved: 0, has: false };
+const ptr = { x: 0, y: 0, t: 0, down: false, moved: 0, has: false, ax: 0, ay: 0, still: 0 };
 canvas.addEventListener('pointermove', e => {
   const now = performance.now() / 1000;
   if (ptr.has) {
     const dt = Math.max(0.008, now - ptr.t);
     const vx = (e.clientX - ptr.x) / dt, vy = (e.clientY - ptr.y) / dt;
-    const sp = Math.hypot(vx, vy);
+    // The pointer only stirs the air; butterflies feel the stirred air (stepFly, stepLanded), they don't see the pointer.
     stir(e.clientX, e.clientY, clamp(vx, -1500, 1500), clamp(vy, -1500, 1500));
     ptr.moved += Math.hypot(e.clientX - ptr.x, e.clientY - ptr.y);
-    if (sp > 380) {
-      for (const b of flies) {
-        const d = Math.hypot(b.x - e.clientX, b.y - e.clientY);
-        if (d < b.sp.flush * cw * (1 + sp / 1500)) {
-          if (b.state === 'nectar' || b.state === 'bask') takeOff(b, e.clientX, e.clientY);
-          else if (b.boost <= 0) { b.boost = 0.7; const a = Math.atan2(b.y - e.clientY, b.x - e.clientX); b.jink += angDiff(b.heading, a) * 0.8; }
-        }
-      }
-    }
-  }
+  } else { ptr.ax = e.clientX; ptr.ay = e.clientY; ptr.still = 0; }
   ptr.x = e.clientX; ptr.y = e.clientY; ptr.t = now; ptr.has = true;
+  // Still means within 2.5 pt of where it came to rest.
+  if (Math.hypot(e.clientX - ptr.ax, e.clientY - ptr.ay) > 2.5) { ptr.ax = e.clientX; ptr.ay = e.clientY; pointerMoved(e.clientX, e.clientY); }
 });
 canvas.addEventListener('pointerdown', e => { ptr.down = true; ptr.moved = 0; });
 canvas.addEventListener('pointerup', e => { if (ptr.down && ptr.moved < 6) bloomAt(e.clientX, e.clientY); ptr.down = false; });
@@ -1836,7 +2230,7 @@ toggle.addEventListener('click', () => setPanel(panel.classList.contains('hidden
 
 function onChange(k) {
   save();
-  if (k === 'count' || k === 'species') syncFlies();
+  if (k === 'count' || k === 'species' || k === 'areaCount') syncFlies();
   if (k === 'density' || k === 'flowerSize') { clearTimeout(onChange.t); onChange.t = setTimeout(() => { plant(); for (const b of flies) if (b.flower && !flowerById(b.flower)) { b.flower = 0; if (b.state !== 'fly') { b.state = 'fly'; pickWaypoint(b); } } }, 120); }
   if (k === 'green' || k === 'grass') groundDirty = true;
   if (k === 'theme') setTheme();
@@ -1920,7 +2314,7 @@ function refreshAll() { for (const k in refresh) { const r = refresh[k]; if (Arr
 document.getElementById('reset').addEventListener('click', () => {
   set = JSON.parse(JSON.stringify(DEFAULTS)); save(); refreshAll(); setTheme(); syncFlies(); plant(); groundDirty = true; gridDirty = true;
 });
-document.getElementById('replant').addEventListener('click', () => { flowers = flowers.filter(() => false); for (const b of flies) { b.flower = 0; b.state = 'fly'; pickWaypoint(b); } plant(); });
+document.getElementById('replant').addEventListener('click', () => { flowers = flowers.filter(() => false); for (const b of flies) { b.flower = 0; if (b.state !== 'cursor' && b.goal !== 'cursor') { if (isLanded(b)) takeOff(b); b.state = 'fly'; b.goal = ''; pickWaypoint(b); } } plant(); });
 let paused = false;
 const pauseBtn = document.getElementById('pause');
 pauseBtn.addEventListener('click', () => { paused = !paused; pauseBtn.textContent = paused ? 'Play' : 'Pause'; });
@@ -1970,11 +2364,12 @@ function start() {
   resize();
   setTheme();
   plant();
-  syncFlies();
+  syncFlies(true);
+  openingMoment();
   buildPanel();
   setPanel(params.has('panel') ? params.get('panel') !== '0' : window.innerWidth > 900);
   // ?warm=S runs S seconds of meadow before the first frame (for screenshots); ?freeze=1 holds it there.
-  if (params.get('debug') === '1') window.__meadow = { step, render, get flies() { return flies; }, get flowers() { return flowers; }, get set() { return set; }, get t() { return simT; } };
+  if (params.get('debug') === '1') window.__meadow = { step, render, syncFlies, onChange, get flies() { return flies; }, get flowers() { return flowers; }, get set() { return set; }, get t() { return simT; }, get ptr() { return ptr; }, wind, windAt, get DWX() { return DWX; } };
   // ?sheet=flowers or ?sheet=flies lays out every kind for a close look (a development aid).
   const sheet = params.get('sheet');
   if (sheet === 'flowers') {
@@ -1996,7 +2391,7 @@ function start() {
   if (params.get('freeze') === '1') { paused = true; pauseBtn.textContent = 'Play'; render(); document.body.dataset.ready = '1'; return; }
   requestAnimationFrame(loop);
 }
-window.addEventListener('resize', () => { const oldW = W, oldH = H; resize(); if (Math.abs(W - oldW) > 80 || Math.abs(H - oldH) > 80) plant(); });
+window.addEventListener('resize', () => { const oldW = W, oldH = H; resize(); if (Math.abs(W - oldW) > 80 || Math.abs(H - oldH) > 80) plant(); if (set.areaCount) syncFlies(); });
 
 const fontReady = document.fonts && document.fonts.load ? document.fonts.load('600 14px "Geist Mono"') : Promise.resolve();
 Promise.race([fontReady, new Promise(r => setTimeout(r, 1500))]).then(start, start);
