@@ -73,6 +73,12 @@ struct WingSpans {
         return false
     }
 
+    /// Every list laid last has an even number of crossings (so a sample left or right of them all is outside).
+    func evenCrossings() -> Bool {
+        for k in 0..<6 where crossN[k] & 1 == 1 { return false }
+        return true
+    }
+
     /// The leftmost and rightmost crossing on the three rows laid last, or nil when no outline crosses them.
     func extent() -> (Double, Double)? {
         var lo = Double.infinity, hi = -Double.infinity
@@ -725,8 +731,30 @@ extension MeadowFrame {
             lo = min(lo, P.cx + P.fx * ua - 2 * cw, P.cx + P.fx * ub - 2 * cw)
             hi = max(hi, P.cx + P.fx * ua + 2 * cw, P.cx + P.fx * ub + 2 * cw)
             if lo > hi { continue }
-            let ca = max(c0, Int(floor((lo - pad - ox) / cw)) - 1), cb = min(c1, Int(floor((hi + pad - ox) / cw)) + 1)
+            var ca = max(c0, Int(floor((lo - pad - ox) / cw)) - 1), cb = min(c1, Int(floor((hi + pad - ox) / cw)) + 1)
             if ca > cb { continue }
+            // Of those, only the columns a cell can be shaded on: where a sample can fall between this row's outer
+            // crossings (an even count on every list, so nothing outside them is inside), or where the row meets the
+            // body's strip (|v| < cw / 2 along the axis). Each bound has a cell to spare, so a column left out is one
+            // the loop below would leave unshaded.
+            if spans.evenCrossings() {
+                var lo2 = Double.infinity, hi2 = -Double.infinity
+                if let (a, b) = spans.extent() {
+                    let off: Double = third * cw * spread
+                    lo2 = a - off - cw
+                    hi2 = b + off + cw
+                }
+                let bx0: Double = min(P.fx * ua, P.fx * ub), bx1: Double = max(P.fx * ua, P.fx * ub)
+                let by0: Double = min(P.fy * ua, P.fy * ub), by1: Double = max(P.fy * ua, P.fy * ub)
+                if py >= P.cy + by0 - 1.5 * cw && py <= P.cy + by1 + 1.5 * cw {
+                    lo2 = min(lo2, P.cx + bx0 - 1.5 * cw)
+                    hi2 = max(hi2, P.cx + bx1 + 1.5 * cw)
+                }
+                if !(lo2 <= hi2) { continue }
+                ca = max(ca, Int(floor((lo2 - ox) / cw)) - 1)
+                cb = min(cb, Int(floor((hi2 - ox) / cw)) + 1)
+                if ca > cb { continue }
+            }
             // One cursor per sample (three across, on each of the three rows), each running left to right.
             var l0 = SpanCursor(), l1 = SpanCursor(), l2 = SpanCursor()
             var m0 = SpanCursor(), m1 = SpanCursor(), m2 = SpanCursor()
