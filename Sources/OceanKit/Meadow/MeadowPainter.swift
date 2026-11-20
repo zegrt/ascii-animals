@@ -370,14 +370,18 @@ private let LINE = 8
 
 /// Under this projected width a wing is seen edge-on: a line, never blocks (a single banked wing, below the clap).
 private let EDGE_ON = 0.18
-/// The clap and the closed pose (the restart's design, at the top of the report): from a stroke of 45° to 62° each
-/// wing's drawn width is held up to `CLAP_HOLD`, so the pair never narrows to a stick; past `UNDER_FROM` it shows its
-/// underside (the morpho's blue and brown flash in turn); from 84° to 89° (at rest; the flight's stroke tops out at
-/// 80°) the pair folds into one solid underside wing pair beside the body, as a perched butterfly is seen from the
-/// side, the far pair tucked behind.
-private let CLAP_HOLD = 0.45
-private let HOLD_FROM = 45 * Double.pi / 180, HOLD_FULL = 62 * Double.pi / 180
-private let UNDER_FROM = 68 * Double.pi / 180
+/// The clap and the closed pose (the restart's design, at the top of its report, carried into flight by fix round 1).
+/// Each wing's drawn width is held from a stroke of `HOLD_FROM` at `CLAP_HOLD`, reached exactly where cos(stroke) falls to
+/// it, so at zero bank a wing never narrows and widens again within a beat (the flicker rule's two switches); from
+/// `TUCK_FROM` to `TUCK_FULL`, inside every species' flight peak (75–80°), the far pair tucks behind the near one, so the
+/// clap in flight is the folded side profile: one solid wing pair on the side the butterfly faces. The face turns from
+/// upper side to underside over `UNDER_FROM` … `UNDER_FULL`, sweeping in from the tips (the morpho's blue and brown flash
+/// in turn). Past the flight's strokes, from `FOLD_FROM` to `FOLD_FULL` (at rest), the near pair opens to the full
+/// underside wing beside the body, as a perched butterfly is seen from the side.
+private let CLAP_HOLD = 0.72
+private let HOLD_FROM = 42.5 * Double.pi / 180, HOLD_FULL = acos(CLAP_HOLD)
+private let TUCK_FROM = 60 * Double.pi / 180, TUCK_FULL = 72 * Double.pi / 180
+private let UNDER_FROM = 58 * Double.pi / 180, UNDER_FULL = 73 * Double.pi / 180
 private let FOLD_FROM = 84 * Double.pi / 180, FOLD_FULL = 89 * Double.pi / 180
 /// The width an edge-on wing's outline is traced at, so its forewing and hindwing still read as lines.
 private let EDGE_LINE = 0.36
@@ -394,9 +398,10 @@ private struct Pose {
     let hsC: Double, hhR: Double
     /// Each wing's projected width, the model's signed cos(stroke ± bank): under 0 the underside shows.
     let sL: Double, sR: Double
-    /// Each wing as drawn: its width (≥ 0), whether it shows its underside, and whether it is an edge-on line.
+    /// Each wing as drawn: its width (≥ 0), and whether it is an edge-on line.
     let wL: Double, wR: Double
-    let underL: Bool, underR: Bool
+    /// How far the underside has swept in from the tips toward the clap, 0…1.
+    let turn: Double
     let lineL: Bool, lineR: Bool
     /// How far the tips climb (pt, at the tip): −0.4 row · sin φ drops them on the downstroke.
     let climb: Double
@@ -424,25 +429,25 @@ private struct Pose {
         sL = s.left
         sR = s.right
         let hold: Double = CLAP_HOLD * smoothstep(HOLD_FROM, HOLD_FULL, b.stroke)
+        let tuck: Double = smoothstep(TUCK_FROM, TUCK_FULL, b.stroke)
         let fold: Double = smoothstep(FOLD_FROM, FOLD_FULL, b.stroke)
-        let late: Bool = b.stroke >= UNDER_FROM
         // The folded pair shows on the side the butterfly faces; the other tucks behind it.
         let nearRight: Bool = b.bank < -0.05 || (abs(b.bank) <= 0.05 && cos(b.heading) >= -1e-9)
         let heldL: Double = max(abs(sL), hold), heldR: Double = max(abs(sR), hold)
-        wL = nearRight ? heldL * (1 - fold) : heldL + (1 - heldL) * fold
-        wR = nearRight ? heldR + (1 - heldR) * fold : heldR * (1 - fold)
-        underL = sL < 0 || late
-        underR = sR < 0 || late
-        lineL = wL < EDGE_ON && fold == 0
-        lineR = wR < EDGE_ON && fold == 0
+        wL = nearRight ? heldL * (1 - tuck) : heldL + (1 - heldL) * fold
+        wR = nearRight ? heldR + (1 - heldR) * fold : heldR * (1 - tuck)
+        turn = smoothstep(UNDER_FROM, UNDER_FULL, b.stroke)
+        lineL = wL < EDGE_ON && tuck == 0
+        lineR = wR < EDGE_ON && tuck == 0
         climb = 0.4 * ch * sin(b.stroke)
         self.id = id
         twoSpots = hash3(id, 7, 3) < 0.5
     }
 
-    /// The drawn width of the wing on `v`'s side, and whether it shows its underside.
+    /// The drawn width of the wing on `v`'s side, and whether it shows its underside at `X` (half-spans out): past
+    /// edge-on, or where the clap's sweep has reached.
     @inline(__always) func width(_ v: Double) -> Double { v < 0 ? wL : wR }
-    @inline(__always) func under(_ v: Double) -> Bool { v < 0 ? underL : underR }
+    @inline(__always) func under(_ v: Double, _ X: Double) -> Bool { (v < 0 ? sL : sR) < 0 || X >= 1.2 - 1.3 * turn }
 }
 
 /// A wing sample: how much of it is covered (0…1, soft at the edge) and, where covered, what it shows.
@@ -558,7 +563,7 @@ private struct WingHit {
     hit.Y = Y
     hit.qx = qx
     hit.qy = qy
-    hit.under = p.under(v)
+    hit.under = p.under(v, X)
     hit.side = v < 0 ? 0 : 1
     hit.flag = pattern(p, &hit, sx, sy)
 }
