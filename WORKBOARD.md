@@ -45,6 +45,9 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-20, after watching the first films: "1. to many 2. they gather around to mcuh and look like they roam
+  around the same places and not enough movevemt". Applies: new (t3's brief; it sets the realism line: movement
+  and spread first).
 - 2026-11-20, asked what the issue was, then "think more exercise abstract thinking": the manager had kept a rule
   nobody asked for (nothing drawn off screen) and patched around it for two rounds. Applies: decide.escalate /
   review.restart (step back to the director's actual asks before rewriting a brief).
@@ -95,17 +98,19 @@ Director's profile: none
 
 - 2026-11-20: After t5, a short film of the butterflies flying before t3 starts (the director: "yes"). Also: keep
   the physics where it makes them look better, and decide how realistic we want them ("its a line drawn in sand on
-  a spectrum", the director). The line is decided after the director sees the film ("we can only decied afteri see it in motion"). Until then,
-  as a working default only: real where a viewer would notice it, stylised where it helps the look.
+  a spectrum", the director). The line is decided after the director sees the film ("we can only decied afteri see it in motion"). Set on
+  2026-11-20 by the director's verdict on the film: movement and spread across the whole screen first, real
+  behaviours tuned to keep the meadow moving. The clap snap and the morpho's flash drew no comment from the
+  director, so t5's two clap findings go to Noticed (manager).
 
 ## Tasks
 
 | Id | Task | Size | Files | Branch | Builder | Reviewer | Rounds | State | Brief |
 |---|---|---|---|---|---|---|---|---|---|
 | t1-2 | Breeze, flowers and butterfly flight (plan T1 + T2), with the director's path fix | Content | Sources/OceanKit/Meadow/{Breeze,Flowers,ButterflySpecies,Butterfly}.swift, Sources/OceanChecks/MeadowChecks.swift, Sources/OceanTool/{Paths,main}.swift | meadow-t1-2 | builder-t1-2 (Claude Opus, T3 child thread; fix round 1) | reviewer-t1-2 (Claude Opus, T3 child thread) | 1 | reviewed, waits for the end of the stack (director: no merge yet): reviewed (review-t1-2 @ 68288c7), CI passed on 1e11a1b (PR #1), merge rehearsed 2026-11-20 (200 passed, app builds) | briefs/t1-2.md |
-| t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered); fix round 1 adds the director's bigger butterflies and better flowers | Content (grown: now also t1-2's sizes and flower shapes; the director set the look, so no separate plan) | Meadow/MeadowPainter.swift (new), OceanTool/{MeadowStill,main}.swift, OceanChecks/MeadowChecks.swift, Render/GlyphAtlas.swift (append only); fix round 1 adds Meadow/ButterflySpecies.swift (sizes) and Meadow/Flowers.swift (heads, leaves, clumps) | meadow-t5 (from meadow-t1-2); restart on meadow-t5r | builder-t5 (Claude Opus, T3 child thread) | reviewer-t5 (Codex) | 2 before the restart; 2 after it; restart 2: 0 | reviewed (review-t5r2 @ 57f880a); two findings wait on the director's film watch (t5v) | briefs/t5.md |
-| t5v | A 30 s film of the butterflies flying, for the director to judge the motion | Content (small) | OceanTool/MeadowFrames.swift (new), OceanTool/main.swift | meadow-t5v (from meadow-t5r) | builder-t5v (Claude Opus, T3 child thread) | Codex | 0 | reviewed (review-t5v @ 94d9d2b): 4 small tool fixes routed; films with the director | briefs/t5v.md |
-| t3 | Meadow world and behaviours (plan T3) | Content | Meadow/{MeadowWorld,Behaviour}.swift (new), OceanChecks/MeadowChecks.swift, Meadow/MeadowPainter.swift (convenience paint, breeze trail), Meadow/Breeze.swift (pointer field), OceanTool/MeadowStill.swift | meadow-t3 (from meadow-t5) | | Codex | 0 | open (waits on t5v watched by the director) | briefs/t3.md |
+| t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered); fix round 1 adds the director's bigger butterflies and better flowers | Content (grown: now also t1-2's sizes and flower shapes; the director set the look, so no separate plan) | Meadow/MeadowPainter.swift (new), OceanTool/{MeadowStill,main}.swift, OceanChecks/MeadowChecks.swift, Render/GlyphAtlas.swift (append only); fix round 1 adds Meadow/ButterflySpecies.swift (sizes) and Meadow/Flowers.swift (heads, leaves, clumps) | meadow-t5 (from meadow-t1-2); restart on meadow-t5r | builder-t5 (Claude Opus, T3 child thread) | reviewer-t5 (Codex) | 2 before the restart; 2 after it; restart 2: 0 | reviewed (review-t5r2 @ 57f880a); clap findings to Noticed after the director's watch | briefs/t5.md |
+| t5v | A 30 s film of the butterflies flying, for the director to judge the motion | Content (small) | OceanTool/MeadowFrames.swift (new), OceanTool/main.swift | meadow-t5v (from meadow-t5r) | builder-t5v (Claude Opus, T3 child thread) | Codex | 0 | reviewed (review-t5v @ 94d9d2b); its 4 tool fixes moved into t3 (which rewrites meadow-frames) | briefs/t5v.md |
+| t3 | Meadow world and behaviours (plan T3), with the director's film verdict | Content | Meadow/{MeadowWorld,Behaviour}.swift (new), OceanChecks/MeadowChecks.swift, Meadow/MeadowPainter.swift (convenience paint, breeze trail), Meadow/Breeze.swift (pointer field), Meadow/{Butterfly,ButterflySpecies}.swift (roaming, spacing, stays), OceanTool/{MeadowStill,MeadowFrames,main}.swift | meadow-t3 (from meadow-t5v) | | Codex | 0 | building | briefs/t3.md |
 | t4 | Cursor landing, courtship, crossings, monarch life cycle (plan T4) | Content | to brief | meadow-t4 | | | 0 | open (waits on t3) | |
 | t6 | Meadow habitat, settings and tools (plan T6) | Content | to brief | meadow-t6 | | | 0 | open (waits on t4) | |
 | t7 | Director reviews the prototype films (plan T7, a gate) | Content | none | none | | | 0 | open (waits on t6) | |
@@ -216,3 +221,5 @@ Director's profile: none
   against 1.25); the check's pinned seeds pass with room.
 - From t5's restart 2 (2026-11-20): an earlier finished worktree (t3-988a7193…) still has `meadow-t5r` checked out
   with uncommitted edits in 4 files; left alone. Clean it up only after checking nothing there is wanted.
+- From t5 and t5v (2026-11-20): at the top of a wingbeat the wings snap shut in one step, the colour flips in 1–2
+  steps (the morpho's brown flash), and the folded wing can jump sides; the director watched and did not raise it.
