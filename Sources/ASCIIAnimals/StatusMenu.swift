@@ -44,6 +44,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     static func snapshot(to url: URL) {
         let app = AppDelegate()
         app.store = SettingsStore.snapshot()
+        app.arrival = SettingsStore.snapshotArrival()
         let s = app.store.settings
         let m = StatusMenu(snapshotOf: app)
         m.statusOverride = OceanStatus(title: OceanStatus.running(s.habitat), detail: "\(s.fps) fps", tone: .live)
@@ -158,8 +159,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(header("Habitat"))
         for (i, h) in HabitatKind.offered.enumerated() {
             let it = add(menu, h.title, #selector(pickHabitat(_:)), state: s.habitat == h, tag: i)
-            // macOS's own menu badge, until the Meadow has been picked once.
-            if h == .meadow && !s.meadowTried { it.badge = NSMenuItemBadge(string: "New") }
+            // macOS's own menu badge, for someone upgrading from before 3.1 until the Meadow has been picked once.
+            if h == .meadow && app.arrival.meadowIsNew(s) { it.badge = NSMenuItemBadge(string: "New") }
         }
 
         menu.addItem(.separator())

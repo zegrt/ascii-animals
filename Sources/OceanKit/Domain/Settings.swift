@@ -197,6 +197,30 @@ public struct MeadowLineUp: Equatable, Sendable {
     }
 }
 
+/// How this person came to 3.1: the one rule for what 3.1 shows as new (the menu's "New" badge on Meadow; t9's
+/// what's-new card uses the same). Decided once, at the first launch of 3.1 or later, and kept under `key`, so it
+/// never changes after (settings saved since, or the welcome seen since, don't turn a new install into an upgrade).
+public enum Arrival: String, Sendable {
+    /// An earlier version ran here: an upgrade, who is told what 3.1 adds.
+    case before31 = "before-3.1"
+    /// A fresh install of 3.1 or later, who meets everything in the welcome.
+    case since31 = "3.1"
+
+    /// Where the decision is kept (the app's own defaults).
+    public static let key = "arrival.v1"
+
+    /// `stored` if it was decided already; otherwise an upgrade when an earlier version left a trace: saved settings
+    /// (ASCII Animals' own, or ASCII Sharks' taken over), the welcome seen, or the hand-over from ASCII Sharks done.
+    /// Nothing at all is a fresh install.
+    public static func decide(stored: String?, savedSettings: Bool, onboarded: Bool, handedOver: Bool) -> Arrival {
+        if let stored, let a = Arrival(rawValue: stored) { return a }
+        return savedSettings || onboarded || handedOver ? .before31 : .since31
+    }
+
+    /// The "New" badge on Meadow in the Habitat menu: for an upgrade, until the Meadow has been picked once.
+    public func meadowIsNew(_ s: Settings) -> Bool { self == .before31 && !s.meadowTried }
+}
+
 public enum SettingsCodec {
     public static func decode(_ data: Data?) -> Settings {
         guard let data, let s = try? JSONDecoder().decode(Settings.self, from: data) else { return .defaults }

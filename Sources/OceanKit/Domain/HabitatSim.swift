@@ -8,10 +8,10 @@ public protocol HabitatSim: AnyObject {
     var time: Double { get }
     var stepCount: Int { get }
     func layout(terrain: Terrain, cell: CGSize, settings: Settings)
-    /// Where this scene sits on the desk when each screen is its own scene: every screen's size, in order, and which
-    /// one is this scene's (`ScenePlan.desk`). Empty when one scene spans the desk. Called before `layout`, so a
-    /// habitat can share a desk-wide cap (the Meadow's 12); the others ignore it.
-    func share(desk: [CGSize], index: Int)
+    /// Where this scene sits on the desk (`HabitatScene.arrange`): the desk's scenes and screens, and which one is this
+    /// scene's. Called before `layout` for a new sim, and again whenever the desk changes, without a layout when this
+    /// scene's own geometry is unchanged, so a habitat can share a desk-wide cap (the Meadow's 12); the others ignore it.
+    func share(desk: SceneDesk, index: Int)
     func step(_ dt: Double)
     func pointerMoved(_ x: Double, _ y: Double)
     func pointerLeft()
@@ -23,7 +23,7 @@ public protocol HabitatSim: AnyObject {
 }
 
 public extension HabitatSim {
-    func share(desk: [CGSize], index: Int) {}
+    func share(desk: SceneDesk, index: Int) {}
 }
 
 public enum Habitats {
@@ -42,5 +42,15 @@ public enum Habitats {
         case .web: return old.webSpiders != new.webSpiders || old.webFlies != new.webFlies || old.webJumper != new.webJumper
         case .meadow: return false
         }
+    }
+
+    /// A view of the habitat shown again after a while (the About banner when reopened): rebuilt when
+    /// `needsRebuild`, and also when the Meadow's line-up changed, which a live scene takes in place but a view coming
+    /// back should simply show (its butterflies would otherwise be the old line-up, or still leaving).
+    public static func needsFreshLook(old: Settings, new: Settings) -> Bool {
+        if needsRebuild(old: old, new: new) { return true }
+        guard new.habitat == .meadow else { return false }
+        let a = old.sanitized(), b = new.sanitized()
+        return a.meadowButterflies != b.meadowButterflies || a.meadowCount != b.meadowCount
     }
 }

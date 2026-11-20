@@ -22,11 +22,6 @@ public struct ScenePlan: Equatable, Sendable {
     public var cell: CGSize
     /// Where ocean space's 0,0 sits in global coordinates.
     public var originInGlobal: CGPoint
-    /// When each screen is its own scene: every screen's size on the desk, in order, so a habitat can share a
-    /// desk-wide cap between the scenes (`HabitatSim.share(desk:index:)`). Empty when one scene spans the desk.
-    public var desk: [CGSize] = []
-    /// This scene's screen in `desk`.
-    public var deskIndex: Int = 0
 
     public var viewports: [(screenID: Int, rect: CGRect)] { views.map { ($0.screenID, $0.rect) } }
 }
@@ -36,12 +31,10 @@ public enum SceneLayout {
     /// one scene per screen, sized and celled exactly as before.
     public static func plan(_ screens: [ScreenInfo], shared: Bool) -> [ScenePlan] {
         guard shared, screens.count > 1 else {
-            let desk: [CGSize] = screens.map(\.frame.size)
-            return screens.enumerated().map { i, s in
+            return screens.map { s in
                 let rect = CGRect(origin: .zero, size: s.frame.size)
                 return ScenePlan(terrain: Terrain(rects: [rect]), views: [.init(screenID: s.id, rect: rect)],
-                                 cell: GridSpec.cell(forWidth: s.frame.width), originInGlobal: s.frame.origin,
-                                 desk: desk, deskIndex: i)
+                                 cell: GridSpec.cell(forWidth: s.frame.width), originInGlobal: s.frame.origin)
             }
         }
         let origin = CGPoint(x: screens.map(\.frame.minX).min()!, y: screens.map(\.frame.minY).min()!)

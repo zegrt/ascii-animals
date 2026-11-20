@@ -7,6 +7,8 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Lazy: the hand-over imports ASCII Sharks' settings first, then the store loads them.
     lazy var store = SettingsStore()
+    /// How this person came to 3.1 (`Arrival`): decided at launch, after the hand-over.
+    var arrival: Arrival = .since31
     let signals = SystemSignals()
     var director: OceanDirector?
     var wallpaper: SystemWallpaper?
@@ -29,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         SharksHandover.run(app: self)
+        arrival = SettingsStore.decideArrival()
         SharksHandover.watch()
         crashedLastTime = CrashMarker.launch()
         Log.write("launch \(AppInfo.version) (\(AppInfo.build))\(crashedLastTime ? " after an unclean exit" : "")")

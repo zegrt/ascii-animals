@@ -40,6 +40,28 @@ final class SettingsStore {
         return SettingsStore(transient: s)
     }
 
+    /// How this person came to 3.1 (`Arrival.decide`), decided at the first launch of 3.1 and kept. Call once at
+    /// launch, after the hand-over (whose taken-over settings count as an earlier version's).
+    static func decideArrival() -> Arrival {
+        let d = UserDefaults.standard
+        let stored = d.string(forKey: Arrival.key)
+        let a = Arrival.decide(stored: stored, savedSettings: d.data(forKey: SettingsStore.key) != nil,
+                               onboarded: d.bool(forKey: OnboardingController.seenKey), handedOver: SharksHandover.happened)
+        if stored == nil { d.set(a.rawValue, forKey: Arrival.key) }
+        return a
+    }
+
+    /// The snapshots' arrival, never kept: `ASCII_ANIMALS_SNAPSHOT_ARRIVAL=before-3.1|3.1`, else what a launch would
+    /// decide from what is saved (read only).
+    static func snapshotArrival() -> Arrival {
+        let d = UserDefaults.standard
+        if let a = ProcessInfo.processInfo.environment["ASCII_ANIMALS_SNAPSHOT_ARRIVAL"].flatMap(Arrival.init(rawValue:)) {
+            return a
+        }
+        return Arrival.decide(stored: d.string(forKey: Arrival.key), savedSettings: d.data(forKey: SettingsStore.key) != nil,
+                              onboarded: d.bool(forKey: OnboardingController.seenKey), handedOver: SharksHandover.happened)
+    }
+
     func update(_ body: (inout Settings) -> Void) {
         let old = settings
         var s = settings

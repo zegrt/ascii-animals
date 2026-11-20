@@ -114,23 +114,28 @@ public struct MeadowTuning: Equatable, Sendable {
     /// Each screen's butterflies when every screen of a desk is its own scene ("One habitat across displays" off), in
     /// the screens' order: each screen's own count by area (`areaCount`) while the desk's total is within
     /// `areaCountLimit`; above it, the limit shared in proportion to those counts (so to the screens' areas), largest
-    /// remainders first, each screen at least 1. The total is then exactly the limit, the same as one scene across
-    /// the same screens; only a desk of more screens than the limit holds more (one each).
+    /// remainders first, each screen at least 1 while places are left. The total is then exactly the limit, the same
+    /// as one scene across the same screens; a desk of more screens than the limit leaves some screens at 0 (the
+    /// director's 12 is absolute).
     public static func areaCountShares(_ count: Int, screens: [CGSize]) -> [Int] {
         let wants: [Int] = screens.map { (s: CGSize) -> Int in areaCount(count, width: Double(s.width), height: Double(s.height)) }
         let total: Int = wants.reduce(0, +)
         guard total > areaCountLimit else { return wants }
-        let limit: Int = max(areaCountLimit, screens.count)
+        let limit: Int = areaCountLimit
         let exact: [Double] = wants.map { (w: Int) -> Double in Double(limit) * Double(w) / Double(total) }
         var shares: [Int] = exact.map { (e: Double) -> Int in max(1, Int(e)) }
         var sum: Int = shares.reduce(0, +)
-        // Over (only when a few small screens were raised to 1): take from the screen furthest above its share.
+        // Over (only when a few small screens were raised to 1): take from the screen furthest above its share, from
+        // those with more than 1 first; past the limit's worth of screens, from those with 1 too (down to 0).
         while sum > limit {
             var pick = -1
-            var most = -Double.infinity
-            for i in shares.indices where shares[i] > 1 {
-                let over: Double = Double(shares[i]) - exact[i]
-                if over > most { most = over; pick = i }
+            for floor in [1, 0] {
+                var most = -Double.infinity
+                for i in shares.indices where shares[i] > floor {
+                    let over: Double = Double(shares[i]) - exact[i]
+                    if over > most { most = over; pick = i }
+                }
+                if pick >= 0 { break }
             }
             guard pick >= 0 else { break }
             shares[pick] -= 1

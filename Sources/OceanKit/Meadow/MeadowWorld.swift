@@ -35,9 +35,13 @@ public final class MeadowWorld {
         }
     }
     /// The most butterflies this scene holds with `areaCount` on: `MeadowTuning.areaCountLimit`, or this screen's
-    /// share of it when each screen of the desk is its own scene (`MeadowTuning.areaCountShares`). A new limit takes
-    /// effect at the next `syncFlies`.
+    /// share of it when each screen of the desk is its own scene (`MeadowTuning.areaCountShares`; 0 once the 12 are
+    /// all placed on other screens). A new limit takes effect at the next `syncFlies`.
     public var countLimit: Int = MeadowTuning.areaCountLimit
+    /// With `areaCount` on: the most butterflies this scene may draw now, the ones leaving included (the desk's 12 less
+    /// what its other scenes draw; `MeadowSim.room`). Unset, 12. Newcomers wait for room, so the desk never draws more
+    /// than 12, also while a change is on its way. With `areaCount` off (the sketch) there is no such limit.
+    public var room: (() -> Int)?
     /// The app's speed setting: the pointer's real time per step is `OceanClock.step / speed` (the sketch's Slow motion).
     public var speed = 1.0
 
@@ -87,10 +91,11 @@ public final class MeadowWorld {
     /// The meadow for `seed` on `terrain`: planted, its butterflies made and the opening moment set (the sketch's
     /// `start`, html:3033–3038).
     public init(terrain: Terrain, cell: CGSize, tuning: MeadowTuning = .director, seed: Int32,
-                countLimit: Int = MeadowTuning.areaCountLimit) {
+                countLimit: Int = MeadowTuning.areaCountLimit, room: (() -> Int)? = nil) {
         let t = tuning.sanitized()
         self.tuning = t
-        self.countLimit = max(1, countLimit)
+        self.countLimit = max(0, countLimit)
+        self.room = room
         self.terrain = terrain
         self.cell = cell
         let usable = MeadowWorld.usable(terrain) ? terrain : Terrain(rects: [])
@@ -539,6 +544,43 @@ public final class MeadowWorld {
         return min(countLimit, n)
     }
 
+    /// The most butterflies drawn at once (leaving ones included): `room` with `areaCount` on, else no limit.
+    var drawLimit: Int {
+        guard tuning.areaCount else { return Int.max }
+        return room?() ?? MeadowTuning.areaCountLimit
+    }
+
+    /// With `areaCount` on: fewer than the count are staying (newcomers waiting for room on the desk).
+    var shortOfCount: Bool {
+        guard tuning.areaCount, !screens.isEmpty, tuning.species.contains(true) else { return false }
+        var active = 0
+        for b in flies where !b.leaving { active += 1 }
+        return active < wantedCount
+    }
+
+    /// For a held frame (`MeadowSim.settle`): takes out every butterfly still on its way out or not yet in (waiting,
+    /// or coming in off the screens). Whether there were any. Only with `areaCount` on (the app).
+    func dropInTransit() -> Bool {
+        guard tuning.areaCount, !screens.isEmpty else { return false }
+        var any = false
+        flies.removeAll { b in
+            let gone: Bool = b.leaving || b.wait > 0 || (b.entering && !onScreens(b.x, b.y))
+            if gone { releaseFlower(b); any = true }
+            return gone
+        }
+        return any
+    }
+
+    /// For a held frame: the line-up made up at once, on the screens, as at a fresh start (`syncFlies(initial:)`),
+    /// within the room the desk has. Only with `areaCount` on (the app).
+    func fillAtOnce() {
+        guard tuning.areaCount, !screens.isEmpty else { return }
+        let prev = rng
+        rng = inputRandom
+        defer { rng = prev }
+        syncFlies(initial: true)
+    }
+
     /// `syncFlies(initial)` (html:1386–1446): keeps the number to the setting and the species mix even. At load they
     /// start on screen; later, newcomers fly in from a real edge and spare ones leave through the nearest.
     public func syncFlies(initial: Bool = false) {
@@ -603,9 +645,13 @@ public final class MeadowWorld {
             active.append(b)
         }
         var wait = 0.0
+        let limit = drawLimit
         while active.count < want {
             var order = on
             rng.shuffle(&order)
+            // The app's fresh line-up takes the species in order, the odd places to the first, as the preset says
+            // (`MeadowLineUp.shares`: Mixed's 7 is 2, 2, 2, 1); the sketch's draws them at random.
+            if initial && tuning.areaCount { order = on }
             var best = order[0]
             var bc = Int.max
             for k in order {
@@ -618,6 +664,8 @@ public final class MeadowWorld {
                 active.append(back)
                 continue
             }
+            // No room on the desk (others still leaving): the rest come once there is (`step`).
+            if flies.count >= limit { break }
             // At load on screens with no way between them: once only as many are left to make as groups still
             // empty, each goes to an empty group (the largest first), so no screen group starts without butterflies.
             var group: Int? = nil
@@ -843,6 +891,8 @@ public final class MeadowWorld {
         var anyDead = false
         for b in flies where b.dead { anyDead = true; releaseFlower(b) }
         if anyDead { flies.removeAll { $0.dead } }
+        // With `areaCount` on (the app): newcomers that waited for room on the desk come in once there is.
+        if tuning.areaCount && !screens.isEmpty && flies.count < drawLimit && shortOfCount { syncFlies() }
         stepDust(dt)
     }
 

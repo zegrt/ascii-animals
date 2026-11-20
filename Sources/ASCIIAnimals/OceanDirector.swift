@@ -9,6 +9,8 @@ final class OceanDirector {
     private let signals: SystemSignals
     private(set) var screens: [OceanScreen] = []
     private(set) var scenes: [HabitatScene] = []
+    /// The desk the scenes sit on (`HabitatScene.arrange`), kept as long as they are.
+    private let desk = SceneDesk()
     private(set) var mode: RunMode = .paused
     /// A habitat switch dissolving on a live desktop; nil when none is.
     private var dissolve: DissolveRun?
@@ -144,17 +146,7 @@ final class OceanDirector {
         }
         let plans = SceneLayout.plan(infos, shared: store.settings.sharedOcean)
 
-        var next: [HabitatScene] = []
-        for plan in plans {
-            let ids = Set(plan.views.map(\.screenID))
-            if !fresh, let keep = scenes.first(where: { $0.screenIDs == ids }) {
-                keep.update(plan, settings: store.settings)
-                next.append(keep)
-            } else {
-                next.append(HabitatScene(plan: plan, settings: store.settings))
-            }
-        }
-        scenes = next
+        scenes = HabitatScene.arrange(scenes, plans: plans, settings: store.settings, fresh: fresh, desk: desk)
 
         let ids = Set(current.map(\.displayID))
         for s in screens where !ids.contains(s.displayID) { s.close() }
