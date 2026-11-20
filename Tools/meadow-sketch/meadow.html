@@ -1,0 +1,1805 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Meadow Sketch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Panel tokens. The meadow itself is drawn on the canvas with the app's own colours. */
+:root {
+  --page: #f7f6f3;
+  --panel: rgba(250, 249, 246, 0.9);
+  --panel-edge: rgba(35, 35, 35, 0.12);
+  --fg: #232323;
+  --muted: #6c6f68;
+  --faint: #9a9d96;
+  --track: rgba(35, 35, 35, 0.16);
+  --fill: #4f7a3e;
+  --chip: rgba(35, 35, 35, 0.06);
+  --chip-on: rgba(79, 122, 62, 0.16);
+  --shadow: 0 10px 40px rgba(0, 0, 0, 0.12);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #000;
+    --panel: rgba(12, 14, 12, 0.86);
+    --panel-edge: rgba(255, 255, 255, 0.09);
+    --fg: #e4e7e1;
+    --muted: #8f968c;
+    --faint: #5f665c;
+    --track: rgba(255, 255, 255, 0.14);
+    --fill: #9cc987;
+    --chip: rgba(255, 255, 255, 0.05);
+    --chip-on: rgba(156, 201, 135, 0.16);
+    --shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #000;
+  --panel: rgba(12, 14, 12, 0.86);
+  --panel-edge: rgba(255, 255, 255, 0.09);
+  --fg: #e4e7e1;
+  --muted: #8f968c;
+  --faint: #5f665c;
+  --track: rgba(255, 255, 255, 0.14);
+  --fill: #9cc987;
+  --chip: rgba(255, 255, 255, 0.05);
+  --chip-on: rgba(156, 201, 135, 0.16);
+  --shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--page); overflow: hidden; }
+body { font-family: "Geist Mono", ui-monospace, Menlo, monospace; color: var(--fg); -webkit-font-smoothing: antialiased; }
+canvas#meadow { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; touch-action: none; cursor: crosshair; }
+
+#toggle {
+  position: fixed; top: 14px; right: 14px; z-index: 3;
+  font: 500 12px/1 "Geist Mono", monospace; letter-spacing: 0.02em;
+  color: var(--fg); background: var(--panel); border: 1px solid var(--panel-edge);
+  border-radius: 999px; padding: 9px 14px; cursor: pointer; box-shadow: var(--shadow);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+}
+#toggle:hover { border-color: var(--faint); }
+#panel {
+  position: fixed; top: 56px; right: 14px; bottom: 14px; z-index: 2; width: 348px;
+  display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--panel-edge); border-radius: 14px;
+  box-shadow: var(--shadow); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  transition: opacity .18s ease, transform .18s ease;
+}
+#panel.hidden { opacity: 0; transform: translateX(12px); pointer-events: none; }
+#panel header { padding: 14px 16px 10px; border-bottom: 1px solid var(--panel-edge); }
+#panel h1 { margin: 0 0 4px; font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
+#panel header p { margin: 0; font-size: 11px; line-height: 1.45; color: var(--muted); }
+#controls { overflow-y: auto; padding: 4px 16px 8px; flex: 1; scrollbar-width: thin; }
+.group h2 { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); margin: 16px 0 8px; }
+.row { margin: 0 0 12px; }
+.row .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.row label { font-size: 12px; font-weight: 500; }
+.row output { font-size: 11px; color: var(--fill); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.row .hint { font-size: 10.5px; line-height: 1.4; color: var(--faint); margin-top: 3px; }
+input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 18px; background: transparent; margin: 4px 0 0; cursor: pointer; }
+input[type=range]::-webkit-slider-runnable-track { height: 3px; border-radius: 3px; background: linear-gradient(to right, var(--fill) var(--p, 50%), var(--track) var(--p, 50%)); }
+input[type=range]::-moz-range-track { height: 3px; border-radius: 3px; background: var(--track); }
+input[type=range]::-moz-range-progress { height: 3px; border-radius: 3px; background: var(--fill); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: var(--fg); margin-top: -5px; border: 0; }
+input[type=range]::-moz-range-thumb { width: 13px; height: 13px; border-radius: 50%; background: var(--fg); border: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chip { font: 500 11px/1 "Geist Mono", monospace; color: var(--muted); background: var(--chip); border: 1px solid transparent; border-radius: 999px; padding: 7px 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.chip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; opacity: .35; }
+.chip.on { color: var(--fg); background: var(--chip-on); border-color: var(--panel-edge); }
+.chip.on i { opacity: 1; }
+#panel footer { border-top: 1px solid var(--panel-edge); padding: 10px 16px 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+#panel footer button { font: 500 11px/1 "Geist Mono", monospace; color: var(--fg); background: var(--chip); border: 1px solid var(--panel-edge); border-radius: 8px; padding: 8px 10px; cursor: pointer; }
+#panel footer button:hover { border-color: var(--faint); }
+#panel footer button.primary { background: var(--chip-on); }
+#stats { margin-left: auto; font-size: 10px; color: var(--faint); font-variant-numeric: tabular-nums; }
+@media (max-width: 600px) {
+  #toggle { top: 10px; right: 10px; }
+  #panel { top: auto; left: 16px; right: 16px; bottom: 16px; width: auto; max-height: 62vh; }
+  #panel.hidden { transform: translateY(12px); }
+}
+</style>
+</head>
+<body>
+<canvas id="meadow" aria-label="An ASCII meadow seen from above, with butterflies"></canvas>
+<button id="toggle" type="button" aria-expanded="true" aria-controls="panel">Hide tweaks</button>
+<aside id="panel" aria-label="Meadow settings">
+  <header>
+    <h1>Meadow sketch</h1>
+    <p>Drag across the meadow to stir the breeze; click to bloom a flower. Values here are what we port to the app.</p>
+  </header>
+  <div id="controls"></div>
+  <footer>
+    <button type="button" id="copy" class="primary">Copy settings</button>
+    <button type="button" id="reset">Reset</button>
+    <button type="button" id="replant">New meadow</button>
+    <button type="button" id="pause">Pause</button>
+    <span id="stats"></span>
+  </footer>
+</aside>
+<script>
+(() => {
+'use strict';
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+//  Basics
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const TAU = Math.PI * 2, DEG = Math.PI / 180;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const angDiff = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
+const params = new URLSearchParams(location.search);
+
+let seed = params.has('seed') ? (+params.get('seed') | 0) : ((Math.random() * 1e6) | 0);
+function mulberry32(a) {
+  return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+let rnd = mulberry32(seed);
+const R = (a, b) => a + (b - a) * rnd();
+const RI = (a, b) => Math.floor(a + (b - a + 1) * rnd());
+function gauss() { const a = Math.max(rnd(), 1e-12), b = rnd(); return Math.sqrt(-2 * Math.log(a)) * Math.cos(TAU * b); }
+
+/** A stable hash of three integers to [0, 1). */
+function hash3(x, y, z) {
+  let h = (Math.imul(x | 0, 0x27d4eb2d) ^ Math.imul(y | 0, 0x165667b1) ^ Math.imul(z | 0, 0x9e3779b1)) | 0;
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b); h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35); h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+/** Smooth value noise in [0, 1]. */
+function vnoise(x, y, s) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  let xf = x - xi, yf = y - yi; xf = xf * xf * (3 - 2 * xf); yf = yf * yf * (3 - 2 * yf);
+  const a = hash3(xi, yi, s), b = hash3(xi + 1, yi, s), c = hash3(xi, yi + 1, s), d = hash3(xi + 1, yi + 1, s);
+  return a + (b - a) * xf + (c - a) * yf + (a - b - c + d) * xf * yf;
+}
+const n1 = (t, s) => vnoise(t, 0.5, s) * 2 - 1;
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+//  Settings: every slider the director plays with. `def` is the default; the panel is built from this list.
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const SPECIES_LIST = [
+  { key: 'monarch', label: 'Monarch', swatch: '#c8641e' },
+  { key: 'morpho', label: 'Morpho', swatch: '#3a78d0' },
+  { key: 'swallowtail', label: 'Swallowtail', swatch: '#d4b844' },
+  { key: 'white', label: 'Cabbage white', swatch: '#dcdacb' },
+];
+
+const f2 = v => (+v).toFixed(2), x2 = v => (+v).toFixed(2) + ' ×';
+const CONTROLS = [
+  { group: 'Butterflies', items: [
+    { k: 'count', label: 'How many', min: 1, max: 12, step: 1, def: 4, fmt: v => String(v),
+      hint: 'Butterflies on screen at once. You asked for few.' },
+    { k: 'sizeLow', label: 'Size down on the flowers', min: 0.2, max: 1.5, step: 0.01, def: 0.75, fmt: x2,
+      hint: 'Drawn size at ground level, as a share of the species size (a monarch is 22 cells across at 1 ×).' },
+    { k: 'sizeHigh', label: 'Size up close', min: 0.4, max: 2.5, step: 0.01, def: 1.4, fmt: x2,
+      hint: 'Drawn size at the top of their flight, nearest you. The gap between the two is the depth.' },
+    { k: 'species', type: 'species', label: 'Species' },
+  ] },
+  { group: 'Flight', items: [
+    { k: 'wingbeat', label: 'Wingbeat speed', min: 0.1, max: 1, step: 0.01, def: 0.5,
+      fmt: v => f2(v) + ' × real · monarch ' + beatHz('monarch', v).toFixed(1) + ' Hz',
+      hint: 'Share of the real wingbeat (the app today: 0.28, capped at 3 Hz). Capped at 7.5 Hz, 4 frames a beat at 30 fps.' },
+    { k: 'lurch', label: 'Lurch on the downstroke', min: 0, max: 2, step: 0.01, def: 1, fmt: x2,
+      hint: 'The push forward each downstroke gives: the jerky, beat-by-beat pace of a real butterfly.' },
+    { k: 'zigzag', label: 'Zig-zag', min: 0, max: 3, step: 0.01, def: 1, fmt: x2,
+      hint: 'Jinks and side-slips at each wingbeat (the cabbage white most, the monarch least).' },
+    { k: 'glide', label: 'Gliding', min: 0, max: 3, step: 0.01, def: 1, fmt: x2,
+      hint: 'How often and how long they stop beating and sail with wings flat, sinking toward the flowers.' },
+    { k: 'speed', label: 'Travel speed', min: 0.3, max: 2.5, step: 0.01, def: 1, fmt: x2,
+      hint: 'How fast they cross the screen (1 × is the measured cruise at screen scale).' },
+    { k: 'turning', label: 'Turning', min: 0.2, max: 2, step: 0.01, def: 1, fmt: x2,
+      hint: 'How quickly they swing round to face where they fly.' },
+    { k: 'bob', label: 'Bob', min: 0, max: 3, step: 0.01, def: 1, fmt: x2,
+      hint: 'The rise on each downstroke, seen from above as a pulse in size and shadow.' },
+    { k: 'height', label: 'Time spent high vs low', min: 0, max: 1, step: 0.01, def: 0.5,
+      fmt: v => v < 0.34 ? f2(v) + ' · mostly low' : v > 0.66 ? f2(v) + ' · mostly high' : f2(v) + ' · both',
+      hint: '0 keeps them down among the flowers, 1 up close to you.' },
+  ] },
+  { group: 'Visits', items: [
+    { k: 'visits', label: 'Flower visits', min: 0, max: 1, step: 0.01, def: 0.35, fmt: f2,
+      hint: 'Chance they head for a flower when they arrive somewhere, rather than travel on.' },
+    { k: 'stay', label: 'How long they stay', min: 0, max: 1.5, step: 0.01, def: 0.25,
+      fmt: v => x2(v) + ' · monarch ' + Math.round(10 * v) + '–' + Math.round(40 * v) + ' s',
+      hint: 'Share of the real time spent on a flower or basking (monarch 10–40 s at 1 ×).' },
+    { k: 'bask', label: 'Basking', min: 0, max: 1, step: 0.01, def: 0.1, fmt: f2,
+      hint: 'Chance they settle on the ground with wings open flat instead of travelling on.' },
+  ] },
+  { group: 'Flowers', items: [
+    { k: 'density', label: 'Flower density', min: 0.2, max: 3, step: 0.01, def: 1, fmt: x2,
+      hint: 'How many planted patches across the screen.' },
+    { k: 'flowerSize', label: 'Flower size', min: 0.4, max: 2, step: 0.01, def: 1.15, fmt: x2,
+      hint: 'Size of the blooms (a daisy is about 11 cells across at 1 ×).' },
+    { k: 'leaves', label: 'Leaves', min: 0, max: 2, step: 0.01, def: 1, fmt: x2,
+      hint: 'The dark rosettes of leaves under each bloom.' },
+  ] },
+  { group: 'Air and ground', items: [
+    { k: 'breeze', label: 'Breeze', min: 0, max: 3, step: 0.01, def: 1, fmt: x2,
+      hint: 'Gusts that ripple through the grass, sway the flowers and drift the butterflies.' },
+    { k: 'shadow', label: 'Shadows', min: 0, max: 1.5, step: 0.01, def: 1, fmt: x2,
+      hint: 'How dark the shadows are; a high butterfly casts a fainter, farther one.' },
+    { k: 'green', label: 'Green in the ground', min: 0, max: 2.5, step: 0.01, def: 1, fmt: x2,
+      hint: 'The hints of green in the black ground.' },
+    { k: 'grass', label: 'Grass', min: 0, max: 2, step: 0.01, def: 1, fmt: x2,
+      hint: 'How many grass marks, and how bright.' },
+  ] },
+  { group: 'View', items: [
+    { k: 'timeScale', label: 'Slow motion', min: 0.05, max: 1.5, step: 0.01, def: 1,
+      fmt: v => v >= 0.995 && v <= 1.005 ? '1 × (real time)' : x2(v),
+      hint: 'Time scale for watching the wingbeat closely; 1 × is the speed the app runs.' },
+    { k: 'theme', type: 'choice', label: 'Theme', options: [['dark', 'Dark'], ['light', 'Light']], def: 'dark' },
+    { k: 'calm', type: 'toggle', label: 'Calm', def: false, hint: 'Dims everything, as the app\'s Calm does.' },
+    { k: 'grid', type: 'toggle', label: 'Grid lines', def: true, hint: 'The faint cell grid the app draws.' },
+  ] },
+];
+
+const DEFAULTS = { species: { monarch: true, morpho: true, swallowtail: true, white: true } };
+for (const g of CONTROLS) for (const c of g.items) if (c.k !== 'species') DEFAULTS[c.k] = c.def;
+const STORE = 'meadow-sketch-settings-v1';
+let set = JSON.parse(JSON.stringify(DEFAULTS));
+try {
+  const saved = JSON.parse(localStorage.getItem(STORE) || 'null');
+  if (saved && typeof saved === 'object') {
+    for (const k in DEFAULTS) if (k in saved && typeof saved[k] === typeof DEFAULTS[k]) set[k] = saved[k];
+  }
+} catch (e) { /* storage blocked: defaults */ }
+if (params.get('defaults') === '1') set = JSON.parse(JSON.stringify(DEFAULTS));
+if (params.has('theme')) set.theme = params.get('theme') === 'light' ? 'light' : 'dark';
+for (const [k, v] of params) if (k.startsWith('s.') && k.slice(2) in DEFAULTS) set[k.slice(2)] = +v;
+function save() { try { localStorage.setItem(STORE, JSON.stringify(set)); } catch (e) { /* ignore */ } }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+//  Species: the measured numbers (ButterflySpecies.swift, research §1) and the drawn look (MeadowPainter.swift)
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+/** Wing outlines, x outward in half-spans (0 at the body), y along the body in half-heights (+ toward the head).
+ *  Edge kinds: 0 root (along the body), 1 costa (leading edge), 2 outer margin, 3 inner margin. */
+const ROOT = 0, COSTA = 1, OUTER = 2, INNER = 3;
+function outline(pts, kinds) {
+  const p = new Float64Array(pts.flat()); let minY = 1e9, maxY = -1e9, maxX = 0;
+  for (let i = 0; i < pts.length; i++) { minY = Math.min(minY, pts[i][1]); maxY = Math.max(maxY, pts[i][1]); maxX = Math.max(maxX, pts[i][0]); }
+  return { p, k: Int8Array.from(kinds), n: pts.length, minY, maxY, maxX };
+}
+const FK = [COSTA, COSTA, COSTA, OUTER, OUTER, OUTER, INNER, INNER, ROOT];
+const HK = [COSTA, COSTA, OUTER, OUTER, OUTER, OUTER, INNER, INNER, ROOT];
+const SHAPES = {
+  monarch: { fore: outline([[0.03, 0.34], [0.30, 0.62], [0.62, 0.88], [0.92, 1.00], [1.00, 0.80], [0.92, 0.40], [0.74, 0.00], [0.40, -0.12], [0.03, -0.10]], FK),
+             hind: outline([[0.03, 0.06], [0.38, 0.06], [0.58, -0.12], [0.68, -0.36], [0.64, -0.62], [0.50, -0.86], [0.28, -0.98], [0.12, -0.88], [0.04, -0.56]], HK), tailY: -9 },
+  morpho: { fore: outline([[0.03, 0.34], [0.34, 0.70], [0.68, 0.94], [0.90, 0.98], [1.00, 0.72], [0.96, 0.34], [0.80, -0.02], [0.40, -0.12], [0.03, -0.10]], FK),
+            hind: outline([[0.03, 0.06], [0.44, 0.06], [0.64, -0.12], [0.76, -0.36], [0.72, -0.64], [0.54, -0.88], [0.30, -1.00], [0.10, -0.90], [0.04, -0.54]], HK), tailY: -9 },
+  swallowtail: { fore: outline([[0.03, 0.34], [0.34, 0.66], [0.68, 0.90], [0.96, 1.02], [0.98, 0.78], [0.86, 0.36], [0.72, -0.02], [0.38, -0.12], [0.03, -0.10]], FK),
+                 hind: outline([[0.03, 0.06], [0.40, 0.06], [0.58, -0.12], [0.68, -0.36], [0.62, -0.68], [0.56, -1.40], [0.44, -1.40], [0.40, -0.88], [0.20, -0.94], [0.08, -0.84], [0.04, -0.54]],
+                               [COSTA, COSTA, OUTER, OUTER, OUTER, OUTER, OUTER, OUTER, INNER, INNER, ROOT]), tailY: -0.92 },
+  white: { fore: outline([[0.03, 0.34], [0.34, 0.72], [0.66, 0.96], [0.88, 0.96], [1.00, 0.66], [0.94, 0.28], [0.74, -0.02], [0.38, -0.12], [0.03, -0.10]], FK),
+           hind: outline([[0.03, 0.06], [0.40, 0.06], [0.58, -0.12], [0.70, -0.38], [0.64, -0.66], [0.46, -0.90], [0.24, -0.98], [0.08, -0.88], [0.04, -0.54]], HK), tailY: -9 },
+};
+
+const rgb = (r, g, b) => [r, g, b];
+/** Species. Sizes in cells at 13 × 19 pt; speeds in pt/s at that cell; angles in degrees. `top`/`bottom` are the
+ *  wing's stroke extremes (deg above level): the stroke runs top → bottom → top each beat, and seen from above a
+ *  wing raised by φ is drawn cos φ wide. `aspect` is the drawn fore-aft height over the wingspan. */
+const SPECIES = {
+  monarch: { span: 22, aspect: 0.6, realBeat: 9.5, top: 80, bottom: -16, cruise: 170, forage: 80, surge: 0, thrust: 0.9,
+    bout: [3, 8], glideS: [1.5, 5], glideWidth: 0.95, jinkChance: 0.12, jinkSigma: 12, slip: 0.35, headingK: 30, zeta: 0.9,
+    bob: 0.25, maxBank: 35, bound: false, nectar: [10, 40], bask: [10, 40], baskPose: 'open', flutterOnFlower: false,
+    flowers: { milkweed: 3, coneflower: 2, clover: 1, daisy: 1 }, flush: 4.5 },
+  morpho: { span: 26, aspect: 0.5, realBeat: 6, top: 82, bottom: -18, cruise: 150, forage: 70, surge: 0, thrust: 0.9,
+    bout: [4, 10], glideS: [0.6, 2], glideWidth: 1, jinkChance: 0.30, jinkSigma: 30, slip: 0.7, headingK: 35, zeta: 0.85,
+    bob: 0.35, maxBank: 50, bound: true, nectar: [20, 60], bask: [20, 90], baskPose: 'closed', flutterOnFlower: false,
+    flowers: {}, flush: 3.5 },
+  swallowtail: { span: 22, aspect: 0.62, realBeat: 7, top: 78, bottom: -14, cruise: 170, forage: 80, surge: 0, thrust: 0.9,
+    bout: [3, 6], glideS: [1, 3], glideWidth: 1, jinkChance: 0.25, jinkSigma: 25, slip: 0.55, headingK: 45, zeta: 0.9,
+    bob: 0.25, maxBank: 40, bound: false, nectar: [6, 25], bask: [10, 30], baskPose: 'open', flutterOnFlower: true,
+    flowers: { coneflower: 2, fennel: 2, milkweed: 1, daisy: 1 }, flush: 5 },
+  white: { span: 15, aspect: 0.68, realBeat: 11.8, top: 80, bottom: -12, cruise: 140, forage: 70, surge: 0.45, thrust: 1.1,
+    bout: [30, 90], glideS: [0.15, 0.4], glideWidth: 1, jinkChance: 0.40, jinkSigma: 40, slip: 1, headingK: 60, zeta: 0.8,
+    bob: 0.2, maxBank: 45, bound: false, nectar: [6, 20], bask: [8, 25], baskPose: 'vee', flutterOnFlower: false,
+    flowers: { mustard: 3, clover: 2, daisy: 2, dandelion: 2 }, flush: 4 },
+};
+const BEAT_CAP = 7.5;
+function beatHz(kind, w) { return Math.min(BEAT_CAP, SPECIES[kind].realBeat * w); }
+for (const k in SPECIES) {
+  const sp = SPECIES[k];
+  sp.key = k; sp.shape = SHAPES[k];
+  sp.mid = (sp.top + sp.bottom) / 2 * DEG; sp.amp = (sp.top - sp.bottom) / 2 * DEG;
+  sp.glideStroke = Math.acos(clamp(sp.glideWidth, -1, 1));
+  // θ on the downstroke where the stroke passes the glide pose (θ = 0 is the top of the stroke).
+  sp.glidePhase = Math.acos(clamp((sp.glideStroke - sp.mid) / sp.amp, -1, 1));
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+//  Colours. Dark: the app's toned-down species colours on black. Light: graphite on paper with species ink.
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const PAPER = [247, 246, 243], INK = [35, 35, 35];
+let LIGHT = false;
+function paperTint(c, k) { return [PAPER[0] + (c[0] - PAPER[0]) * k, PAPER[1] + (c[1] - PAPER[1]) * k, PAPER[2] + (c[2] - PAPER[2]) * k]; }
+/** A dark-theme colour for paper: the same hue at graphite strength, saturation held down. */
+function onPaper(c) {
+  const lum = Math.max(1, 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]);
+  let v = [c[0] * 96 / lum, c[1] * 96 / lum, c[2] * 96 / lum];
+  const mx = Math.max(...v), mn = Math.min(...v);
+  if (mx > 0 && mx - mn > 0.5 * mx) { const k = 0.5 * mx / (mx - mn); v = v.map(x => mx - (mx - x) * k); }
+  return v.map(x => clamp(x, 0, 255));
+}
+
+/** One species' wing inks: a four-step ramp for the field (deep at the root and in shade, bright where the wing
+ *  catches the light), a three-step ramp for the black marks, and the spot colours. Stylised, not photographic. */
+function wingInks(kind, light) {
+  const d = {
+    monarch: { ramp: [rgb(96, 38, 10), rgb(150, 64, 16), rgb(204, 104, 28), rgb(240, 152, 62)],
+      marks: [rgb(12, 9, 8), rgb(30, 22, 17), rgb(54, 40, 30)], markInk: rgb(118, 88, 64),
+      dot: rgb(240, 234, 218), spot: rgb(232, 172, 92), under: rgb(176, 122, 60), ring: rgb(240, 234, 218), centre: rgb(30, 22, 18), blue: rgb(0, 0, 0) },
+    morpho: { ramp: [rgb(12, 30, 86), rgb(24, 62, 150), rgb(42, 104, 200), rgb(86, 152, 232)],
+      marks: [rgb(7, 9, 16), rgb(16, 20, 34), rgb(32, 38, 60)], markInk: rgb(76, 90, 122),
+      dot: rgb(222, 230, 242), spot: rgb(222, 230, 242), under: rgb(112, 84, 54), ring: rgb(204, 176, 102), centre: rgb(34, 26, 20), blue: rgb(0, 0, 0),
+      shine: rgb(178, 226, 255) },
+    swallowtail: { ramp: [rgb(110, 90, 28), rgb(164, 140, 50), rgb(212, 188, 82), rgb(244, 226, 134)],
+      marks: [rgb(11, 10, 8), rgb(28, 25, 20), rgb(50, 45, 35)], markInk: rgb(112, 100, 72),
+      dot: rgb(236, 216, 120), spot: rgb(236, 216, 120), under: rgb(180, 164, 98), ring: rgb(218, 98, 46), centre: rgb(26, 23, 18), blue: rgb(72, 114, 200) },
+    white: { ramp: [rgb(132, 132, 122), rgb(178, 178, 166), rgb(214, 212, 198), rgb(238, 236, 224)],
+      marks: [rgb(26, 26, 28), rgb(40, 40, 42), rgb(58, 58, 60)], markInk: rgb(120, 120, 116),
+      dot: rgb(140, 140, 132), spot: rgb(140, 140, 132), under: rgb(198, 204, 156), ring: rgb(140, 140, 132), centre: rgb(36, 36, 38), blue: rgb(0, 0, 0) },
+  }[kind];
+  d.body = rgb(22, 19, 17); d.bodyInk = rgb(200, 190, 172); d.feeler = rgb(178, 168, 150);
+  if (!light) return d;
+  // Graphite on paper: the species hue tinted toward the paper, deeper steps darker; marks and bodies graphite.
+  const L = Object.assign({}, d);
+  const hue = d.ramp[2];
+  if (kind === 'white') L.ramp = [rgb(168, 168, 160), rgb(192, 192, 184), rgb(212, 212, 204), rgb(230, 229, 222)];
+  else L.ramp = [0.95, 0.78, 0.6, 0.42].map(k => paperTint(hue, k).map((x, i) => x * (k > 0.9 ? 0.82 : 1)));
+  L.marks = [rgb(86, 82, 78), rgb(106, 102, 98), rgb(128, 124, 120)]; L.markInk = rgb(170, 166, 160);
+  L.dot = kind === 'white' ? rgb(90, 90, 86) : rgb(244, 242, 236);
+  L.spot = kind === 'white' ? L.dot : paperTint(d.spot, 0.6);
+  L.under = paperTint(d.under, 0.6); L.ring = kind === 'morpho' ? rgb(150, 124, 40) : paperTint(d.ring, 0.85);
+  L.blue = paperTint(d.blue, 0.75); L.centre = rgb(74, 70, 66);
+  L.body = rgb(66, 63, 60); L.bodyInk = rgb(238, 236, 230); L.feeler = rgb(70, 67, 64);
+  if (d.shine) L.shine = paperTint(rgb(80, 150, 230), 0.55);
+  return L;
+}
+
+/** The meadow's plant colours (MeadowPainter's PlantInks, extended for blooms seen from above). */
+function plantInks(light) {
+  const p = {
+    leaf: rgb(12, 32, 15), leafLit: rgb(24, 54, 26), rib: rgb(66, 108, 58), leafEdge: rgb(40, 78, 42),
+    grass: rgb(50, 82, 44), stirred: rgb(132, 172, 106), ground: rgb(8, 20, 10),
+    daisy: rgb(236, 234, 224), daisyEye: rgb(196, 150, 30), daisyEyeInk: rgb(248, 214, 96),
+    cone: rgb(198, 112, 170), coneEye: rgb(110, 50, 22), coneEyeInk: rgb(226, 132, 52),
+    milkweed: rgb(214, 136, 160), milkweedBody: rgb(92, 40, 60), milkweedInk: rgb(246, 190, 206),
+    fennel: rgb(240, 224, 128), fennelRay: rgb(118, 142, 66),
+    clover: rgb(200, 106, 142), cloverTip: rgb(236, 196, 212), cloverBody: rgb(96, 40, 66),
+    mustard: rgb(232, 200, 70), mustardBud: rgb(150, 160, 64),
+    dandelion: rgb(236, 196, 52), dandelionEye: rgb(196, 128, 26),
+    gold: rgb(232, 200, 90),
+  };
+  if (!light) return p;
+  const q = {};
+  for (const k in p) q[k] = onPaper(p[k]);
+  q.leaf = rgb(206, 216, 198); q.leafLit = rgb(222, 230, 214); q.rib = rgb(110, 130, 98); q.leafEdge = rgb(140, 158, 128);
+  q.grass = rgb(150, 164, 140); q.stirred = rgb(70, 88, 62); q.ground = rgb(232, 238, 226);
+  q.daisy = rgb(255, 255, 252); q.daisyEye = paperTint(onPaper(p.daisyEye), 0.7); q.daisyEyeInk = onPaper(p.daisyEye);
+  for (const k of ['cone', 'milkweed', 'fennel', 'clover', 'mustard', 'dandelion']) q[k] = paperTint(onPaper(p[k]), 0.55);
+  q.coneEye = paperTint(onPaper(p.coneEye), 0.8); q.milkweedBody = paperTint(onPaper(p.milkweedBody), 0.45);
+  q.cloverBody = paperTint(onPaper(p.cloverBody), 0.45); q.dandelionEye = paperTint(onPaper(p.dandelionEye), 0.7);
+  q.cloverTip = paperTint(onPaper(p.clover), 0.25); q.mustardBud = onPaper(p.mustardBud); q.fennelRay = onPaper(p.fennelRay);
+  q.gold = rgb(150, 124, 40);
+  return q;
+}
+
+let INKS = {}, PI_ = plantInks(false);
+const PLANT_DARK = plantInks(false);
+/** Light theme: a dark-theme flower colour as a block on paper (bright colours tint strongly, dim ones barely) and as
+ *  graphite-strength ink. */
+const LB = [0, 0, 0], LI = [0, 0, 0];
+function lightBlock(r, g, b) { const l = 0.2126 * r + 0.7152 * g + 0.0722 * b; const h = onPaper([r, g, b]); const k = clamp(l / 160, 0, 1) * 0.8;
+  LB[0] = PAPER[0] + (h[0] - PAPER[0]) * k; LB[1] = PAPER[1] + (h[1] - PAPER[1]) * k; LB[2] = PAPER[2] + (h[2] - PAPER[2]) * k; return LB; }
+function lightInk(r, g, b) { const h = onPaper([r, g, b]); LI[0] = h[0]; LI[1] = h[1]; LI[2] = h[2]; return LI; }
+function fBlock(i, r, g, b) { if (LIGHT) { const c = lightBlock(r, g, b); blockAt(i, c[0], c[1], c[2], 1); } else blockAt(i, r, g, b, 1); }
+function fGlyph(i, gi, r, g, b, a) { if (LIGHT) { const c = lightInk(r, g, b); glyphAt(i, gi, c[0], c[1], c[2], a); } else glyphAt(i, gi, r, g, b, a); }
+function setTheme() {
+  LIGHT = set.theme === 'light';
+  for (const k in SPECIES) INKS[k] = wingInks(k, LIGHT);
+  PI_ = plantInks(LIGHT);
+  document.documentElement.setAttribute('data-theme', LIGHT ? 'light' : 'dark');
+  groundDirty = true; gridDirty = true;
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+//  The cell grid: each cell a block colour and a glyph, as the app draws (Geist Mono SemiBold)
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const GL = [' ', ':', ';', 't', '%', 'S', 'X', '8', '#', '@', '.', "'", ',', '`', 'o', '-', '*', '·', '¯', '_', '/', '\\', '|', '+', 'x', 'O', '°', 'v', '0'];
+const G = {}; GL.forEach((c, i) => { G[c] = i; });
+const HEAVY = [G[':'], G[';']], LIGHT_EDGE = [G['.'], G["'"], G[','], G['`']];
+/** A line glyph for a direction on screen (pt, y down). */
+function lineGlyph(dx, dy) {
+  let a = Math.atan2(-dy, dx) / DEG; if (a < 0) a += 180;
+  if (a < 22.5 || a >= 157.5) return G['-'];
+  if (a < 67.5) return G['/'];
+  if (a < 112.5) return G['|'];
+  return G['\\'];
+}
+
+const canvas = document.getElementById('meadow');
+const ctx = canvas.getContext('2d', { alpha: false });
+let W = 0, H = 0, DPR = 1, cw = 13, ch = 19, S = 1, cols = 0, rows = 0, N = 0;
+let BR, BG, BB, GI, IR, IG, IB, IA;     // this frame's cells
+let groundR, groundG, groundB, tuft, tuftK; // the ground, cached
+let groundDirty = true, gridDirty = true;
+const blockCanvas = document.createElement('canvas'), blockCtx = blockCanvas.getContext('2d');
+const gridCanvas = document.createElement('canvas'), gridCtx = gridCanvas.getContext('2d');
+let blockImage = null;
+
+function resize() {
+  W = Math.max(1, window.innerWidth); H = Math.max(1, window.innerHeight);
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
+  // The app's cell: 13 × 19 pt on a big screen, smaller on a small one (GridSpec.cell(forWidth:)).
+  cw = Math.min(13, Math.max(8, Math.round(W / 124))); ch = Math.round(cw * 1.45); S = cw / 13;
+  cols = Math.ceil(W / cw); rows = Math.ceil(H / ch); N = cols * rows;
+  BR = new Float32Array(N); BG = new Float32Array(N); BB = new Float32Array(N);
+  GI = new Uint8Array(N); IR = new Float32Array(N); IG = new Float32Array(N); IB = new Float32Array(N); IA = new Float32Array(N);
+  groundR = new Float32Array(N); groundG = new Float32Array(N); groundB = new Float32Array(N);
+  tuft = new Uint8Array(N); tuftK = new Float32Array(N);
+  blockCanvas.width = cols; blockCanvas.height = rows; blockImage = blockCtx.createImageData(cols, rows);
+  gridCanvas.width = canvas.width; gridCanvas.height = canvas.height;
+  groundDirty = true; gridDirty = true;
+  pfInit();
+}
+
+// Cell writes. Blocks blend by `a`; glyphs replace.
+function blockAt(i, r, g, b, a) {
+  if (a >= 1) { BR[i] = r; BG[i] = g; BB[i] = b; }
+  else if (a > 0) { BR[i] += (r - BR[i]) * a; BG[i] += (g - BG[i]) * a; BB[i] += (b - BB[i]) * a; }
+}
+function glyphAt(i, gi, r, g, b, a) { GI[i] = gi; IR[i] = r; IG[i] = g; IB[i] = b; IA[i] = a; }
+/** A shadow: darker block, fainter glyph. */
+function shade(i, k) {
+  if (k <= 0) return;
+  if (LIGHT) { const m = 1 - 0.32 * k; BR[i] *= m; BG[i] *= m; BB[i] *= m; IA[i] *= 1 - 0.5 * k; }
+  else { const m = 1 - k; BR[i] *= m; BG[i] *= m; BB[i] *= m; IA[i] *= 1 - 0.9 * k; }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+//  Breeze: a slowly turning wind with gust bands that travel downwind, plus the air the pointer stirs
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const wind = { cx: 1, cy: 0, base: 0, x: 0, y: 0, g: 0, m: 0 };
+let PG = 48, pgc = 0, pgr = 0, PFX = new Float32Array(0), PFY = new Float32Array(0);
+function pfInit() { PG = 48 * S; pgc = Math.ceil(W / PG) + 1; pgr = Math.ceil(H / PG) + 1; PFX = new Float32Array(pgc * pgr); PFY = new Float32Array(pgc * pgr); }
+function updateWind(t, dt) {
+  const dir = 0.35 + 1.1 * n1(t * 0.013, 91);
+  wind.cx = Math.cos(dir); wind.cy = Math.sin(dir);
+  wind.base = 26 * S * set.breeze * (0.75 + 0.35 * n1(t * 0.05, 17));
+  const k = Math.exp(-1.6 * dt);
+  for (let i = 0; i < PFX.length; i++) { PFX[i] *= k; PFY[i] *= k; }
+}
+/** Gust strength at a point, 0 … 1: bands that roll downwind across the meadow. */
+function gustAt(x, y, t) {
+  const a = (x * wind.cx + y * wind.cy) / (300 * S) - t * 0.42;
+  const b = (-x * wind.cy + y * wind.cx) / (520 * S);
+  const g = 0.62 * vnoise(a, b, 5) + 0.38 * vnoise(a * 2.3 + 3.3, b * 1.9, 9);
+  return smooth(0.42, 0.82, g);
+}
+/** The wind at a point into `wind.x/y` (pt/s), its gust (`g`) and speed (`m`). */
+function windAt(x, y, t) {
+  const g = gustAt(x, y, t);
+  const m = wind.base * (0.2 + 1.7 * g);
+  let px = 0, py = 0;
+  const gx = clamp(x / PG, 0, pgc - 1.001), gy = clamp(y / PG, 0, pgr - 1.001);
+  const ix = gx | 0, iy = gy | 0, fx = gx - ix, fy = gy - iy, i = iy * pgc + ix;
+  if (PFX.length) {
+    px = (PFX[i] * (1 - fx) + PFX[i + 1] * fx) * (1 - fy) + (PFX[i + pgc] * (1 - fx) + PFX[i + pgc + 1] * fx) * fy;
+    py = (PFY[i] * (1 - fx) + PFY[i + 1] * fx) * (1 - fy) + (PFY[i + pgc] * (1 - fx) + PFY[i + pgc + 1] * fx) * fy;
+  }
+  wind.x = wind.cx * m + px; wind.y = wind.cy * m + py; wind.g = g; wind.m = Math.hypot(wind.x, wind.y);
+}
+function stir(x, y, vx, vy) {
+  const rad = 3, cx = x / PG, cy = y / PG;
+  for (let r = Math.floor(cy - rad); r <= Math.ceil(cy + rad); r++) for (let c = Math.floor(cx - rad); c <= Math.ceil(cx + rad); c++) {
+    if (c < 0 || r < 0 || c >= pgc || r >= pgr) continue;
+    const d = Math.hypot(c - cx, r - cy) / rad; if (d >= 1) continue;
+    const w = (1 - d) * (1 - d) * 0.16, i = r * pgc + c;
+    PFX[i] = clamp(PFX[i] + vx * w, -260, 260); PFY[i] = clamp(PFY[i] + vy * w, -260, 260);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+//  Flowers seen from above, planted in patches
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const KINDS = ['daisy', 'coneflower', 'milkweed', 'fennel', 'clover', 'mustard', 'dandelion'];
+const KIND = {
+  daisy:      { r: 66, n: [2, 4],  weight: 1.4, f0: [1.5, 2.2], petals: [10, 13] },
+  coneflower: { r: 72, n: [1, 3],  weight: 1.2,   f0: [0.7, 1.1], petals: [10, 12] },
+  milkweed:   { r: 52, n: [1, 3],  weight: 0.9, f0: [0.8, 1.2], petals: [0, 0] },
+  fennel:     { r: 80, n: [1, 2],  weight: 0.8, f0: [0.7, 1.0], petals: [6, 9] },
+  clover:     { r: 38, n: [3, 5],  weight: 0.5,   f0: [1.8, 2.5], petals: [0, 0] },
+  mustard:    { r: 52, n: [1, 3],  weight: 0.5, f0: [1.2, 1.8], petals: [0, 0] },
+  dandelion:  { r: 50, n: [2, 4],  weight: 1,   f0: [1.6, 2.4], petals: [30, 36] },
+};
+let flowers = [];
+let flowerId = 1;
+
+function makeFlower(kind, x, y, grown) {
+  const K = KIND[kind];
+  const R0 = K.r * S * set.flowerSize * R(0.82, 1.18);
+  const f = { id: flowerId++, kind, x, y, R: R0, rot: R(0, TAU), seed: RI(1, 1e6), age: grown ? 1 : 0,
+    n: RI(K.petals[0], K.petals[1]), f0: R(K.f0[0], K.f0[1]), ox: 0, oy: 0, vx: 0, vy: 0, busy: 0, leaves: [], clicked: !grown };
+  // A rosette of leaves on the ground under the bloom (not swaying with it).
+  const L = [];
+  const add = (a, len, wid, kindL) => L.push({ a, len: len * R0, wid: wid * R0, k: kindL || 0 });
+  const a0 = R(0, TAU);
+  switch (kind) {
+    case 'daisy': { const n = RI(4, 6); for (let i = 0; i < n; i++) add(a0 + i * TAU / n + R(-0.3, 0.3), R(1.3, 1.6), R(0.24, 0.3), 2); break; }
+    case 'coneflower': { const n = RI(3, 4); for (let i = 0; i < n; i++) add(a0 + i * TAU / n + R(-0.3, 0.3), R(1.5, 1.85), R(0.26, 0.32)); break; }
+    case 'milkweed': { add(a0, R(1.7, 2.0), 0.5); add(a0 + Math.PI, R(1.6, 1.9), 0.48); if (rnd() < 0.6) { add(a0 + Math.PI / 2, 1.4, 0.42); add(a0 - Math.PI / 2, 1.35, 0.42); } break; }
+    case 'fennel': { const n = RI(7, 10); for (let i = 0; i < n; i++) add(a0 + i * TAU / n + R(-0.2, 0.2), R(1.1, 1.45), 0.06, 1); break; }
+    case 'clover': { const n = RI(1, 2); for (let i = 0; i < n; i++) add(a0 + i * 2.6 + R(-0.3, 0.3), R(1.5, 1.8), 0.9, 3); break; }
+    case 'mustard': { const n = RI(3, 4); for (let i = 0; i < n; i++) add(a0 + i * TAU / n + R(-0.3, 0.3), R(1.4, 1.7), R(0.3, 0.36), 2); break; }
+    case 'dandelion': { const n = RI(6, 8); for (let i = 0; i < n; i++) add(a0 + i * TAU / n + R(-0.2, 0.2), R(1.5, 1.9), R(0.2, 0.24), 4); break; }
+  }
+  f.leaves = L;
+  f.reach = Math.max(R0 * 1.15, ...L.map(l => l.len)) + 2 * cw;
+  // Mustard: small four-petalled flowers in a loose spiral raceme. Milkweed/clover florets on a jittered grid.
+  if (kind === 'mustard') {
+    f.sub = []; const m = RI(6, 9);
+    for (let i = 0; i < m; i++) { const r = R0 * (0.18 + 0.78 * Math.sqrt((i + 0.5) / m)), a = i * 2.39996 + f.rot;
+      f.sub.push({ x: Math.cos(a) * r, y: Math.sin(a) * r, s: R0 * R(0.26, 0.34) * (1 - 0.25 * (i / m)), open: i > 0, rot: R(0, TAU) }); }
+  }
+  return f;
+}
+
+function pickKind(x, y) {
+  let tot = 0; for (const k of KINDS) tot += KIND[k].weight;
+  let u = rnd() * tot; for (const k of KINDS) { u -= KIND[k].weight; if (u <= 0) return k; } return 'daisy';
+}
+
+function plant() {
+  const keep = flowers.filter(f => f.clicked);
+  flowers = keep;
+  const area = W * H;
+  const patches = Math.max(1, Math.round(area / (190000 * S * S) * set.density));
+  const centres = [];
+  const margin = 20 * S;
+  for (let p = 0; p < patches; p++) {
+    // Spread patches over the whole screen: the best of a few candidates for distance from the others.
+    let best = null, bestD = -1;
+    for (let i = 0; i < 10; i++) {
+      const x = R(margin, W - margin), y = R(margin, H - margin);
+      let d = 1e9; for (const c of centres) d = Math.min(d, Math.hypot(c.x - x, c.y - y));
+      if (d > bestD) { bestD = d; best = { x, y }; }
+    }
+    centres.push(best);
+    const kind = pickKind(best.x, best.y), K = KIND[kind];
+    const n = RI(K.n[0], K.n[1]);
+    const spread = K.r * S * set.flowerSize * (1.6 + 0.5 * n);
+    for (let i = 0; i < n; i++) {
+      for (let t = 0; t < 14; t++) {
+        const a = R(0, TAU), r = spread * Math.sqrt(rnd());
+        const x = best.x + Math.cos(a) * r, y = best.y + Math.sin(a) * r;
+        if (x < -10 || y < -10 || x > W + 10 || y > H + 10) continue;
+        const cand = makeFlower(kind, x, y, true);
+        let ok = true;
+        for (const o of flowers) if (Math.hypot(o.x - x, o.y - y) < (o.R + cand.R) * 1.05) { ok = false; break; }
+        if (ok) { flowers.push(cand); break; }
+      }
+    }
+  }
+  // Small ones first so the big blooms lie over them.
+  flowers.sort((a, b) => a.R - b.R);
+}
+
+function bloomAt(x, y) {
+  const f = makeFlower(pickKind(x, y), x, y, false);
+  flowers.push(f);
+  for (let i = 0; i < 16; i++) {
+    const a = R(0, TAU), v = R(20, 70) * S;
+    dust.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: R(1.2, 2.2), max: 2.2, spark: true });
+  }
+  // A fresh bloom is an offer: the nearest butterfly that is travelling may come.
+  let best = null, bd = 1e9;
+  for (const b of flies) if (b.state === 'fly') { const d = Math.hypot(b.x - x, b.y - y); if (d < bd) { bd = d; best = b; } }
+  if (best && rnd() < 0.7) { best.goal = 'nectar'; best.flower = f.id; f.busy = best.id; best.state = 'approach'; best.timer = 16; }
+}
+
+function stepFlowers(dt) {
+  for (const f of flowers) {
+    if (f.age < 1) f.age = Math.min(1, f.age + dt / 2.2);
+    // The head is a damped spring at the top of its stem, forced by drag in the wind (research §4.2).
+    windAt(f.x, f.y, simT);
+    const w = TAU * f.f0, zeta = 0.12;
+    const k = 0.0035 * (1 + 0.6 * (f.R / (30 * S)));
+    const fx = wind.x * wind.m * k, fy = wind.y * wind.m * k;
+    f.vx += (fx - w * w * f.ox - 2 * zeta * w * f.vx) * dt;
+    f.vy += (fy - w * w * f.oy - 2 * zeta * w * f.vy) * dt;
+    f.ox += f.vx * dt; f.oy += f.vy * dt;
+    const lim = 0.45 * f.R; const m = Math.hypot(f.ox, f.oy);
+    if (m > lim) { f.ox *= lim / m; f.oy *= lim / m; }
+  }
+}
+const flowerById = id => { for (const f of flowers) if (f.id === id) return f; return null; };
+
+// ── drawing a flower ──
+
+const FH = { hit: 0, r: 0, g: 0, b: 0, gi: 0, ir: 0, ig: 0, ib: 0, ia: 1, solid: true };
+function fhit(layer, r, g, b, gi, ir, ig, ib, ia, solid) { FH.hit = layer; FH.r = r; FH.g = g; FH.b = b; FH.gi = gi; FH.ir = ir; FH.ig = ig; FH.ib = ib; FH.ia = ia; FH.solid = solid; }
+// The light comes from the top-left, a little above (also for the butterflies' wings and the shadows).
+const LX = -0.42, LY = -0.58, LZ = 0.70;
+const LIGHT2 = Math.atan2(LY, LX);
+
+/** Samples a bloom's head at offset (dx, dy) from its centre. Sets FH; FH.hit 0 for a miss. */
+function headSample(f, dx, dy, grow) {
+  // Always drawn in the dark palette; drawFlower maps the result onto the paper in light.
+  const LIGHT = false, PI_ = PLANT_DARK;
+  FH.hit = 0;
+  const Rr = f.R * grow;
+  if (Rr <= 0.5) return;
+  const r = Math.hypot(dx, dy);
+  if (r > Rr * 1.12) return;
+  const P = PI_;
+  const th = Math.atan2(dy, dx);
+  const lit = Math.cos(th - LIGHT2);   // +1 on the side facing the light
+  const s = f.seed;
+  switch (f.kind) {
+    case 'daisy': case 'coneflower': case 'dandelion': {
+      const daisy = f.kind === 'daisy', cone = f.kind === 'coneflower';
+      const eye = Rr * (daisy ? 0.3 : cone ? 0.42 : 0.26);
+      if (r < eye) {
+        // The disc (or cone): a lit dome of florets.
+        const t = r / eye;
+        const dome = 0.78 + 0.32 * lit * t - 0.18 * t * t;
+        const base = daisy ? P.daisyEye : cone ? P.coneEye : P.dandelionEye;
+        const ink = daisy ? P.daisyEyeInk : cone ? P.coneEyeInk : P.dandelion;
+        const h = hash3(Math.round(dx / cw * 2), Math.round(dy / ch * 2), s);
+        const gi = cone ? (h < 0.5 ? G['*'] : h < 0.75 ? G['x'] : G['+']) : daisy ? (t < 0.35 ? G['o'] : h < 0.5 ? G['·'] : G['°']) : (h < 0.5 ? G['*'] : G['·']);
+        fhit(3, base[0] * dome, base[1] * dome, base[2] * dome, gi, ink[0], ink[1], ink[2], 0.85, true);
+        return;
+      }
+      // Ray petals round the disc, each its own length and shade; gaps between them show the ground. Each petal is
+      // a dim block carrying a bright stroke that points along it, so a bloom reads as an ASCII starburst.
+      const n = f.n, u = ((th - f.rot) / TAU * n % n + n) % n;
+      const idx = Math.floor(u + 0.5) % n, frac = u - Math.round(u);
+      const len = Rr * (0.84 + 0.18 * hash3(idx, 3, s)) * (cone ? 0.94 : 1);
+      if (r > len) return;
+      const t = clamp((r - eye) / (len - eye), 0, 1);
+      // Lateral distance from the petal's midline, pt; a petal is widest two-thirds of the way out.
+      const lat = Math.abs(frac) * TAU / n * r;
+      const pw = (daisy ? 0.15 : cone ? 0.24 : 0.2) * Rr * Math.pow(Math.sin(Math.PI * clamp(0.2 + 0.8 * t, 0, 1)), 0.6) * (0.6 + 0.4 * t);
+      const dense = f.kind === 'dandelion';
+      if (lat > pw && !dense) return;
+      const base = daisy ? P.daisy : cone ? P.cone : P.dandelion;
+      const v = 0.88 + 0.2 * hash3(idx, 7, s);
+      // Daisies brighten to the tip; a coneflower's petals droop away, so they darken toward it. The base of every
+      // petal sits in the disc's shadow.
+      let k = daisy ? (0.6 + 0.4 * t) : cone ? (0.95 - 0.35 * t) : (0.7 + 0.3 * t);
+      k *= v * (1 + 0.18 * lit) * (0.75 + 0.25 * smooth(0, 0.3, t));
+      const block = LIGHT ? 1 : (daisy ? 0.22 : cone ? 0.36 : 0.45);
+      const pa = f.rot + Math.round(u) * TAU / n;
+      let gi;
+      if (dense) gi = hash3(Math.round(dx / cw), Math.round(dy / ch), s + 3) < 0.35 ? G['*'] : lineGlyph(Math.cos(th), Math.sin(th));
+      else if (t > 0.86) gi = hash3(idx, 11, s) < 0.5 ? G["'"] : G['.'];
+      else gi = lineGlyph(Math.cos(pa), Math.sin(pa));
+      const ik = LIGHT ? 1 : Math.min(1.15, 0.75 + 0.45 * k);
+      const ink = LIGHT ? onPaper(base) : [Math.min(255, base[0] * ik), Math.min(255, base[1] * ik), Math.min(255, base[2] * ik)];
+      fhit(2, base[0] * k * block, base[1] * k * block, base[2] * k * block, gi, ink[0], ink[1], ink[2], 0.92, true);
+      return;
+    }
+    case 'milkweed': case 'clover': {
+      // A ball of florets: a lit dome, each floret a bright mark on the darker cluster.
+      const clover = f.kind === 'clover';
+      if (r > Rr) return;
+      const t = r / Rr;
+      const nz = Math.sqrt(Math.max(0, 1 - t * t));
+      const nx = dx / Rr, ny = dy / Rr;
+      const lam = clamp(nx * LX + ny * LY + nz * LZ, 0, 1);
+      const body = clover ? P.cloverBody : P.milkweedBody;
+      const fl = clover ? P.clover : P.milkweed;
+      // Florets on a jittered grid in the bloom's own frame.
+      const cs = Math.cos(f.rot), sn = Math.sin(f.rot);
+      const lx = dx * cs + dy * sn, ly = -dx * sn + dy * cs;
+      const cell = Rr * (clover ? 0.42 : 0.34);
+      const gx = lx / cell, gy = ly / cell;
+      let best = 9;
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+        const cx = Math.floor(gx) + i, cy = Math.floor(gy) + j;
+        const px = cx + 0.25 + 0.5 * hash3(cx, cy, s), py = cy + 0.25 + 0.5 * hash3(cx, cy, s + 1);
+        best = Math.min(best, Math.hypot(gx - px, gy - py));
+      }
+      const onFloret = best < 0.36;
+      const shadeK = 0.45 + 0.75 * lam;
+      if (onFloret) {
+        const tip = clover && t > 0.55 ? P.cloverTip : fl;
+        const ink = clover ? P.cloverTip : P.milkweedInk;
+        const gi = clover ? (t > 0.6 ? G["'"] : G['°']) : (best < 0.18 ? G['*'] : G['°']);
+        const bk = LIGHT ? 1 : 0.62;
+        fhit(2, tip[0] * shadeK * bk, tip[1] * shadeK * bk, tip[2] * shadeK * bk, gi, ink[0], ink[1], ink[2], 0.6 + 0.4 * lam, true);
+      } else {
+        const bk = LIGHT ? 1 : 1;
+        fhit(2, body[0] * shadeK * bk, body[1] * shadeK * bk, body[2] * shadeK * bk, (best > 0.55 ? G['·'] : 0), fl[0], fl[1], fl[2], 0.4, true);
+      }
+      return;
+    }
+    case 'fennel': {
+      // A compound umbel: fine rays out to small umbellets of tiny flowers; airy, the ground shows through.
+      const n = f.n, u = ((th - f.rot) / TAU * n % n + n) % n;
+      const idx = Math.round(u) % n;
+      const ra = f.rot + Math.round(u) * TAU / n;
+      const rr = Rr * (0.58 + 0.14 * hash3(idx, 2, s));
+      const ux = Math.cos(ra) * rr, uy = Math.sin(ra) * rr;
+      const ur = Rr * (0.29 + 0.05 * hash3(idx, 4, s));
+      const du = Math.hypot(dx - ux, dy - uy);
+      const P2 = P.fennel;
+      if (du < ur) {
+        // Tiny flowers in the umbellet: bright dots, a dim block under the middle of it.
+        const t = du / ur;
+        const h = hash3(Math.round(dx / cw * 1.5), Math.round(dy / ch * 1.5), s + idx);
+        const k = (0.75 + 0.35 * (1 - t)) * (1 + 0.15 * lit);
+        const gi = t < 0.45 ? (h < 0.5 ? G[':'] : G['*']) : h < 0.55 ? G['·'] : h < 0.8 ? G['°'] : G['.'];
+        const bk = LIGHT ? 0.85 : 0.3 * (1 - t);
+        fhit(2, P2[0] * k * bk, P2[1] * k * bk, P2[2] * k * bk, gi, Math.min(255, P2[0] * k), Math.min(255, P2[1] * k), Math.min(255, P2[2] * k), 0.95, t < 0.55);
+        return;
+      }
+      // The ray: a thin line from the centre to the umbellet.
+      const along = (dx * Math.cos(ra) + dy * Math.sin(ra));
+      const lat = Math.abs(-dx * Math.sin(ra) + dy * Math.cos(ra));
+      if (along > 0.08 * Rr && along < rr && lat < 0.3 * cw) {
+        const c = P.fennelRay;
+        fhit(1, 0, 0, 0, lineGlyph(Math.cos(ra), Math.sin(ra)), c[0], c[1], c[2], 0.8, false);
+      } else if (r < 0.1 * Rr) { const c = P.fennelRay; fhit(1, 0, 0, 0, G['*'], c[0], c[1], c[2], 0.9, false); }
+      return;
+    }
+    case 'mustard': {
+      // Small four-petalled flowers in a loose raceme, buds at its tip (the middle, seen from above): each open one a
+      // bright cross on a small yellow block, its petals as dots round it.
+      for (let i = f.sub.length - 1; i >= 0; i--) {
+        const q = f.sub[i]; const qx = dx - q.x * grow, qy = dy - q.y * grow; const sr = q.s * grow;
+        const d = Math.hypot(qx / cw, qy / ch * 1.25);   // in cells
+        if (d > 1.15) continue;
+        if (!q.open) { const c = P.mustardBud; fhit(1, 0, 0, 0, d < 0.6 ? G['o'] : G['·'], c[0], c[1], c[2], 0.85, false); return; }
+        const c = P.mustard;
+        if (d < 0.6) { const bk = LIGHT ? 1 : 0.55; fhit(2, c[0] * bk, c[1] * bk, c[2] * bk, G['+'], Math.min(255, c[0] * 1.1), Math.min(255, c[1] * 1.1), Math.min(255, c[2] * 1.1), 1, true); return; }
+        fhit(1, 0, 0, 0, hash3(i, Math.round(qx), s) < 0.5 ? G['·'] : G["'"], c[0], c[1], c[2], 0.85, false);
+        return;
+      }
+      return;
+    }
+  }
+}
+/** Samples the leaves under a bloom at offset (dx, dy) from its foot. Sets FH. */
+function leafSample(f, dx, dy) {
+  const LIGHT = false, PI_ = PLANT_DARK;
+  FH.hit = 0;
+  const amt = set.leaves; if (amt <= 0) return;
+  const P = PI_;
+  for (let i = f.leaves.length - 1; i >= 0; i--) {
+    const l = f.leaves[i]; const len = l.len * Math.min(1, 0.4 + 0.6 * amt), wid = l.wid * Math.min(1.3, amt);
+    const ca = Math.cos(l.a), sa = Math.sin(l.a);
+    const along = dx * ca + dy * sa, lat = -dx * sa + dy * ca;
+    if (l.k === 3) {
+      // Clover: three round leaflets with a pale chevron.
+      const cx = along - len * 0.55;
+      for (let j = 0; j < 3; j++) {
+        const aa = j * TAU / 3 + 0.5;
+        const lx = cx - Math.cos(aa) * wid * 0.3, ly = lat - Math.sin(aa) * wid * 0.3;
+        if (Math.hypot(lx, ly) < wid * 0.3) {
+          const chev = Math.abs(Math.hypot(lx, ly) - wid * 0.16) < cw * 0.35;
+          const c = chev ? P.leafLit : P.leaf;
+          fhit(1, c[0], c[1], c[2], chev ? G['v'] : 0, P.rib[0], P.rib[1], P.rib[2], 0.7, true);
+          return;
+        }
+      }
+      continue;
+    }
+    if (along < 0.08 * len || along > len) continue;
+    const t = along / len;
+    let half = wid * Math.pow(Math.sin(Math.PI * Math.min(1, t * 1.08)), l.k === 2 ? 0.55 : 0.8);
+    if (l.k === 4) half *= 0.78 + 0.22 * Math.abs(Math.sin(t * 14));   // a dandelion's teeth
+    if (l.k === 1) {
+      // Fennel's thread-like leaves: a fine line.
+      if (Math.abs(lat) < 0.3 * cw) { fhit(1, 0, 0, 0, lineGlyph(ca, sa), P.leafEdge[0], P.leafEdge[1], P.leafEdge[2], 0.7, false); return; }
+      continue;
+    }
+    if (Math.abs(lat) > half) continue;
+    const edge = Math.abs(lat) > half - 0.45 * cw;
+    const mid = Math.abs(lat) < 0.28 * cw;
+    // A leaf lies flat and catches the light on its upper half.
+    const k = 0.75 + 0.35 * (1 - Math.abs(lat) / Math.max(1, half)) + 0.15 * Math.sign(lat) * Math.sin(l.a - LIGHT2);
+    const c = P.leaf, cl = P.leafLit;
+    const bk = (LIGHT ? 1 : 1) * clamp(k, 0.5, 1.2);
+    const mixK = clamp(0.5 - Math.abs(t - 0.45), 0, 1);
+    const br = (c[0] + (cl[0] - c[0]) * mixK) * bk, bg = (c[1] + (cl[1] - c[1]) * mixK) * bk, bb = (c[2] + (cl[2] - c[2]) * mixK) * bk;
+    if (mid && t < 0.9) fhit(1, br, bg, bb, lineGlyph(ca, sa), P.rib[0], P.rib[1], P.rib[2], 0.75, true);
+    else if (edge) fhit(1, br, bg, bb, (hash3(Math.round(dx / cw), Math.round(dy / ch), f.seed) < 0.5 ? G[','] : G["'"]), P.leafEdge[0], P.leafEdge[1], P.leafEdge[2], 0.7, true);
+    else fhit(1, br, bg, bb, 0, 0, 0, 0, 0, true);
+    return;
+  }
+}
+
+const SUB4 = [[-0.25, -0.25], [0.25, -0.25], [-0.25, 0.25], [0.25, 0.25]];
+function drawFlower(f) {
+  const grow = f.age >= 1 ? 1 : easeOutBack(f.age);
+  const hx = f.x + f.ox, hy = f.y + f.oy;
+  const reach = f.reach;
+  const c0 = Math.max(0, Math.floor((f.x - reach) / cw)), c1 = Math.min(cols - 1, Math.floor((f.x + reach) / cw));
+  const r0 = Math.max(0, Math.floor((f.y - reach) / ch)), r1 = Math.min(rows - 1, Math.floor((f.y + reach) / ch));
+  // The head stands on its stem a little above the ground: its shadow falls down-right of it.
+  const so = 0.32 * f.R + 4 * S, sx = hx - LX * so, sy = hy - LY * so;
+  const leafGrow = f.age >= 1 ? 1 : clamp(f.age * 1.6, 0, 1);
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    const px = (c + 0.5) * cw, py = (r + 0.5) * ch, i = r * cols + c;
+    // Head, with 2 × 2 coverage.
+    let cov = 0, got = false, sr = 0, sg = 0, sb = 0, gi = 0, ir = 0, ig = 0, ib = 0, ia = 0, solid = true;
+    for (let k = 0; k < 4; k++) {
+      headSample(f, px + SUB4[k][0] * cw - hx, py + SUB4[k][1] * ch - hy, grow);
+      if (FH.hit) { cov++; if (!got) { got = true; sr = FH.r; sg = FH.g; sb = FH.b; gi = FH.gi; ir = FH.ir; ig = FH.ig; ib = FH.ib; ia = FH.ia; solid = FH.solid; } }
+    }
+    headSample(f, px - hx, py - hy, grow);
+    if (FH.hit) { sr = FH.r; sg = FH.g; sb = FH.b; gi = FH.gi; ir = FH.ir; ig = FH.ig; ib = FH.ib; ia = FH.ia; solid = FH.solid; got = true; }
+    if (got && FH.hit === 1 && cov <= 2) { fGlyph(i, gi, ir, ig, ib, ia); continue; }   // a ray line, no block
+    if (got && cov >= 3) {
+      if (solid) fBlock(i, sr, sg, sb);
+      if (gi) fGlyph(i, gi, ir, ig, ib, ia); else GI[i] = 0;
+      continue;
+    }
+    if (got && cov > 0) {
+      // A petal's edge: a light glyph in the petal colour, no block.
+      const e = cov >= 2 ? HEAVY[(c + r) & 1] : LIGHT_EDGE[(c * 3 + r) & 3];
+      fGlyph(i, e, Math.min(255, sr * 1.5), Math.min(255, sg * 1.5), Math.min(255, sb * 1.5), 0.4 + 0.2 * cov);
+      continue;
+    }
+    // The head's shadow on the leaves and ground.
+    const sd = Math.hypot(px - sx, py - sy);
+    const shadowK = sd < f.R * grow * 0.95 ? 0.55 * set.shadow * smooth(f.R * grow * 0.95, f.R * grow * 0.5, sd) : 0;
+    // Leaves.
+    if (leafGrow > 0) {
+      leafSample(f, (px - f.x) / leafGrow, (py - f.y) / leafGrow);
+      if (FH.hit) {
+        if (FH.solid) fBlock(i, FH.r, FH.g, FH.b);
+        if (FH.gi) fGlyph(i, FH.gi, FH.ir, FH.ig, FH.ib, FH.ia); else if (FH.solid) GI[i] = 0;
+      }
+    }
+    if (shadowK > 0) shade(i, Math.min(0.85, shadowK));
+  }
+}
+function easeOutBack(t) { const c1 = 1.4, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); }
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+//  Butterflies: the measured per-beat flight (Butterfly.swift) turned on its side, seen from above
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+let flies = [];
+let flyId = 1;
+let simT = 0;
+const dust = [];
+
+function makeFly(kind) {
+  const sp = SPECIES[kind];
+  const b = { id: flyId++, kind, sp, x: R(0.1, 0.9) * W, y: R(0.1, 0.9) * H, ux: 0, uy: 0, vx: 0, vy: 0,
+    heading: R(0, TAU), turn: 0, jink: 0, phase: R(0, TAU), stroke: 0, bank: 0, z: 0.5, zs: R(0.35, 0.75), zv: 0, bobAmp: 1,
+    size: 1 + R(-0.12, 0.12), beatF: 1 + R(-0.1, 0.1), jinkF: 1 + R(-0.3, 0.3), seed: RI(1, 1e6),
+    gliding: false, glideLeft: 0, glideHeading: 0, beatsLeft: RI(sp.bout[0], sp.bout[1]), armed: false, pace: 1,
+    bound: 1, boundLeft: RI(2, 4), boost: 0, state: 'fly', goal: '', flower: 0, gx: 0, gy: 0, wx: 0, wy: 0, wpLeft: 0,
+    timer: 0, landHeading: 0, slow: R(0, 10), flash: R(10, 30), flashT: 0, t: R(0, 100) };
+  const sp0 = b.heading; b.ux = Math.cos(sp0) * sp.cruise * S * 0.6; b.uy = Math.sin(sp0) * sp.cruise * S * 0.6;
+  b.stroke = sp.mid + sp.amp * Math.cos(b.phase);
+  pickWaypoint(b);
+  return b;
+}
+/** Wingspan used for the flight's distances, pt (about the mid-height drawn size). */
+const spanRef = b => b.sp.span * 13 * S * b.size * 0.6;
+
+function syncFlies() {
+  const on = SPECIES_LIST.map(s => s.key).filter(k => set.species[k]);
+  flies = flies.filter(b => on.includes(b.kind));
+  if (!on.length) { flies = []; return; }
+  while (flies.length > set.count) { const b = flies.pop(); releaseFlower(b); }
+  while (flies.length < set.count) {
+    // The species with the fewest on screen, so 4 butterflies are one of each.
+    let best = null, bc = 1e9; const order = on.slice().sort(() => rnd() - 0.5);
+    for (const k of order) { const c = flies.filter(b => b.kind === k).length; if (c < bc) { bc = c; best = k; } }
+    flies.push(makeFly(best));
+  }
+}
+
+function releaseFlower(b) { if (b.flower) { const f = flowerById(b.flower); if (f && f.busy === b.id) f.busy = 0; } b.flower = 0; }
+
+/** The next place to travel to: the best of a few random points for being far from here, away from the other
+ *  butterflies and their goals, and roughly ahead (a correlated random walk over the whole screen). */
+function pickWaypoint(b) {
+  const m = 0.07 * Math.min(W, H), diag = Math.hypot(W, H);
+  let best = null, bs = -1e9;
+  for (let i = 0; i < 9; i++) {
+    const x = R(m, W - m), y = R(m, H - m);
+    const d = Math.hypot(x - b.x, y - b.y);
+    let sep = 1e9;
+    for (const o of flies) if (o !== b) { sep = Math.min(sep, Math.hypot(o.x - x, o.y - y), Math.hypot(o.wx - x, o.wy - y) * 1.3); }
+    const ahead = Math.cos(Math.atan2(y - b.y, x - b.x) - b.heading);
+    const score = 0.9 * Math.min(1, d / (0.5 * diag)) + 1.1 * Math.min(1, sep / (0.32 * diag)) + 0.35 * ahead + 0.25 * rnd()
+      - (d < 0.18 * diag ? 1 : 0);
+    if (score > bs) { bs = score; best = { x, y }; }
+  }
+  b.wx = best.x; b.wy = best.y; b.wpLeft = R(4, 9);
+}
+
+function pickFlower(b) {
+  const diag = Math.hypot(W, H);
+  let tot = 0; const cand = [];
+  for (const f of flowers) {
+    if (f.busy || f.age < 0.6) continue;
+    const d = Math.hypot(f.x - b.x, f.y - b.y);
+    if (d < 120 * S || f.x < 0 || f.y < 0 || f.x > W || f.y > H) continue;
+    let w = (b.sp.flowers[f.kind] || 0.5) * (d < 0.6 * diag ? 1 : 0.4);
+    let sep = 1e9; for (const o of flies) if (o !== b) sep = Math.min(sep, Math.hypot(o.x - f.x, o.y - f.y));
+    w *= 0.25 + Math.min(1, sep / (0.25 * diag));
+    if (w > 0) { cand.push([f, w]); tot += w; }
+  }
+  if (!cand.length) return null;
+  let u = rnd() * tot; for (const [f, w] of cand) { u -= w; if (u <= 0) return f; }
+  return cand[cand.length - 1][0];
+}
+
+function chooseNext(b) {
+  releaseFlower(b);
+  const u = rnd();
+  if (u < set.visits) {
+    const f = pickFlower(b);
+    if (f) { b.state = 'approach'; b.goal = 'nectar'; b.flower = f.id; f.busy = b.id; b.timer = 18; return; }
+  } else if (u < set.visits + set.bask * (1 - set.visits)) {
+    const m = 0.1 * Math.min(W, H);
+    b.state = 'approach'; b.goal = 'bask'; b.flower = 0; b.timer = 18;
+    let best = null, bs = -1;
+    for (let i = 0; i < 6; i++) { const x = R(m, W - m), y = R(m, H - m); let sep = 1e9; for (const o of flies) if (o !== b) sep = Math.min(sep, Math.hypot(o.x - x, o.y - y));
+      const d = Math.hypot(x - b.x, y - b.y); const s = Math.min(sep, 400 * S) + (d > 200 * S ? 200 : 0); if (s > bs) { bs = s; best = { x, y }; } }
+    b.gx = best.x; b.gy = best.y; return;
+  }
+  b.state = 'fly'; pickWaypoint(b);
+}
+
+function target(b) {
+  if (b.flower) { const f = flowerById(b.flower); if (f) return [f.x + f.ox, f.y + f.oy]; }
+  return [b.gx, b.gy];
+}
+
+function takeOff(b, awayX, awayY) {
+  if (b.flower) {
+    const f = flowerById(b.flower);
+    if (f) for (let i = 0; i < 7; i++) dust.push({ x: f.x + f.ox + R(-6, 6) * S, y: f.y + f.oy + R(-6, 6) * S, vx: R(-15, 15) * S, vy: R(-15, 15) * S, life: R(2.5, 4.5), max: 4.5, spark: false });
+  }
+  releaseFlower(b);
+  b.state = 'fly'; b.boost = R(0.6, 1.0); b.zv = 0.45; b.bobAmp = 1; b.gliding = false; b.armed = false;
+  b.beatsLeft = Math.max(RI(b.sp.bout[0], b.sp.bout[1]), 6);
+  pickWaypoint(b);
+  if (awayX !== undefined) { const a = Math.atan2(b.y - awayY, b.x - awayX); b.wx = clamp(b.x + Math.cos(a) * 500 * S, 40, W - 40); b.wy = clamp(b.y + Math.sin(a) * 500 * S, 40, H - 40); b.heading = a; }
+  b.phase = 0;
+}
+
+function land(b) {
+  b.state = b.goal;
+  const sp = b.sp;
+  const range = b.goal === 'nectar' ? sp.nectar : sp.bask;
+  b.timer = Math.max(0.8, R(range[0], range[1]) * set.stay);
+  b.landHeading = b.heading + gauss() * 0.5;
+  b.gliding = false; b.zv = 0; b.ux = b.uy = 0;
+}
+
+function startGlide(b) {
+  b.gliding = true; b.armed = false;
+  b.glideLeft = R(b.sp.glideS[0], b.sp.glideS[1]) * Math.min(1.6, set.glide);
+  b.glideHeading = b.heading;
+  b.phase = b.sp.glidePhase; b.stroke = b.sp.glideStroke;
+}
+function endGlide(b) {
+  b.gliding = false;
+  const k = Math.max(0.3, set.glide);
+  b.beatsLeft = Math.max(2, Math.round(RI(b.sp.bout[0], b.sp.bout[1]) / k));
+}
+
+/** The clap, wings together at the top: one beat done. Jinks (the hindwings' zig-zag), side-slips, the white's
+ *  surge, the morpho's bounds. */
+function clap(b, speed, hx, hy) {
+  const sp = b.sp, zz = set.zigzag;
+  b.beatsLeft--; if (b.beatsLeft <= 0) b.armed = true;
+  if (sp.surge > 0) b.pace = clamp(1 + sp.surge * gauss(), 0.4, 1.6);
+  const calm = b.state === 'approach' ? 0.45 : 1;
+  if (rnd() < Math.min(0.95, sp.jinkChance * zz)) b.jink += gauss() * sp.jinkSigma * DEG * b.jinkF * Math.min(1.6, 0.4 + 0.6 * zz) * calm;
+  b.jink = clamp(b.jink, -1.2, 1.2);
+  const slip = gauss() * 0.3 * speed * zz * sp.slip * calm;
+  b.ux += -hy * slip; b.uy += hx * slip;
+  if (sp.bound) { if (--b.boundLeft <= 0) { b.bound = -b.bound; b.boundLeft = RI(2, 4); b.zv += b.bound * 0.22 * Math.min(2, set.bob); } }
+}
+
+function stepFly(b, dt) {
+  const sp = b.sp;
+  b.t += dt;
+  if (b.state === 'nectar' || b.state === 'bask') { stepLanded(b, dt); return; }
+  // ── where it is going ──
+  let tx, ty;
+  if (b.state === 'approach') {
+    if (b.flower && !flowerById(b.flower)) { b.state = 'fly'; pickWaypoint(b); }
+    [tx, ty] = b.state === 'approach' ? target(b) : [b.wx, b.wy];
+  } else { tx = b.wx; ty = b.wy; }
+  let dx = tx - b.x, dy = ty - b.y, dist = Math.hypot(dx, dy);
+  const span = spanRef(b);
+  if (b.state === 'fly') { b.wpLeft -= dt; if (dist < 1.1 * span || b.wpLeft <= 0) { chooseNext(b); return; } }
+  else { b.timer -= dt; if (b.timer <= 0) { releaseFlower(b); b.state = 'fly'; pickWaypoint(b); return; } }
+
+  // ── how fast, and how fast it beats ──
+  let speed = sp.cruise * S * set.speed * b.pace;
+  let near = 1;
+  if (b.state === 'approach') { near = clamp(dist / (2.2 * span), 0, 1); speed = lerp(sp.forage * S * set.speed, speed, near); }
+  let f = sp.realBeat * set.wingbeat * b.beatF;
+  if (b.boost > 0) { b.boost -= dt; speed *= 1.8; f *= 1.25; }
+  windAt(b.x, b.y, simT);
+  const wx = wind.x, wy = wind.y;
+  if (wind.m > 0.3 * speed) f *= 1.15;   // gusts: beat faster
+  f = Math.min(BEAT_CAP, f);
+
+  // ── the heading it wants ──
+  let want = Math.atan2(dy, dx);
+  if (b.state === 'fly') want += 0.45 * n1(b.t * 0.16, b.seed);
+  let px = 0, py = 0;
+  for (const o of flies) {
+    if (o === b) continue;
+    const ox = b.x - o.x, oy = b.y - o.y, d = Math.hypot(ox, oy), lim = 2.4 * (span + spanRef(o)) / 2;
+    // Seen from above, two butterflies over each other read as one muddle at any height: keep them apart.
+    if (d < lim && d > 0.1) { const w = (1 - d / lim) * (o.state === 'nectar' || o.state === 'bask' ? 0.6 : 1); px += ox / d * w * w * 2; py += oy / d * w * w * 2; }
+    const touch = 0.8 * (span + spanRef(o));
+    if (d < touch && d > 0.1) { const push = (1 - d / touch) * 260 * S * dt; b.ux += ox / d * push; b.uy += oy / d * push; }
+  }
+  const m = -0.25 * span;   // they may flutter a little off screen, then turn back
+  let ex = 0, ey = 0;
+  if (b.x < m) ex = 1; else if (b.x > W - m) ex = -1;
+  if (b.y < m) ey = 1; else if (b.y > H - m) ey = -1;
+  if (px || py || ex || ey) want = Math.atan2(Math.sin(want) + 2.6 * py + 2 * ey, Math.cos(want) + 2.6 * px + 2 * ex);
+
+  // ── heading on a spring (full stiffness, so a jink is a flick) ──
+  if (b.gliding) b.glideHeading += angDiff(b.glideHeading, want) * Math.min(1, 0.7 * dt);
+  const aim = b.gliding ? b.glideHeading : want + b.jink;
+  b.jink *= Math.exp(-dt / 0.9);
+  const k = sp.headingK * set.turning;
+  b.turn += (k * angDiff(b.heading, aim) - 2 * sp.zeta * Math.sqrt(k) * b.turn) * dt;
+  b.turn = clamp(b.turn, -6 * Math.sqrt(set.turning), 6 * Math.sqrt(set.turning));
+  b.heading += b.turn * dt;
+  const hx = Math.cos(b.heading), hy = Math.sin(b.heading);
+
+  // ── wings and forces ──
+  // The per-beat model on its side. The downstroke pushes forward (the lurch); drag pulls the airspeed back toward
+  // the wanted pace between pushes, so the pace pulses every beat. Height is two parts: a slow height that flapping
+  // climbs toward and glides sink from, and the bob, the rise and fall within each beat (lift on the downstroke
+  // against gravity: its fundamental puts the body lowest mid-downstroke and highest mid-upstroke).
+  const drag = 8;
+  const impulse = sp.thrust * speed * set.lurch;
+  const w = TAU * f;
+  const zBase = clamp(set.height + 0.3 * n1(b.t * 0.045, b.seed + 3), 0.06, 0.96);
+  const zc = b.state === 'approach' ? lerp(0.0, zBase, smooth(0.1, 1, near)) : (b.boost > 0 ? Math.max(zBase, 0.55) : zBase);
+  if (!b.gliding) {
+    const prev = b.phase;
+    b.phase += w * dt;
+    const s = Math.sin(b.phase);
+    if (s > 0) { const a = impulse * Math.PI * f * s; b.ux += a * hx * dt; b.uy += a * hy * dt; }
+    if (b.phase >= TAU) { b.phase -= TAU; clap(b, speed, hx, hy); }
+    const v = Math.max(0.12 * speed, speed - impulse * f / drag);
+    b.ux += -drag * (b.ux - v * hx) * dt; b.uy += -drag * (b.uy - v * hy) * dt;
+    b.stroke = sp.mid + sp.amp * Math.cos(b.phase);
+    const kz = 1.4;
+    b.zv += (kz * (zc - b.zs) - 2 * Math.sqrt(kz) * b.zv) * dt;
+    b.bobAmp += (1 - b.bobAmp) * Math.min(1, 6 * dt);
+    const canGlide = set.glide > 0.01 && b.boost <= 0 && b.zs > zc - 0.1 && (b.state === 'fly' || near > 0.7);
+    if (b.armed && canGlide && prev < sp.glidePhase && b.phase >= sp.glidePhase) startGlide(b);
+  } else {
+    b.glideLeft -= dt;
+    if (b.glideLeft <= 0 || (b.state === 'approach' && near < 0.6) || b.zs < 0.05) endGlide(b);
+    // A glide: wings held flat, the pace eases off, and it sinks toward the flowers.
+    const gv = speed * 0.8;
+    b.ux += (gv * hx - b.ux) * Math.min(1, 2.2 * dt); b.uy += (gv * hy - b.uy) * Math.min(1, 2.2 * dt);
+    b.zv += (-0.08 - b.zv) * Math.min(1, 3 * dt);
+    b.bobAmp *= Math.exp(-5 * dt);
+    b.stroke = sp.glideStroke + 4 * DEG * Math.sin(b.t * 2.3 + b.seed);
+  }
+  b.zs += b.zv * dt;
+  if (b.zs < 0.02) { b.zs = 0.02; if (b.zv < 0) b.zv = 0; }
+  if (b.zs > 0.97) { b.zs = 0.97; if (b.zv > 0) b.zv = 0; }
+  const bobZ = 0.045 * set.bob * (sp.bob / 0.25) * b.bobAmp;
+  b.z = clamp(b.zs - bobZ * Math.sin(b.phase), 0, 1);
+
+  // ── bank into turns (a small difference between the wings' widths) ──
+  const bankT = sp.maxBank * DEG * 0.35 * Math.tanh(b.turn / 1.5);
+  b.bank += (bankT - b.bank) * Math.min(1, 6 * dt);
+
+  // ── ground velocity = airspeed + some of the breeze ──
+  b.vx = b.ux + wx * 0.55; b.vy = b.uy + wy * 0.55;
+  b.x += b.vx * dt; b.y += b.vy * dt;
+
+  // ── settling onto the flower or the ground ──
+  if (b.state === 'approach') {
+    [tx, ty] = target(b); dx = tx - b.x; dy = ty - b.y; dist = Math.hypot(dx, dy);
+    if (dist < 0.6 * span) {
+      const pull = Math.min(1, (1 - dist / (0.6 * span)) * 6 * dt);
+      b.x += dx * pull; b.y += dy * pull;
+      b.zv = Math.min(b.zv, -0.35 - 0.6 * (1 - dist / (0.6 * span)));
+      if (dist < 0.12 * span && b.zs < 0.1) land(b);
+    }
+  }
+}
+
+function stepLanded(b, dt) {
+  const sp = b.sp;
+  b.timer -= dt;
+  const [tx, ty] = target(b);
+  b.x += (tx - b.x) * Math.min(1, 10 * dt); b.y += (ty - b.y) * Math.min(1, 10 * dt);
+  b.zs += (0 - b.zs) * Math.min(1, 6 * dt); b.z = b.zs; b.zv = 0;
+  b.heading += angDiff(b.heading, b.landHeading) * Math.min(1, 2 * dt);
+  b.bank *= Math.exp(-4 * dt);
+  b.slow += dt;
+  if (b.state === 'nectar') {
+    if (sp.flutterOnFlower) { b.phase += TAU * Math.min(BEAT_CAP, sp.realBeat * set.wingbeat * 0.8) * dt; b.stroke = (34 + 16 * Math.cos(b.phase)) * DEG; }
+    else {
+      // Wings held half-open, opening and closing slowly now and then.
+      const slow = 0.5 + 0.5 * Math.sin(b.slow * 1.3 + b.seed);
+      b.stroke = (28 + 46 * Math.pow(slow, 1.5)) * DEG;
+    }
+  } else {
+    if (sp.baskPose === 'open') b.stroke = (4 + 6 * Math.max(0, Math.sin(b.slow * 0.9))) * DEG;
+    else if (sp.baskPose === 'vee') b.stroke = (52 + 8 * Math.sin(b.slow * 0.8)) * DEG;
+    else {
+      // The morpho rests wings closed and flashes them open now and then.
+      b.flash -= dt;
+      if (b.flash <= 0) { b.flashT = 0.6; b.flash = R(5, 14); }
+      if (b.flashT > 0) { b.flashT -= dt; b.stroke = (10 + 76 * Math.abs(Math.cos(Math.PI * (b.flashT / 0.6)))) * DEG; }
+      else b.stroke = 86 * DEG;
+    }
+  }
+  if (b.timer <= 0) takeOff(b);
+}
+
+function stepDust(dt) {
+  for (let i = dust.length - 1; i >= 0; i--) {
+    const d = dust[i]; d.life -= dt; if (d.life <= 0) { dust.splice(i, 1); continue; }
+    windAt(d.x, d.y, simT);
+    d.vx += (wind.x * 0.6 - d.vx) * Math.min(1, 1.5 * dt); d.vy += (wind.y * 0.6 - d.vy) * Math.min(1, 1.5 * dt);
+    d.x += d.vx * dt; d.y += d.vy * dt;
+  }
+}
+
+function step(dt) {
+  simT += dt;
+  updateWind(simT, dt);
+  stepFlowers(dt);
+  for (const b of flies) stepFly(b, dt);
+  stepDust(dt);
+}
+
+// ── drawing a butterfly ──
+
+/** One butterfly's pose for drawing: centre, axes, half span and half height (pt), each wing's drawn width
+ *  and its light. */
+const POSE = { cx: 0, cy: 0, fx: 1, fy: 0, rx: 0, ry: 1, hs: 1, hh: 1, wl: 1, wr: 1, lamL: 0.7, lamR: 0.7, specL: 0, specR: 0, under: 0, depth: 1, shape: null };
+function depthScale(z) { const lo = set.sizeLow, hi = Math.max(set.sizeLow, set.sizeHigh); return lo * Math.pow(hi / lo, z); }
+function setPose(b, shadow) {
+  const sp = b.sp;
+  const z = shadow ? 0 : b.z;
+  const k = depthScale(z) * b.size;
+  const span = sp.span * 13 * S * k;
+  // A slight yaw with the beat, as the body rocks.
+  const h = b.heading + (b.state === 'nectar' || b.state === 'bask' ? 0 : 0.05 * Math.sin(b.phase));
+  POSE.fx = Math.cos(h); POSE.fy = Math.sin(h); POSE.rx = -POSE.fy; POSE.ry = POSE.fx;
+  POSE.hs = span / 2; POSE.hh = span * sp.aspect / 2;
+  const sl = b.stroke - b.bank, sr = b.stroke + b.bank;
+  const minW = 0.1;
+  POSE.wl = Math.max(minW, Math.cos(sl)); POSE.wr = Math.max(minW, Math.cos(sr));
+  // Each wing's light: its surface turns toward or away from the light as it rises.
+  const rl = POSE.rx * LX + POSE.ry * LY;   // how much the right side faces the light
+  POSE.lamR = clamp(-Math.sin(sr) * rl + Math.cos(sr) * LZ, 0, 1);
+  POSE.lamL = clamp(Math.sin(sl) * rl + Math.cos(sl) * LZ, 0, 1);
+  // A glint off the scales where the wing's tilt mirrors the light toward the viewer.
+  const hz = 1 / Math.hypot(LX, LY, LZ + 1);
+  POSE.specR = Math.pow(clamp((-Math.sin(sr) * rl + Math.cos(sr) * (LZ + 1)) * hz, 0, 1), 18);
+  POSE.specL = Math.pow(clamp((Math.sin(sl) * rl + Math.cos(sl) * (LZ + 1)) * hz, 0, 1), 18);
+  POSE.under = smooth(68 * DEG, 86 * DEG, b.stroke);
+  POSE.depth = z;
+  POSE.shape = sp.shape;
+  if (shadow) {
+    const off = b.z * 150 * S + 3 * S;
+    POSE.cx = b.x - LX * off; POSE.cy = b.y - LY * off;
+  } else { POSE.cx = b.x; POSE.cy = b.y; }
+}
+
+/** Point in polygon (even-odd). */
+function inside(o, x, y) {
+  if (y < o.minY || y > o.maxY || x > o.maxX) return false;
+  const p = o.p, n = o.n; let c = false;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const ax = p[2 * i], ay = p[2 * i + 1], bx = p[2 * j], by = p[2 * j + 1];
+    if ((ay > y) !== (by > y) && x < ax + (y - ay) / (by - ay) * (bx - ax)) c = !c;
+  }
+  return c;
+}
+const WT = { part: -1, X: 0, Y: 0, side: 0, sx: 1, sy: 1 };
+/** Which wing part covers screen point (x, y) for the current pose: -1 none, 0 forewing, 1 hindwing, 2 tail. */
+function wingTest(x, y) {
+  const dx = x - POSE.cx, dy = y - POSE.cy;
+  const u = dx * POSE.fx + dy * POSE.fy, v = dx * POSE.rx + dy * POSE.ry;
+  const side = v < 0 ? 0 : 1, w = side ? POSE.wr : POSE.wl;
+  const sx = POSE.hs * w, sy = POSE.hh;
+  const X = Math.abs(v) / sx, Y = u / sy;
+  WT.X = X; WT.Y = Y; WT.side = side; WT.sx = sx; WT.sy = sy;
+  const sh = POSE.shape;
+  if (inside(sh.fore, X, Y)) return (WT.part = 0);
+  if (inside(sh.hind, X, Y)) return (WT.part = Y < sh.tailY ? 2 : 1);
+  return (WT.part = -1);
+}
+
+const EI = { d: 0, kind: 0, along: 0 };
+/** Distance (cells) from the sample to the outline's nearest free edge, which kind it is, and how far along. */
+function edgeInfo(o, X, Y, sx, sy) {
+  const p = o.p, n = o.n, qx = X * sx, qy = Y * sy;
+  let best = 1e9, kind = 0, along = 0, acc = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const ax = p[2 * i] * sx, ay = p[2 * i + 1] * sy, bx = p[2 * j] * sx, by = p[2 * j + 1] * sy;
+    const ex = bx - ax, ey = by - ay, L2 = ex * ex + ey * ey || 1e-9, L = Math.sqrt(L2);
+    const t = clamp(((qx - ax) * ex + (qy - ay) * ey) / L2, 0, 1);
+    const e = Math.hypot(qx - ax - ex * t, qy - ay - ey * t);
+    if (o.k[i] !== ROOT && e < best) { best = e; kind = o.k[i]; along = acc + t * L; }
+    acc += L;
+  }
+  EI.d = best / cw; EI.kind = kind; EI.along = along / cw;
+}
+
+const FIELD = 0, MARK = 1, DOT = 2, RING = 3, CENTRE = 4, BLUE = 5, SPOT = 6, LINE = 7, SEAM = 8;
+let lineG = 0;
+/** The species' markings on the upper side, each where the real species has it (MeadowPainter's pattern, with
+ *  more veins: borders a cell deep along the free edges, veins as lines from the root, spots at fixed places). */
+function pattern(kind, part, X, Y, side, sx, sy) {
+  const sh = SPECIES[kind].shape;
+  edgeInfo(part === 0 ? sh.fore : sh.hind, X, Y, sx, sy);
+  const d = EI.d, ek = EI.kind;
+  const alt = Math.floor(EI.along / 1.5) % 2 === 0;
+  const qx = X * sx / cw, qy = Y * sy / cw;
+  const near = (x, y, r) => Math.hypot(qx - x * sx / cw, qy - y * sy / cw) < r;
+  const big = sx / cw > 4.5, huge = sx / cw > 8;
+  const vein = (x0, y0, x1, y1, th) => {
+    const ax = x0 * sx / cw, ay = y0 * sy / cw, bx = x1 * sx / cw, by = y1 * sy / cw;
+    const ex = bx - ax, ey = by - ay, L2 = ex * ex + ey * ey || 1e-9;
+    const t = clamp(((qx - ax) * ex + (qy - ay) * ey) / L2, 0, 1);
+    if (Math.hypot(qx - ax - ex * t, qy - ay - ey * t) >= (th || 0.4)) return false;
+    // The vein's direction on screen, for a line glyph.
+    const sgn = side ? 1 : -1;
+    const vx = POSE.rx * (x1 - x0) * sx * sgn + POSE.fx * (y1 - y0) * sy, vy = POSE.ry * (x1 - x0) * sx * sgn + POSE.fy * (y1 - y0) * sy;
+    lineG = lineGlyph(vx, vy);
+    return true;
+  };
+  switch (kind) {
+    case 'monarch':
+      if (ek === OUTER && d < 0.95) return alt && d > 0.22 ? DOT : MARK;
+      if (part === 0) {
+        if (X + 0.6 * Y > 1.38) return near(0.80, 0.86, 0.55) || near(0.94, 0.62, 0.45) || near(0.66, 0.93, 0.4) ? SPOT : MARK;
+        if (ek === COSTA && d < 0.85 && X > 0.38) return MARK;
+        // Veins: dark line glyphs on the orange, so they stay thin at any size.
+        if (vein(0.08, 0.12, 0.92, 0.62, 0.3) || vein(0.08, 0.06, 0.88, 0.32, 0.3) || (huge && vein(0.1, 0.0, 0.76, 0.02, 0.3))) return LINE;
+        if (ek === INNER && d < 0.6) return MARK;
+      } else {
+        if (vein(0.06, -0.08, 0.62, -0.32, 0.3) || vein(0.06, -0.14, 0.44, -0.82, 0.3) || (huge && vein(0.06, -0.1, 0.66, -0.56, 0.3))) return LINE;
+        if (ek === INNER && d < 0.55) return MARK;
+      }
+      return FIELD;
+    case 'morpho':
+      if (part === 0 && (ek === OUTER || ek === COSTA) && X > 0.4 && d < 1.45) return near(0.84, 0.8, 0.5) || near(0.95, 0.5, 0.45) || near(0.7, 0.92, 0.4) ? DOT : MARK;
+      if (part === 1 && ek === OUTER && d < 0.85) return alt && d > 0.15 ? DOT : MARK;
+      if (part === 0 && ek === INNER && d < 0.7) return SEAM;
+      if (big && (vein(0.1, 0.08, 0.86, 0.5, 0.3) || vein(0.08, -0.1, 0.6, -0.5, 0.3))) return LINE;
+      return FIELD;
+    case 'swallowtail':
+      if (part === 2) return MARK;
+      if (X < 0.12) return MARK;
+      if (part === 1 && near(0.18, -0.84, 0.65)) return near(0.18, -0.84, 0.3) ? CENTRE : RING;
+      if (part === 0 && ek === COSTA && d < 0.85 && X > 0.2 && Math.floor(EI.along / 2.4) % 2 === 0) return MARK;
+      if (part === 0 && ek === OUTER && d < 1.15) return d < 0.6 && alt ? DOT : MARK;
+      if (part === 0 && X + 0.6 * Y > 1.5) return MARK;
+      if (part === 1 && ek === OUTER && d < 1.7) { if (d < 0.7) return alt ? DOT : MARK; return Y < -0.2 ? BLUE : MARK; }
+      if (part === 1 && ek === INNER && d < 0.6) return MARK;
+      if (part === 0 && vein(0.12, 0.08, 0.76, 0.44, 0.32)) return LINE;
+      if (part === 0 && big && vein(0.12, 0.02, 0.7, 0.02, 0.32)) return LINE;
+      if (part === 1 && vein(0.12, -0.14, 0.5, -0.56, 0.32)) return LINE;
+      if (part === 0 && ek === INNER && d < 0.8) return SEAM;
+      return FIELD;
+    case 'white':
+      if (part === 0 && ek !== INNER && X + 0.5 * Y > 1.18 && d < 1.4) return MARK;
+      if (part === 0 && near(0.55, 0.3, 0.6)) return MARK;
+      if (part === 0 && near(0.5, 0.02, 0.5)) return MARK;
+      if (part === 1 && ek === COSTA && near(0.5, -0.04, 0.45)) return MARK;
+      if (part === 0 && ek === INNER && d < 0.8) return SEAM;
+      return FIELD;
+  }
+  return FIELD;
+}
+
+const SUB9 = [];
+for (const a of [-1 / 3, 0, 1 / 3]) for (const b of [-1 / 3, 0, 1 / 3]) SUB9.push([a, b]);
+
+// Glyphs by shade step: the deep steps sparse and soft, the bright ones busier (the reference's mosaic, our own).
+const FIELD_G = [[G[';'], G[':'], G['·'], G[';'], G[':']], [G['+'], G[';'], G['x'], G[':'], G['+']], [G['*'], G['+'], G['x'], G['+'], G[':']], [G['*'], G['·'], G['+'], G['°'], G['*']]];
+const MARK_G = [G['#'], G['%'], G['@'], G['8'], G['#'], G['%'], G['X']];
+const RIM_G = [G['%'], G[';'], G['#'], G[':'], G[';'], G['%']];
+const pick = (arr, k) => arr[Math.floor(k * arr.length) % arr.length];
+
+function drawButterfly(b) {
+  setPose(b, false);
+  const sp = b.sp, ink = INKS[b.kind];
+  const reach = Math.max(POSE.hs, POSE.hh * (sp.shape.tailY > -9 ? 1.5 : 1.1)) + cw;
+  const c0 = Math.max(0, Math.floor((POSE.cx - reach) / cw)), c1 = Math.min(cols - 1, Math.floor((POSE.cx + reach) / cw));
+  const r0 = Math.max(0, Math.floor((POSE.cy - reach) / ch)), r1 = Math.min(rows - 1, Math.floor((POSE.cy + reach) / ch));
+  const nearK = 0.94 + 0.12 * POSE.depth;      // nearer is a little brighter
+  const under = POSE.under;
+  const ramp = ink.ramp, marks = ink.marks;
+  const U = ink.under;
+  const tone = (c, k) => { let r = c[0] * k, g = c[1] * k, bb = c[2] * k;
+    if (under > 0) { r += (U[0] * k - r) * under; g += (U[1] * k - g) * under; bb += (U[2] * k - bb) * under; } TC[0] = r; TC[1] = g; TC[2] = bb; return TC; };
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    const px = (c + 0.5) * cw, py = (r + 0.5) * ch, i = r * cols + c;
+    let cov = 0, hp = -1, hX = 0, hY = 0, hs = 0, hsx = 1, hsy = 1;
+    for (let k = 0; k < 9; k++) {
+      const p = wingTest(px + SUB9[k][0] * cw, py + SUB9[k][1] * ch);
+      if (p >= 0) { cov++; if (hp < 0 || k === 4) { hp = p; hX = WT.X; hY = WT.Y; hs = WT.side; hsx = WT.sx; hsy = WT.sy; } }
+    }
+    if (!cov) continue;
+    const region = pattern(b.kind, hp === 2 ? 1 : hp, hX, hY, hs, hsx, hsy);
+    const d = EI.d;
+    const lam = hs ? POSE.lamR : POSE.lamL, spec = hs ? POSE.specR : POSE.specL;
+    // Keyed by where the cell is on the wing, so the texture rides with the wing as it turns.
+    const qx = Math.round(hX * hsx / cw * 1.2), qy = Math.round(hY * hsy / ch * 1.2), salt = b.id * 8 + hp + 3 * hs;
+    const key = hash3(qx, qy, salt), key2 = hash3(qx, qy, salt + 101);
+    const frac = cov / 9;
+    // The shade: the wing's tilt to the light, deeper at the root, brighter inside the wing than at its rim.
+    const t = clamp(hX * 1.2 - 0.12, 0, 1);
+    let v = (0.18 + 0.42 * (lam / 0.72) + 0.28 * t + 0.05 * Math.min(d, 3)) * nearK;
+    const shine = b.kind === 'morpho' ? spec * (1 - under) : 0;
+    v += shine * 0.7;
+    const lvl = clamp(Math.floor(v * 3.3 + (key - 0.5) * 0.7), 0, 3);
+    if (frac < 0.3) {
+      // A wisp of the edge: a light glyph, no block.
+      const e = region === FIELD ? tone(ramp[1], 1) : marks[2];
+      glyphAt(i, pick(LIGHT_EDGE, key), e[0], e[1], e[2], 0.75);
+      continue;
+    }
+    const a = frac < 0.6 ? 0.85 : 1;
+    switch (region) {
+      case MARK: case SEAM: {
+        if (region === SEAM && b.kind !== 'monarch') { const f = tone(ramp[Math.max(0, lvl - 1)], 1); blockAt(i, f[0], f[1], f[2], a); glyphAt(i, pick(FIELD_G[0], key2), ramp[lvl][0], ramp[lvl][1], ramp[lvl][2], 0.6); break; }
+        const ml = clamp(Math.floor(v * 2.2 + (key - 0.5)), 0, 2), m = marks[ml], mi = ink.markInk;
+        blockAt(i, m[0], m[1], m[2], a);
+        if (key2 < 0.3) glyphAt(i, pick(MARK_G, key2 / 0.3), mi[0], mi[1], mi[2], 0.45); else GI[i] = 0;
+        break;
+      }
+      case DOT: {
+        const m = marks[1], q = ink.dot;
+        blockAt(i, m[0], m[1], m[2], a);
+        glyphAt(i, key2 < 0.45 ? G['·'] : key2 < 0.85 ? G['°'] : G['o'], q[0], q[1], q[2], 0.95);
+        break;
+      }
+      case SPOT: {
+        const q = ink.spot, k = 0.62 + 0.2 * v;
+        blockAt(i, q[0] * k, q[1] * k, q[2] * k, a);
+        glyphAt(i, key2 < 0.5 ? G['·'] : G['°'], ink.dot[0], ink.dot[1], ink.dot[2], 0.85);
+        break;
+      }
+      case RING: {
+        const q = ink.ring;
+        blockAt(i, q[0] * 0.6, q[1] * 0.6, q[2] * 0.6, a);
+        glyphAt(i, G['o'], Math.min(255, q[0] * 1.15), Math.min(255, q[1] * 1.15), Math.min(255, q[2] * 1.15), 0.95);
+        break;
+      }
+      case CENTRE: {
+        const q = ink.centre;
+        blockAt(i, q[0], q[1], q[2], a);
+        glyphAt(i, G['@'], ink.ring[0], ink.ring[1], ink.ring[2], 0.95);
+        break;
+      }
+      case BLUE: {
+        const q = ink.blue, k = 0.8 + 0.3 * v;
+        blockAt(i, q[0] * k, q[1] * k, q[2] * k, a);
+        glyphAt(i, key2 < 0.5 ? G['·'] : G[':'], Math.min(255, q[0] * 1.8), Math.min(255, q[1] * 1.6), Math.min(255, q[2] * 1.3), 0.8);
+        break;
+      }
+      default: {
+        // The field, with a darker rim where it meets the ground.
+        const rim = frac < 0.62 || d < 0.42;
+        const L = rim ? 0 : (hX < 0.14 ? Math.min(lvl, 1) : lvl);
+        const f = tone(ramp[L], rim ? 0.75 : 1);
+        blockAt(i, f[0], f[1], f[2], a);
+        if (region === LINE) { const m = marks[0]; glyphAt(i, lineG, m[0], m[1], m[2], 0.9); break; }
+        if (shine > 0.4 && key2 < 0.35 * set_accent()) { const s = ink.shine; glyphAt(i, key2 < 0.12 ? G['*'] : G['·'], s[0], s[1], s[2], 0.95); break; }
+        if (rim) { if (key2 < 0.55) { const e = tone(ramp[1], 1); glyphAt(i, pick(RIM_G, key2 / 0.55), e[0], e[1], e[2], 0.6); } else GI[i] = 0; break; }
+        if (key2 > (b.kind === 'white' ? 0.35 : 0.7)) { GI[i] = 0; break; }
+        // Ink one step brighter than the block, or one deeper on the brightest cells, so the glyph shows.
+        const up = L < 3 ? ramp[L + 1] : ramp[1];
+        const gg = tone(up, L < 3 ? 1.08 : 1);
+        glyphAt(i, pick(FIELD_G[L], key2 / 0.7), gg[0], gg[1], gg[2], L < 3 ? 0.8 : 0.7);
+      }
+    }
+  }
+  drawBody(b, ink);
+}
+const TC = [0, 0, 0];
+const set_accent = () => set.calm ? 0.35 : 1;
+
+function drawBody(b, ink) {
+  const fx = POSE.fx, fy = POSE.fy, rx = POSE.rx, ry = POSE.ry, hh = POSE.hh;
+  const head = 0.4 * hh, tail = -0.78 * hh;
+  const step = 0.45 * Math.min(cw, ch);
+  const cellOf = (along, across) => {
+    const x = POSE.cx + fx * along + rx * across, y = POSE.cy + fy * along + ry * across;
+    const c = Math.floor(x / cw), r = Math.floor(y / ch);
+    return c < 0 || r < 0 || c >= cols || r >= rows ? -1 : r * cols + c;
+  };
+  const bl = ink.body, bi = ink.bodyInk;
+  const lineAlong = lineGlyph(fx, fy);
+  // Tail to head, so the head wins its cell.
+  for (let a = tail; a <= head + 0.01; a += step) {
+    const i = cellOf(a, 0); if (i < 0) continue;
+    const t = (a - tail) / (head - tail);
+    const g = t > 0.86 ? G['o'] : t > 0.58 ? G['8'] : t < 0.08 ? G['·'] : lineAlong;
+    blockAt(i, bl[0], bl[1], bl[2], 1); glyphAt(i, g, bi[0], bi[1], bi[2], 0.95);
+  }
+  // Antennae: out and forward from the head, clubbed.
+  const fe = ink.feeler;
+  const len = Math.max(1.6 * cw, 0.62 * hh);
+  for (const sgn of [-1, 1]) {
+    const ang = 0.42 + 0.06 * Math.sin(b.phase);
+    const dxA = fx * Math.cos(ang) + rx * Math.sin(ang) * sgn, dyA = fy * Math.cos(ang) + ry * Math.sin(ang) * sgn;
+    const g = lineGlyph(dxA, dyA);
+    let last = -1;
+    for (let s = 0.7 * cw; s <= len; s += step) {
+      const x = POSE.cx + fx * head + dxA * s, y = POSE.cy + fy * head + dyA * s;
+      const c = Math.floor(x / cw), r = Math.floor(y / ch); if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
+      const i = r * cols + c; if (i === last) continue; last = i;
+      glyphAt(i, s + step > len ? G['°'] : g, fe[0], fe[1], fe[2], 0.85);
+    }
+  }
+}
+
+function drawShadow(b) {
+  const k0 = set.shadow * (LIGHT ? 0.9 : 0.8) * (1 - 0.55 * b.z);
+  if (k0 <= 0.01) return;
+  setPose(b, true);
+  const sp = b.sp;
+  const reach = Math.max(POSE.hs, POSE.hh * 1.5) + cw;
+  const c0 = Math.max(0, Math.floor((POSE.cx - reach) / cw)), c1 = Math.min(cols - 1, Math.floor((POSE.cx + reach) / cw));
+  const r0 = Math.max(0, Math.floor((POSE.cy - reach) / ch)), r1 = Math.min(rows - 1, Math.floor((POSE.cy + reach) / ch));
+  // Softer the higher it flies: the samples spread wider.
+  const spread = 0.3 + 0.9 * b.z;
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    const px = (c + 0.5) * cw, py = (r + 0.5) * ch;
+    let cov = 0;
+    for (let k = 0; k < 9; k++) if (wingTest(px + SUB9[k][0] * cw * spread * 1.5, py + SUB9[k][1] * ch * spread * 1.5) >= 0) cov++;
+    // The body's shadow too.
+    const dx = px - POSE.cx, dy = py - POSE.cy, u = dx * POSE.fx + dy * POSE.fy, v = dx * POSE.rx + dy * POSE.ry;
+    if (Math.abs(v) < 0.5 * cw && u < 0.4 * POSE.hh && u > -0.78 * POSE.hh) cov = Math.max(cov, 6);
+    if (cov) shade(r * cols + c, k0 * cov / 9);
+  }
+}
+
+function drawDust() {
+  const g = PI_.gold;
+  for (const d of dust) {
+    const c = Math.floor(d.x / cw), r = Math.floor(d.y / ch); if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
+    const a = clamp(d.life / d.max, 0, 1);
+    const twinkle = d.spark ? (hash3(c, r, Math.floor(simT * 6)) < 0.5 ? G['+'] : G['·']) : (a > 0.5 ? G['·'] : G['.']);
+    glyphAt(r * cols + c, twinkle, g[0], g[1], g[2], (d.spark ? 1 : 0.8) * a * set_accent());
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+//  The ground: mainly black, slow patches of green, grass marks that ripple and lean as the gusts pass
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const TUFT_GLYPHS = [G[','], G["'"], G['`'], G['.'], G[','], G["'"], G['·']];
+function buildGround() {
+  const P = PI_;
+  const bg = LIGHT ? PAPER : [0, 0, 0];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const i = r * cols + c;
+    const x = c * cw / S, y = r * ch / S;
+    const n = 0.6 * vnoise(x / 260, y / 230, 21) + 0.4 * vnoise(x / 90, y / 80, 22);
+    const patch = smooth(0.42, 0.82, n);
+    const k = clamp(patch * set.green * 1.15, 0, 2);
+    groundR[i] = bg[0] + (P.ground[0] - bg[0]) * k;
+    groundG[i] = bg[1] + (P.ground[1] - bg[1]) * k;
+    groundB[i] = bg[2] + (P.ground[2] - bg[2]) * k;
+    const dens = (0.09 + 0.22 * patch + 0.08 * vnoise(x / 40, y / 40, 23)) * set.grass;
+    const h = hash3(c, r, 11);
+    tuft[i] = h < dens ? TUFT_GLYPHS[Math.floor(hash3(c, r, 5) * TUFT_GLYPHS.length)] : 0;
+    tuftK[i] = (0.45 + 0.55 * hash3(c, r, 7)) * (0.55 + 0.45 * patch);
+  }
+  groundDirty = false;
+}
+
+function drawGround() {
+  if (groundDirty) buildGround();
+  BR.set(groundR); BG.set(groundG); BB.set(groundB);
+  GI.fill(0);
+  const P = PI_, gr = P.grass, st = P.stirred;
+  const grassAmt = Math.min(1.4, set.grass);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const i = r * cols + c; const t0 = tuft[i]; if (!t0) continue;
+    const x = (c + 0.5) * cw, y = (r + 0.5) * ch;
+    windAt(x, y, simT);
+    const s = clamp((wind.m / Math.max(1, 26 * S * Math.max(0.3, set.breeze)) - 0.35) / 1.3, 0, 1);
+    // In a gust the blades lie over along the wind and catch the light: a bright band rolling across.
+    let g = t0;
+    if (s > 0.45 && hash3(c, r, 13) < 0.25 + 0.6 * s) g = lineGlyph(wind.x, wind.y);
+    const kk = s * 0.85;
+    glyphAt(i, g, gr[0] + (st[0] - gr[0]) * kk, gr[1] + (st[1] - gr[1]) * kk, gr[2] + (st[2] - gr[2]) * kk,
+      tuftK[i] * (0.42 + 0.58 * s) * grassAmt);
+  }
+}
+
+function buildGrid() {
+  gridCtx.setTransform(1, 0, 0, 1, 0, 0);
+  gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
+  if (set.grid) {
+    gridCtx.fillStyle = LIGHT ? 'rgba(35,35,35,0.08)' : 'rgba(255,255,255,0.055)';
+    const lw = Math.max(1, Math.round(DPR * 0.5));
+    for (let c = 1; c < cols; c++) gridCtx.fillRect(Math.round(c * cw * DPR), 0, lw, gridCanvas.height);
+    for (let r = 1; r < rows; r++) gridCtx.fillRect(0, Math.round(r * ch * DPR), gridCanvas.width, lw);
+  }
+  gridDirty = false;
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+//  Frame
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+function render() {
+  drawGround();
+  for (const f of flowers) drawFlower(f);
+  const order = flies.slice().sort((a, b) => a.z - b.z);
+  for (const b of order) drawShadow(b);
+  for (const b of order) drawButterfly(b);
+  drawDust();
+  blit();
+}
+
+function blit() {
+  // Calm: dims toward black, or toward the paper in light.
+  const bright = set.calm ? 0.62 : 1;
+  const pr = LIGHT ? PAPER : [0, 0, 0];
+  const tone = v => v;
+  const data = blockImage.data;
+  for (let i = 0, j = 0; i < N; i++, j += 4) {
+    let r = BR[i], g = BG[i], b = BB[i];
+    if (bright !== 1) { r = pr[0] + (r - pr[0]) * bright; g = pr[1] + (g - pr[1]) * bright; b = pr[2] + (b - pr[2]) * bright; }
+    data[j] = r; data[j + 1] = g; data[j + 2] = b; data[j + 3] = 255;
+  }
+  blockCtx.putImageData(blockImage, 0, 0);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(blockCanvas, 0, 0, cols, rows, 0, 0, Math.round(cols * cw * DPR), Math.round(rows * ch * DPR));
+  if (gridDirty) buildGrid();
+  if (set.grid) ctx.drawImage(gridCanvas, 0, 0);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.font = '600 ' + Math.round(ch * 0.74) + 'px "Geist Mono", ui-monospace, monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  let lastStyle = '', lastA = -1;
+  for (let r = 0; r < rows; r++) {
+    const y = r * ch + ch / 2 + 1;
+    for (let c = 0; c < cols; c++) {
+      const i = r * cols + c, g = GI[i]; if (!g) continue;
+      let a = IA[i]; if (a <= 0.02) continue;
+      let ir = IR[i], ig = IG[i], ib = IB[i];
+      if (bright !== 1) { ir = pr[0] + (ir - pr[0]) * bright; ig = pr[1] + (ig - pr[1]) * bright; ib = pr[2] + (ib - pr[2]) * bright; }
+      const style = 'rgb(' + (ir | 0) + ',' + (ig | 0) + ',' + (ib | 0) + ')';
+      if (style !== lastStyle) { ctx.fillStyle = style; lastStyle = style; }
+      a = a > 1 ? 1 : a;
+      if (a !== lastA) { ctx.globalAlpha = a; lastA = a; }
+      ctx.fillText(GL[g], c * cw + cw / 2, y);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+//  Pointer: stir the breeze, flush the butterflies near a fast pointer, click to bloom
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const ptr = { x: 0, y: 0, t: 0, down: false, moved: 0, has: false };
+canvas.addEventListener('pointermove', e => {
+  const now = performance.now() / 1000;
+  if (ptr.has) {
+    const dt = Math.max(0.008, now - ptr.t);
+    const vx = (e.clientX - ptr.x) / dt, vy = (e.clientY - ptr.y) / dt;
+    const sp = Math.hypot(vx, vy);
+    stir(e.clientX, e.clientY, clamp(vx, -1500, 1500), clamp(vy, -1500, 1500));
+    ptr.moved += Math.hypot(e.clientX - ptr.x, e.clientY - ptr.y);
+    if (sp > 380) {
+      for (const b of flies) {
+        const d = Math.hypot(b.x - e.clientX, b.y - e.clientY);
+        if (d < b.sp.flush * cw * (1 + sp / 1500)) {
+          if (b.state === 'nectar' || b.state === 'bask') takeOff(b, e.clientX, e.clientY);
+          else if (b.boost <= 0) { b.boost = 0.7; const a = Math.atan2(b.y - e.clientY, b.x - e.clientX); b.jink += angDiff(b.heading, a) * 0.8; }
+        }
+      }
+    }
+  }
+  ptr.x = e.clientX; ptr.y = e.clientY; ptr.t = now; ptr.has = true;
+});
+canvas.addEventListener('pointerdown', e => { ptr.down = true; ptr.moved = 0; });
+canvas.addEventListener('pointerup', e => { if (ptr.down && ptr.moved < 6) bloomAt(e.clientX, e.clientY); ptr.down = false; });
+canvas.addEventListener('pointerleave', () => { ptr.has = false; });
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+//  The panel
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const panel = document.getElementById('panel'), toggle = document.getElementById('toggle');
+const controlsEl = document.getElementById('controls');
+const refresh = {};
+function setPanel(open) {
+  panel.classList.toggle('hidden', !open);
+  toggle.textContent = open ? 'Hide tweaks' : 'Tweaks';
+  toggle.setAttribute('aria-expanded', String(open));
+}
+toggle.addEventListener('click', () => setPanel(panel.classList.contains('hidden')));
+
+function onChange(k) {
+  save();
+  if (k === 'count' || k === 'species') syncFlies();
+  if (k === 'density' || k === 'flowerSize') { clearTimeout(onChange.t); onChange.t = setTimeout(() => { plant(); for (const b of flies) if (b.flower && !flowerById(b.flower)) { b.flower = 0; if (b.state !== 'fly') { b.state = 'fly'; pickWaypoint(b); } } }, 120); }
+  if (k === 'green' || k === 'grass') groundDirty = true;
+  if (k === 'theme') setTheme();
+  if (k === 'grid') gridDirty = true;
+  if (k === 'leaves') for (const f of flowers) f.reach = Math.max(f.R * 1.15, ...f.leaves.map(l => l.len * Math.min(1, 0.4 + 0.6 * set.leaves))) + 2 * cw;
+}
+
+function buildPanel() {
+  controlsEl.innerHTML = '';
+  for (const g of CONTROLS) {
+    const sec = document.createElement('section'); sec.className = 'group';
+    const h = document.createElement('h2'); h.textContent = g.group; sec.appendChild(h);
+    for (const c of g.items) {
+      const row = document.createElement('div'); row.className = 'row';
+      if (c.type === 'species') {
+        row.innerHTML = '<div class="top"><label>' + c.label + '</label></div>';
+        const chips = document.createElement('div'); chips.className = 'chips';
+        for (const s of SPECIES_LIST) {
+          const b = document.createElement('button'); b.type = 'button'; b.className = 'chip';
+          b.innerHTML = '<i style="background:' + s.swatch + '"></i>' + s.label;
+          const upd = () => b.classList.toggle('on', !!set.species[s.key]);
+          b.addEventListener('click', () => { set.species[s.key] = !set.species[s.key]; upd(); onChange('species'); });
+          upd(); chips.appendChild(b);
+          (refresh.species = refresh.species || []).push(upd);
+        }
+        row.appendChild(chips);
+      } else if (c.type === 'choice' || c.type === 'toggle') {
+        row.innerHTML = '<div class="top"><label>' + c.label + '</label></div>';
+        const chips = document.createElement('div'); chips.className = 'chips';
+        const opts = c.type === 'toggle' ? [[true, 'On'], [false, 'Off']] : c.options;
+        const ups = [];
+        for (const [v, lab] of opts) {
+          const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = lab;
+          const upd = () => b.classList.toggle('on', set[c.k] === v);
+          b.addEventListener('click', () => { set[c.k] = v; ups.forEach(u => u()); onChange(c.k); });
+          ups.push(upd); upd(); chips.appendChild(b);
+        }
+        refresh[c.k] = () => ups.forEach(u => u());
+        row.appendChild(chips);
+        if (c.hint) { const hn = document.createElement('div'); hn.className = 'hint'; hn.textContent = c.hint; row.appendChild(hn); }
+      } else {
+        const id = 'in-' + c.k;
+        row.innerHTML = '<div class="top"><label for="' + id + '">' + c.label + '</label><output></output></div>' +
+          '<input type="range" id="' + id + '" min="' + c.min + '" max="' + c.max + '" step="' + c.step + '">' +
+          '<div class="hint">' + c.hint + '</div>';
+        const input = row.querySelector('input'), out = row.querySelector('output');
+        const upd = () => {
+          input.value = set[c.k]; out.textContent = c.fmt(set[c.k]);
+          input.style.setProperty('--p', ((set[c.k] - c.min) / (c.max - c.min) * 100) + '%');
+        };
+        input.addEventListener('input', () => { set[c.k] = +input.value; upd(); onChange(c.k); });
+        refresh[c.k] = upd; upd();
+      }
+      sec.appendChild(row);
+    }
+    controlsEl.appendChild(sec);
+  }
+}
+function refreshAll() { for (const k in refresh) { const r = refresh[k]; if (Array.isArray(r)) r.forEach(f => f()); else r(); } }
+
+document.getElementById('reset').addEventListener('click', () => {
+  set = JSON.parse(JSON.stringify(DEFAULTS)); save(); refreshAll(); setTheme(); syncFlies(); plant(); groundDirty = true; gridDirty = true;
+});
+document.getElementById('replant').addEventListener('click', () => { flowers = flowers.filter(() => false); for (const b of flies) { b.flower = 0; b.state = 'fly'; pickWaypoint(b); } plant(); });
+let paused = false;
+const pauseBtn = document.getElementById('pause');
+pauseBtn.addEventListener('click', () => { paused = !paused; pauseBtn.textContent = paused ? 'Play' : 'Pause'; });
+document.getElementById('copy').addEventListener('click', async () => {
+  const out = { sketch: 'meadow s1', ...set, species: { ...set.species } };
+  const text = JSON.stringify(out, null, 2);
+  const btn = document.getElementById('copy');
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; } catch (e) {
+    const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); try { ok = document.execCommand('copy'); } catch (e2) { ok = false; } ta.remove();
+  }
+  btn.textContent = ok ? 'Copied' : 'Copy failed';
+  setTimeout(() => { btn.textContent = 'Copy settings'; }, 1400);
+});
+window.addEventListener('keydown', e => {
+  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+  if (e.key === 'h' || e.key === 'H') setPanel(panel.classList.contains('hidden'));
+  if (e.key === ' ') { e.preventDefault(); pauseBtn.click(); }
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+//  Start
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const statsEl = document.getElementById('stats');
+let last = 0, acc = 0, frames = 0, msSum = 0, statT = 0;
+function loop(now) {
+  const real = last ? Math.min(0.1, (now - last) / 1000) : 1 / 60;
+  last = now;
+  if (!paused) {
+    // Fixed 60 Hz steps at 1 ×; slow motion takes the same steps, shortened.
+    acc += real * set.timeScale;
+    const h = 1 / 60 * Math.min(1, set.timeScale);
+    let n = 0;
+    while (acc >= h && n < 8) { step(h); acc -= h; n++; }
+    if (n === 8) acc = 0;
+  }
+  const t0 = performance.now();
+  render();
+  msSum += performance.now() - t0; frames++;
+  if (now - statT > 1000) { statsEl.textContent = (msSum / frames).toFixed(1) + ' ms · ' + flies.length + ' · ' + flowers.length + ' fl'; frames = 0; msSum = 0; statT = now; }
+  requestAnimationFrame(loop);
+}
+
+function start() {
+  resize();
+  setTheme();
+  plant();
+  syncFlies();
+  buildPanel();
+  setPanel(params.has('panel') ? params.get('panel') !== '0' : window.innerWidth > 900);
+  // ?warm=S runs S seconds of meadow before the first frame (for screenshots); ?freeze=1 holds it there.
+  if (params.get('debug') === '1') window.__meadow = { step, render, get flies() { return flies; }, get flowers() { return flowers; }, set, get t() { return simT; } };
+  // ?sheet=flowers or ?sheet=flies lays out every kind for a close look (a development aid).
+  const sheet = params.get('sheet');
+  if (sheet === 'flowers') {
+    flies = []; flowers = [];
+    KINDS.forEach((k, i) => { const f = makeFlower(k, W * (0.14 + 0.24 * (i % 4)), H * (i < 4 ? 0.28 : 0.72), true); f.R = KIND[k].r * S * set.flowerSize * 1.05; flowers.push(f); });
+    paused = true; render(); document.body.dataset.ready = '1'; return;
+  }
+  if (sheet === 'flies') {
+    flowers = []; flies = [];
+    const kinds = ['monarch', 'morpho', 'swallowtail', 'white'], phases = [0, 1.2, 2.2, 3.4];
+    kinds.forEach((k, j) => phases.forEach((ph, i) => {
+      const b = makeFly(k); b.x = W * (0.13 + 0.25 * i); b.y = H * (0.13 + 0.245 * j); b.heading = -Math.PI / 2 + (j % 2 ? 0.5 : -0.3);
+      b.phase = ph; b.stroke = b.sp.mid + b.sp.amp * Math.cos(ph); b.z = +(params.get('z') || 0.5); b.zs = b.z; flies.push(b);
+    }));
+    paused = true; render(); document.body.dataset.ready = '1'; return;
+  }
+  const warm = +(params.get('warm') || 0);
+  for (let t = 0; t < warm; t += 1 / 60) step(1 / 60);
+  if (params.get('freeze') === '1') { paused = true; pauseBtn.textContent = 'Play'; render(); document.body.dataset.ready = '1'; return; }
+  requestAnimationFrame(loop);
+}
+window.addEventListener('resize', () => { const oldW = W, oldH = H; resize(); if (Math.abs(W - oldW) > 80 || Math.abs(H - oldH) > 80) plant(); });
+
+const fontReady = document.fonts && document.fonts.load ? document.fonts.load('600 14px "Geist Mono"') : Promise.resolve();
+Promise.race([fontReady, new Promise(r => setTimeout(r, 1500))]).then(start, start);
+})();
+</script>
+</body>
+</html>
