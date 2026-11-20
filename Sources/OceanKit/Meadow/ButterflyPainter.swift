@@ -20,7 +20,7 @@ struct WingSpans {
     let px: UnsafeMutablePointer<Double>, py: UnsafeMutablePointer<Double>
     let count: UnsafeMutablePointer<Int>
     let minY: UnsafeMutablePointer<Double>, maxY: UnsafeMutablePointer<Double>
-    /// Crossings per outline per sample row (3 rows).
+    /// Crossings per group (forewings, hindwings) per sample row (3 rows), sorted.
     let cross: UnsafeMutablePointer<Double>
     let crossN: UnsafeMutablePointer<Int>
 
@@ -31,44 +31,63 @@ struct WingSpans {
             return p
         }
         return WingSpans(px: buf(4 * maxPoints, 0.0), py: buf(4 * maxPoints, 0.0), count: buf(4, 0), minY: buf(4, 0.0), maxY: buf(4, 0.0),
-                         cross: buf(4 * 3 * maxCross, 0.0), crossN: buf(4 * 3, 0))
+                         cross: buf(2 * 3 * maxCross, 0.0), crossN: buf(2 * 3, 0))
     }
 
     func free() { px.deallocate(); py.deallocate(); count.deallocate(); minY.deallocate(); maxY.deallocate(); cross.deallocate(); crossN.deallocate() }
 
+    /// Lays sample row j at y: the forewings' crossings in one sorted list and the hindwings' in another (left and
+    /// right never overlap, so the even-odd test over a merged list is each outline's own).
     func row(_ j: Int, _ y: Double) {
-        for p in 0..<4 {
-            let k = p * 3 + j
-            crossN[k] = 0
-            if y < minY[p] || y > maxY[p] { continue }
-            let n = count[p], base = p * WingSpans.maxPoints
-            var b = n - 1
-            for a in 0..<n {
-                let ay = py[base + a], by = py[base + b]
-                if (ay > y) != (by > y) {
-                    let ax = px[base + a], bx = px[base + b]
-                    if crossN[k] < WingSpans.maxCross {
-                        cross[k * WingSpans.maxCross + crossN[k]] = ax + (y - ay) / (by - ay) * (bx - ax)
-                        crossN[k] += 1
+        for g in 0..<2 {
+            let k = g * 3 + j
+            let base = k * WingSpans.maxCross
+            var m = 0
+            for p in (g * 2)..<(g * 2 + 2) {
+                if y < minY[p] || y > maxY[p] { continue }
+                let n = count[p], pb = p * WingSpans.maxPoints
+                var b = n - 1
+                for a in 0..<n {
+                    let ay = py[pb + a], by = py[pb + b]
+                    if (ay > y) != (by > y) && m < WingSpans.maxCross {
+                        let ax = px[pb + a], bx = px[pb + b]
+                        let xc: Double = ax + (y - ay) / (by - ay) * (bx - ax)
+                        // Insert in order.
+                        var q = m
+                        while q > 0 && cross[base + q - 1] > xc { cross[base + q] = cross[base + q - 1]; q -= 1 }
+                        cross[base + q] = xc
+                        m += 1
                     }
+                    b = a
                 }
-                b = a
             }
+            crossN[k] = m
         }
     }
 
-    @inline(__always) func inside(_ p: Int, _ j: Int, _ x: Double) -> Bool {
-        let k = p * 3 + j
-        var c = false
-        let base = k * WingSpans.maxCross
-        for q in 0..<crossN[k] where x < cross[base + q] { c.toggle() }
-        return c
+    /// Inside group g (0 forewings, 1 hindwings) at x on row j: an odd number of crossings to its right.
+    @inline(__always) func inside(_ g: Int, _ j: Int, _ x: Double) -> Bool {
+        let k = g * 3 + j
+        let n = crossN[k], base = k * WingSpans.maxCross
+        for q in 0..<n where x < cross[base + q] { return (n - q) & 1 == 1 }
+        return false
+    }
+
+    /// The leftmost and rightmost crossing on the three rows laid last, or nil when no outline crosses them.
+    func extent() -> (Double, Double)? {
+        var lo = Double.infinity, hi = -Double.infinity
+        for k in 0..<6 where crossN[k] > 0 {
+            let base = k * WingSpans.maxCross
+            lo = min(lo, cross[base])
+            hi = max(hi, cross[base + crossN[k] - 1])
+        }
+        return lo <= hi ? (lo, hi) : nil
     }
 
     /// Which part covers sample x on row j: -1 none, 0 forewing, 1 hindwing (the tail is told by the wing's frame).
     @inline(__always) func part(_ j: Int, _ x: Double) -> Int {
-        if inside(0, j, x) || inside(1, j, x) { return 0 }
-        if inside(2, j, x) || inside(3, j, x) { return 1 }
+        if inside(0, j, x) { return 0 }
+        if inside(1, j, x) { return 1 }
         return -1
     }
 }
@@ -78,6 +97,12 @@ struct WingPose {
     var cx = 0.0, cy = 0.0, fx = 1.0, fy = 0.0, rx = 0.0, ry = 1.0
     var hs = 1.0, hh = 1.0, wl = 1.0, wr = 1.0
     var lamL = 0.7, lamR = 0.7, specL = 0.0, specR = 0.0, under = 0.0, depth = 1.0
+}
+
+/// An outline's edge at this frame's scale (`edgeInfo`'s numbers, laid once per butterfly per frame).
+struct EdgeSeg {
+    var ax = 0.0, ay = 0.0, ex = 0.0, ey = 0.0, L2 = 1.0, L = 1.0, acc = 0.0
+    var kind = WingOutline.Edge.root
 }
 
 /// A vein on the screen this frame.
@@ -153,34 +178,52 @@ extension MeadowFrame {
         return (abs(v) / sx, u / P.hh, side, sx, P.hh)
     }
 
-    /// `edgeInfo` (html:2073–2086): cells to the outline's nearest free edge, its kind and how far along.
-    @inline(__always) mutating func edgeInfo(_ o: WingOutline, _ X: Double, _ Y: Double, _ sx: Double, _ sy: Double) -> (d: Double, kind: WingOutline.Edge, along: Double) {
-        let qx = X * sx, qy = Y * sy
-        var best = 1e9, along = 0.0, acc = 0.0
-        var kind = WingOutline.Edge.root
-        let n = o.points.count
-        for i in 0..<n {
-            let j = (i + 1) % n
-            let ax: Double = o.points[i].x * sx, ay: Double = o.points[i].y * sy
-            let bx: Double = o.points[j].x * sx, by: Double = o.points[j].y * sy
-            let ex = bx - ax, ey = by - ay
-            var L2: Double = ex * ex + ey * ey
-            if L2 == 0 { L2 = 1e-9 }
-            let L = L2.squareRoot()
-            let t: Double = clamp(((qx - ax) * ex + (qy - ay) * ey) / L2, 0, 1)
-            let e = hypot(qx - ax - ex * t, qy - ay - ey * t)
-            if o.kinds[i] != .root && e < best { best = e; kind = o.kinds[i]; along = acc + t * L }
-            acc += L
+    /// The outline's edges at this frame's scale, for `edgeInfo`: outline `p` (0 fore-left, 1 fore-right, 2 hind-left,
+    /// 3 hind-right).
+    mutating func layEdges(_ sp: ButterflySpecies, _ P: WingPose) {
+        for p in 0..<4 {
+            let o = p < 2 ? sp.fore : sp.hind
+            let sx: Double = P.hs * (p % 2 == 1 ? P.wr : P.wl), sy = P.hh
+            let n = min(o.points.count, WingSpans.maxPoints)
+            edgeN[p] = n
+            var acc = 0.0
+            for i in 0..<n {
+                let j = (i + 1) % n
+                let ax: Double = o.points[i].x * sx, ay: Double = o.points[i].y * sy
+                let bx: Double = o.points[j].x * sx, by: Double = o.points[j].y * sy
+                let ex = bx - ax, ey = by - ay
+                var L2: Double = ex * ex + ey * ey
+                if L2 == 0 { L2 = 1e-9 }
+                let L = L2.squareRoot()
+                edges[p * WingSpans.maxPoints + i] = EdgeSeg(ax: ax, ay: ay, ex: ex, ey: ey, L2: L2, L: L, acc: acc, kind: o.kinds[i])
+                acc += L
+            }
         }
-        return (best / cw, kind, along / cw)
+    }
+
+    /// `edgeInfo` (html:2073–2086): cells to the outline's nearest free edge, its kind and how far along, on outline
+    /// `p` as laid by `layEdges`.
+    @inline(__always) func edgeInfo(_ p: Int, _ X: Double, _ Y: Double, _ sx: Double, _ sy: Double) -> (d: Double, kind: WingOutline.Edge, along: Double) {
+        let qx = X * sx, qy = Y * sy
+        var best2 = 1e18, along = 0.0
+        var kind = WingOutline.Edge.root
+        let base = p * WingSpans.maxPoints
+        for i in 0..<edgeN[p] {
+            let e = edges[base + i]
+            if e.kind == .root { continue }
+            let t: Double = clamp(((qx - e.ax) * e.ex + (qy - e.ay) * e.ey) / e.L2, 0, 1)
+            let dx: Double = qx - e.ax - e.ex * t, dy: Double = qy - e.ay - e.ey * t
+            let d2: Double = dx * dx + dy * dy
+            if d2 < best2 { best2 = d2; kind = e.kind; along = e.acc + t * e.L }
+        }
+        return (best2.squareRoot() / cw, kind, along / cw)
     }
 
     enum Region { case field, mark, dot, ring, centre, blue, spot, seam }
 
     /// `pattern` (html:2091–2132): each species' markings on the upper side.
-    mutating func pattern(_ kind: ButterflyKind, _ part: Int, _ X: Double, _ Y: Double, _ sx: Double, _ sy: Double) -> (Region, Double) {
-        let sp = kind.species
-        let ei = edgeInfo(part == 0 ? sp.fore : sp.hind, X, Y, sx, sy)
+    mutating func pattern(_ kind: ButterflyKind, _ part: Int, _ side: Int, _ X: Double, _ Y: Double, _ sx: Double, _ sy: Double) -> (Region, Double) {
+        let ei = edgeInfo(part * 2 + side, X, Y, sx, sy)
         let d = ei.d, ek = ei.kind
         let alt = Int(floor(ei.along / 1.5)) % 2 == 0
         let qx: Double = X * sx / cw, qy: Double = Y * sy / cw
@@ -325,6 +368,7 @@ extension MeadowFrame {
         let pig: MeadowRGB = pw.pig + (pw.under - pw.pig) * under
         let pedge: MeadowRGB = pw.edge + (pw.under * 0.7 - pw.edge) * under
         let nVeins = buildVeins(b, P)
+        layEdges(sp, P)
         wingStampN &+= 1
         if wingStampN == 0 { for i in 0..<n { wingStamp[i] = 0 }; wingStampN = 1 }
         let stampV = wingStampN
@@ -334,7 +378,11 @@ extension MeadowFrame {
             spans.row(0, y0 + 0.5 * ch)
             spans.row(1, y0 + 0.3 * ch)
             spans.row(2, y0 + 0.72 * ch)
-            for c in c0...c1 {
+            // Only the columns the outlines reach on these rows.
+            guard let (lo, hi) = spans.extent() else { continue }
+            let ca = max(c0, Int(floor((lo - ox) / cw)) - 1), cb = min(c1, Int(floor((hi - ox) / cw)) + 1)
+            if ca > cb { continue }
+            for c in ca...cb {
                 let x0: Double = ox + Double(c) * cw
                 let px: Double = x0 + 0.5 * cw, py: Double = y0 + 0.5 * ch
                 let i = r * cols + c
@@ -352,7 +400,7 @@ extension MeadowFrame {
                 let wf = wingFrame(P, sxp, syp)
                 let hp = first == 1 && wf.Y < sp.tailY ? 2 : first
                 let cov = Double(hits) / 5, part = hp == 2 ? 1 : hp
-                let (region, d) = pattern(b.kind, part, wf.X, wf.Y, wf.sx, wf.sy)
+                let (region, d) = pattern(b.kind, part, wf.side, wf.X, wf.Y, wf.sx, wf.sy)
                 let key = keyOf(MeadowMath.round(wf.X * P.hs / (cw * 0.9)), MeadowMath.round(wf.Y * wf.sy / (cw * 0.9)), idKey + Double(hp) + 3 * Double(wf.side))
                 let isField = region == .field || region == .seam
                 if !centre || cov < 0.6 {
@@ -509,6 +557,7 @@ extension MeadowFrame {
             touch(nb)
             if LIGHT || lum(Double(BR[nb]), Double(BG[nb]), Double(BB[nb])) > 8 {
                 BR[nb] += (t.x - BR[nb]) * kk; BG[nb] += (t.y - BG[nb]) * kk; BB[nb] += (t.z - BB[nb]) * kk
+                if HB[nb] == 0 { HB[nb] = 2 }
             }
             IA[nb] *= 1 - 0.8 * kk
         }
@@ -637,7 +686,17 @@ extension MeadowFrame {
             spans.row(0, py - third * ch * spread)
             spans.row(1, py)
             spans.row(2, py + third * ch * spread)
-            for c in c0...c1 {
+            // Only the columns the outlines (and the body along the axis) reach on these rows.
+            var lo = Double.infinity, hi = -Double.infinity
+            if let (a, b) = spans.extent() { lo = a; hi = b }
+            let pad: Double = third * cw * spread + cw
+            let ua: Double = -0.78 * P.hh, ub: Double = 0.4 * P.hh
+            lo = min(lo, P.cx + P.fx * ua - 2 * cw, P.cx + P.fx * ub - 2 * cw)
+            hi = max(hi, P.cx + P.fx * ua + 2 * cw, P.cx + P.fx * ub + 2 * cw)
+            if lo > hi { continue }
+            let ca = max(c0, Int(floor((lo - pad - ox) / cw)) - 1), cb = min(c1, Int(floor((hi + pad - ox) / cw)) + 1)
+            if ca > cb { continue }
+            for c in ca...cb {
                 let px: Double = ox + (Double(c) + 0.5) * cw
                 var cov = 0
                 for a in -1...1 {

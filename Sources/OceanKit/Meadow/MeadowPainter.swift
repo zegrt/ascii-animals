@@ -109,6 +109,9 @@ struct FlowerOp {
     var cell: Int32
     var r: Float, g: Float, b: Float, a: Float
     var key: UInt32
+    /// The shimmer's last roll and the tick it was rolled on (it re-rolls 2.4 times a second, html:599).
+    var tick: Int32 = Int32.min
+    var roll: Float = 1
 }
 
 /// A flower's recorded cells on one screen, with what they were drawn at.
@@ -153,6 +156,8 @@ final class ViewportCache {
     var tuftGlyph: [UInt8] = []
     var tuftK: [Float] = []
     var tuftM: [Float] = []
+    /// Each tuft's `hash3(c, r, 13)` (whether it lies over in a gust), fixed per cell.
+    var tuftH: [Float] = []
     var flowers: [Int: FlowerCache] = [:]
     var used = 0
     deinit { gR.free(); gG.free(); gB.free(); packed.free() }
@@ -175,13 +180,16 @@ public final class MeadowPainter {
     var order = MBuf<Int>(0)
     let spans = WingSpans.make()
     var veins = MBuf<VeinSeg>(VeinSeg())
+    var edges = MBuf<EdgeSeg>(EdgeSeg()), edgeN = MBuf<Int>(0)
+    /// The grass ink by how hard the air moves it, 65 steps, made each frame.
+    var grassInk = MBuf<SIMD3<Float>>(.zero)
 
-    public init() { veins.ensure(16) }
+    public init() { veins.ensure(16); grassInk.ensure(65); edges.ensure(4 * WingSpans.maxPoints); edgeN.ensure(4) }
 
     deinit {
         BR.free(); BG.free(); BB.free(); HB.free(); GI.free(); IR.free(); IG.free(); IB.free(); IA.free()
         stamp.free(); touched.free(); recMark.free(); recList.free(); rimMark.free(); rimW.free(); rimList.free()
-        wingStamp.free(); airX.free(); airY.free(); order.free(); veins.free(); spans.free()
+        wingStamp.free(); airX.free(); airY.free(); order.free(); veins.free(); spans.free(); grassInk.free(); edges.free(); edgeN.free()
     }
 
     private func ensure(_ count: Int) {
@@ -244,7 +252,7 @@ struct MeadowFrame {
     unowned let world: MeadowWorld
     unowned let v: ViewportCache
     let n: Int
-    // This frame's cells (html:642).
+    // This frame's cells (html:642). HB: 1 the cell has a block; 2 no block but its ground was shaded; 0 neither.
     let BR: UnsafeMutablePointer<Float>, BG: UnsafeMutablePointer<Float>, BB: UnsafeMutablePointer<Float>
     let HB: UnsafeMutablePointer<UInt8>, GI: UnsafeMutablePointer<UInt8>
     let IR: UnsafeMutablePointer<Float>, IG: UnsafeMutablePointer<Float>, IB: UnsafeMutablePointer<Float>, IA: UnsafeMutablePointer<Float>
@@ -255,6 +263,7 @@ struct MeadowFrame {
     var gR: UnsafeMutablePointer<Float>, gG: UnsafeMutablePointer<Float>, gB: UnsafeMutablePointer<Float>
     let spans: WingSpans
     let veins: UnsafeMutablePointer<VeinSeg>
+    let edges: UnsafeMutablePointer<EdgeSeg>, edgeN: UnsafeMutablePointer<Int>
     let frame: UInt32
     var touchedN = 0
     var recStamp: UInt32, rimStamp: UInt32, wingStampN: UInt32
@@ -295,6 +304,7 @@ struct MeadowFrame {
         gR = v.gR.p; gG = v.gG.p; gB = v.gB.p
         spans = p.spans
         veins = p.veins.p
+        edges = p.edges.p; edgeN = p.edgeN.p
         frame = p.frame
         recStamp = p.recStamp; rimStamp = p.rimStamp; wingStampN = p.wingStampN
         self.cols = cols
@@ -382,7 +392,7 @@ struct MeadowFrame {
         var r = r0, g = g0, b = b0, a = a0
         if FAR != 0 {
             far(&r, &g, &b)
-            if HB[i] != 0 {
+            if HB[i] == 1 {
                 let fl = FAR_FLAT
                 r += (Double(BR[i]) - r) * fl; g += (Double(BG[i]) - g) * fl; b += (Double(BB[i]) - b) * fl
             } else {
@@ -404,6 +414,7 @@ struct MeadowFrame {
         if k <= 0 { return }
         if let rc = recording { rc.ops.append(FlowerOp(kind: .shade, gi: 0, cell: Int32(i), r: 0, g: 0, b: 0, a: Float(k), key: 0)); return }
         touch(i)
+        if HB[i] == 0 { HB[i] = 2 }
         if LIGHT {
             BR[i] *= Float(1 - 0.24 * k); BG[i] *= Float(1 - 0.21 * k); BB[i] *= Float(1 - 0.15 * k); IA[i] *= Float(1 - 0.5 * k)
         } else {
@@ -510,6 +521,7 @@ struct MeadowFrame {
         v.tuftGlyph.removeAll(keepingCapacity: true)
         v.tuftK.removeAll(keepingCapacity: true)
         v.tuftM.removeAll(keepingCapacity: true)
+        v.tuftH.removeAll(keepingCapacity: true)
         v.flowers.removeAll()
         let bgc: MeadowRGB = LIGHT ? PlantInk.paper : MeadowRGB(0, 0, 0)
         let gc: MeadowRGB = LIGHT ? PlantInk.groundPaper : PlantInk.ground
@@ -536,6 +548,7 @@ struct MeadowFrame {
                     v.tuftGlyph.append(gi)
                     v.tuftK.append(Float((0.45 + 0.55 * mhash(gcx, gry, 7)) * (0.55 + 0.45 * patch)))
                     v.tuftM.append(Float(mhash(gcx, gry, 17)))
+                    v.tuftH.append(Float(mhash(gcx, gry, 13)))
                 }
             }
         }
@@ -576,11 +589,27 @@ struct MeadowFrame {
         let ref: Double = max(1, 26 * S * max(0.3, tuning.breeze))
         let gr = PlantInk.grass, st = PlantInk.stirred
         let pg = PlantInk.paperGrass, pz = PlantInk.paperGrassStirred
-        let cells = v.tuftCells, glyphs = v.tuftGlyph, ks = v.tuftK, ms = v.tuftM
+        let cells = v.tuftCells, glyphs = v.tuftGlyph, ks = v.tuftK, ms = v.tuftM, hs = v.tuftH
         let airN = painter.airCount
         let airX = painter.airX.p, airY = painter.airY.p
         let o = b.origin, spacing = b.spacing, bc = b.columns, brows = b.rows
         let gxMax: Double = max(0, Double(bc) - 1.001), gyMax: Double = max(0, Double(brows) - 1.001)
+        // The ink at each of 65 steps of the air's pull `s` (html:2559–2567): the stirred colour by `0.85 s`, pushed
+        // back with the meadow (`far`); a glyph with no block under it is fainter (`FAR_FAINT`), and on black the
+        // silk's alpha (lGlyph) is its own, on paper 0.75 of it.
+        let ink = painter.grassInk.p
+        for q in 0...64 {
+            let kk: Double = Double(q) / 64 * 0.85
+            var r: Double, g: Double, bl: Double
+            if LIGHT {
+                r = pg.x + (pz.x - pg.x) * kk; g = pg.y + (pz.y - pg.y) * kk; bl = pg.z + (pz.z - pg.z) * kk
+            } else {
+                r = gr.x + (st.x - gr.x) * kk; g = gr.y + (st.y - gr.y) * kk; bl = gr.z + (st.z - gr.z) * kk
+            }
+            if FAR != 0 { far(&r, &g, &bl) }
+            ink[q] = SIMD3(Float(r), Float(g), Float(bl))
+        }
+        let alphaK: Double = (LIGHT ? 0.75 : 1) * grassAmt * (FAR != 0 ? FAR_FAINT : 1) * INK_K
         for k in 0..<cells.count {
             let i = Int(cells[k])
             let c = i % cols, r = i / cols
@@ -602,14 +631,13 @@ struct MeadowFrame {
             let m = (wx * wx + wy * wy).squareRoot()
             let s: Double = clamp((m / ref - 0.35) / 1.3, 0, 1)
             var g = glyphs[k]
-            if s > 0.45 && mhash(Double(c) + gc0, Double(r) + gr0, 13) < 0.25 + 0.6 * s { g = meadowLine(wx, wy, Double(ms[k])) }
-            let kk: Double = s * 0.85
-            let a: Double = Double(ks[k]) * (0.42 + 0.58 * s) * grassAmt
-            if LIGHT {
-                putGlyph(i, g, pg.x + (pz.x - pg.x) * kk, pg.y + (pz.y - pg.y) * kk, pg.z + (pz.z - pg.z) * kk, 0.75 * a)
-            } else {
-                lGlyph(i, g, gr.x + (st.x - gr.x) * kk, gr.y + (st.y - gr.y) * kk, gr.z + (st.z - gr.z) * kk, a)
-            }
+            if s > 0.45 && Double(hs[k]) < 0.25 + 0.6 * s { g = meadowLine(wx, wy, Double(ms[k])) }
+            // lGlyph (or the paper's glyph) with the meadow pushed back: the ink from this frame's table.
+            let col = ink[Int(s * 64 + 0.5)]
+            touch(i)
+            GI[i] = g
+            IR[i] = col.x; IG[i] = col.y; IB[i] = col.z
+            IA[i] = Float(Double(ks[k]) * (0.42 + 0.58 * s) * alphaK)
         }
         farPush(0)
         drawMotes()
@@ -698,9 +726,11 @@ struct MeadowFrame {
                     canvas.glyph.withUnsafeMutableBufferPointer { glyph in
                         for k in 0..<touchedN {
                             let i = Int(touched[k])
-                            if HB[i] != 0 {
+                            let hb = HB[i]
+                            if hb == 1 {
                                 block[i] = packTrunc(BR[i], BG[i], BB[i], 1, pr, br)
-                            } else {
+                            } else if hb == 2 {
+                                // The ground here was shaded (or rimmed): its own colour; elsewhere the cached one.
                                 ground[i] = packTrunc(BR[i], BG[i], BB[i], 1, pr, br)
                             }
                             let gi = GI[i]

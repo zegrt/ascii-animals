@@ -86,17 +86,31 @@ extension MeadowFrame {
             // Replay, pushed back with the meadow; a flower being fed comes forward a little (html:1203–1205).
             INK_K = fk
             farPush(tuning.depth * (1 - 0.45 * f.lift))
-            for op in cache.ops {
-                let i = Int(op.cell)
-                switch op.kind {
-                case .block: put(i, Double(op.r), Double(op.g), Double(op.b), Double(op.a))
-                case .glyph: putGlyph(i, op.gi, Double(op.r), Double(op.g), Double(op.b), Double(op.a))
-                case .shimmerGlyph:
-                    let s = shimmer(op.key, 0.03 * sparkleK, 0.05 * sparkleK)
-                    if s != 0 { shimmerGlyph(i, op.gi, s, op.key, false) }
-                    else { putGlyph(i, op.gi, Double(op.r), Double(op.g), Double(op.b), Double(op.a)) }
-                case .clearGlyph: touch(i); GI[i] = MG.none
-                case .shade: shadeNow(i, Double(op.a))
+            let accK: Double = 0.03 * sparkleK * sparkleRate, fleckK: Double = 0.05 * sparkleK * sparkleRate
+            cache.ops.withUnsafeMutableBufferPointer { ops in
+                for k in 0..<ops.count {
+                    let i = Int(ops[k].cell)
+                    switch ops[k].kind {
+                    case .block: put(i, Double(ops[k].r), Double(ops[k].g), Double(ops[k].b), Double(ops[k].a))
+                    case .glyph: putGlyph(i, ops[k].gi, Double(ops[k].r), Double(ops[k].g), Double(ops[k].b), Double(ops[k].a))
+                    case .shimmerGlyph:
+                        // `shimmer` (html:597–602), its roll kept until the cell's next tick.
+                        let key = ops[k].key
+                        var s = 0
+                        if sparkleRate > 0 {
+                            let tick = Int32(clamping: Int(floor(simT * 2.4 + Double(key % 997) / 97)))
+                            if ops[k].tick != tick {
+                                ops[k].tick = tick
+                                ops[k].roll = Float(mhash(Double(key), Double(tick), 7))
+                            }
+                            let roll = Double(ops[k].roll)
+                            s = !LIGHT && roll < accK ? 1 : roll < fleckK ? 2 : 0
+                        }
+                        if s != 0 { shimmerGlyph(i, ops[k].gi, s, key, false) }
+                        else { putGlyph(i, ops[k].gi, Double(ops[k].r), Double(ops[k].g), Double(ops[k].b), Double(ops[k].a)) }
+                    case .clearGlyph: touch(i); GI[i] = MG.none
+                    case .shade: shadeNow(i, Double(ops[k].a))
+                    }
                 }
             }
             INK_K = 1

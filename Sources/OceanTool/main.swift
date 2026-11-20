@@ -6,7 +6,7 @@
 //                    [--habitat ocean|web|meadow] [--spiders a,b] [--warmup S] [--interact]
 //     --interact (Web): the parity script (WebScript.swift): the pointer drawn through the near web, a click
 //     dropping a fly on it, the pointer held still near the jumper.
-//   OceanTool bench [--habitat ocean|web]
+//   OceanTool bench [--habitat ocean|web|meadow]
 //   OceanTool bench --desk [--habitat ocean|web|meadow] [--separate] [--laptop WxH] [--density D] [--seconds S]
 //     CPU per second on the owner's desk (Bench.swift): both viewports drawn as the app draws them, at 30 and 15 fps.
 //   OceanTool meadow-sheet <out.png> <W>x<H> --sheet flowers|flies [--z Z] [--light] [--calm] [--seed N] [--scale N]
@@ -165,12 +165,12 @@ case "bench":
         Bench.digest(s, laptop: laptop, separate: separate, frames: Int(option("--frames") ?? "900") ?? 900)
         break
     }
-    if s.habitat == .web {
+    if s.habitat == .web || s.habitat == .meadow {
         // Simulation per step and painting per frame (one 1800 x 1169 screen, its cell canvas), the demo wall.
         let size = CGSize(width: 1800, height: 1169)
         let cell = GridSpec.cell(forWidth: 1800)
         let grid = GridSpec.make(viewportSize: size, cell: cell)
-        let sim = WebSim(settings: s.sanitized(), seed: 1)
+        let sim = Habitats.make(s.sanitized(), seed: 1) as! CellPainter
         sim.layout(terrain: .single(width: 1800, height: 1169), cell: cell, settings: s)
         let canvas = CellCanvas(cols: grid.cols, rows: grid.rows)
         let viewport = CGRect(origin: .zero, size: size)
@@ -192,8 +192,14 @@ case "bench":
                 paintT += p
                 worstPaint = max(worstPaint, p)
             }
-            print(String(format: "web %@  webs %d  weavers %d  flies %d  sim %.1f µs/step = %.3f ms per simulated second (%.2f%% of a core at 60 steps/s)  paint %.3f ms/frame (worst %.3f; clear included)  grid %dx%d",
-                         light ? "light" : "dark", sim.world.webs.count, sim.world.weavers.count, sim.world.swarm.flies.count,
+            let what: String
+            if let web = sim as? WebSim {
+                what = String(format: "webs %d  weavers %d  flies %d", web.world.webs.count, web.world.weavers.count, web.world.swarm.flies.count)
+            } else if let meadow = sim as? MeadowSim {
+                what = String(format: "butterflies %d  flowers %d", meadow.world.flies.count, meadow.world.flowers.all.count)
+            } else { what = "" }
+            print(String(format: "%@ %@  %@  sim %.1f µs/step = %.3f ms per simulated second (%.2f%% of a core at 60 steps/s)  paint %.3f ms/frame (worst %.3f; clear included)  grid %dx%d",
+                         s.habitat.rawValue, light ? "light" : "dark", what,
                          stepT / Double(frames) / 1000, stepT / Double(frames) * 60 / 1e6, stepT / Double(frames) * 60 / 1e7, paintT / Double(frames) / 1e6, worstPaint / 1e6,
                          grid.cols, grid.rows))
         }
