@@ -169,14 +169,24 @@ struct MCell {
     static let hb0 = MemoryLayout<MCell>.offset(of: \MCell.hb)!, gi0 = MemoryLayout<MCell>.offset(of: \MCell.gi)!
 }
 
-/// One field of every cell, indexed as an array of it (`BR[i]`).
-struct CellField<T> {
+/// One field of every record in a buffer of `Record`s, indexed as an array of it (`BR[i]`).
+struct Field<Record, T> {
     let p: UnsafeMutableRawPointer
-    init(_ cells: UnsafeMutablePointer<MCell>, _ offset: Int) { p = UnsafeMutableRawPointer(cells) + offset }
+    init(_ records: UnsafeMutablePointer<Record>, _ offset: Int) { p = UnsafeMutableRawPointer(records) + offset }
     @inline(__always) subscript(i: Int) -> T {
-        get { p.load(fromByteOffset: i &* MemoryLayout<MCell>.stride, as: T.self) }
-        nonmutating set { p.storeBytes(of: newValue, toByteOffset: i &* MemoryLayout<MCell>.stride, as: T.self) }
+        get { p.load(fromByteOffset: i &* MemoryLayout<Record>.stride, as: T.self) }
+        nonmutating set { p.storeBytes(of: newValue, toByteOffset: i &* MemoryLayout<Record>.stride, as: T.self) }
     }
+}
+typealias CellField<T> = Field<MCell, T>
+
+/// A cell's marks while the butterflies are drawn (the wing it was last drawn by, the butterfly that last recorded it,
+/// the rim last laid round it and its weight there), side by side as `MCell` is.
+struct WingMark {
+    var rec: UInt32 = 0, rim: UInt32 = 0, wing: UInt32 = 0
+    var rimW: Float = 0
+    static let rec0 = MemoryLayout<WingMark>.offset(of: \WingMark.rec)!, rim0 = MemoryLayout<WingMark>.offset(of: \WingMark.rim)!
+    static let wing0 = MemoryLayout<WingMark>.offset(of: \WingMark.wing)!, rimW0 = MemoryLayout<WingMark>.offset(of: \WingMark.rimW)!
 }
 
 /// The cells' fields, made from the painter's cells.
@@ -193,6 +203,17 @@ struct CellFields {
     }
 }
 
+/// One grass tuft (`buildGround`): its cell, glyph, ink strength `k`, where its line lies in the cell `m`, its
+/// `hash3(c, r, 13)` (whether it lies over in a gust), and its four air samples (`j`, `j1`, `j2`, `j3`) with its
+/// weights between them on the breeze's grid. Kept together, so a tuft is read from one place.
+struct Tuft {
+    var cell: Int32
+    var glyph: UInt8
+    var k: Float, m: Float, h: Float
+    var air = SIMD4<Int32>(0, 0, 0, 0)
+    var w = SIMD2<Float>(0, 0)
+}
+
 /// One screen's cached ground (`buildGround`, html:2523–2543) and its flowers' recordings.
 final class ViewportCache {
     var rect = CGRect.null
@@ -205,16 +226,9 @@ final class ViewportCache {
     var gRGB = MBuf<SIMD4<Float>>(.zero)
     var packed = MBuf<UInt32>(0)
     var built = false
-    var tuftCells: [Int32] = []
-    var tuftGlyph: [UInt8] = []
-    var tuftK: [Float] = []
-    var tuftM: [Float] = []
-    /// Each tuft's `hash3(c, r, 13)` (whether it lies over in a gust), fixed per cell.
-    var tuftH: [Float] = []
-    /// Each tuft's four air samples (`j`, `j1`, `j2`, `j3`) and its weights between them on the breeze's grid laid
-    /// as `airKey` says (the grid's origin, spacing, columns and rows); made again when the tufts or the grid change.
-    var tuftAir: [SIMD4<Int32>] = []
-    var tuftW: [SIMD2<Float>] = []
+    /// The grass tufts, each with where it reads the air (`airKey` says on which grid; made again when the tufts or
+    /// the grid change).
+    var tufts: [Tuft] = []
     var airKey = SIMD4<Double>(.nan, .nan, .nan, .nan)
     var airRows = -1
     /// The flowers' recordings by flower id, in slots that are reused: `slots` holds every slot made, `free` the
@@ -286,8 +300,7 @@ public final class MeadowPainter {
     var n = 0
     var cellBuf = MBuf<MCell>(MCell())
     var touched = MBuf<Int32>(0)
-    var recMark = MBuf<UInt32>(0), recList = MBuf<Int32>(0), rimMark = MBuf<UInt32>(0), rimW = MBuf<Float>(0), rimList = MBuf<Int32>(0)
-    var wingStamp = MBuf<UInt32>(0)
+    var marks = MBuf<WingMark>(WingMark()), recList = MBuf<Int32>(0), rimList = MBuf<Int32>(0)
     var frame: UInt32 = 0, recStamp: UInt32 = 0, rimStamp: UInt32 = 0, wingStampN: UInt32 = 0
     var views: [ViewportCache] = []
     var paintCount = 0
@@ -305,15 +318,14 @@ public final class MeadowPainter {
     public init() { veins.ensure(16); grassInk.ensure(65); edges.ensure(4 * WingSpans.maxPoints); edgeN.ensure(4) }
 
     deinit {
-        cellBuf.free(); touched.free(); recMark.free(); recList.free(); rimMark.free(); rimW.free(); rimList.free()
-        wingStamp.free(); airX.free(); airY.free(); lattice1.free(); lattice2.free(); order.free(); veins.free(); spans.free(); grassInk.free(); edges.free(); edgeN.free()
+        cellBuf.free(); touched.free(); marks.free(); recList.free(); rimList.free()
+        airX.free(); airY.free(); lattice1.free(); lattice2.free(); order.free(); veins.free(); spans.free(); grassInk.free(); edges.free(); edgeN.free()
     }
 
     private func ensure(_ count: Int) {
         guard count > n else { return }
         n = count
-        cellBuf.ensure(n); touched.ensure(n); recMark.ensure(n); recList.ensure(n); rimMark.ensure(n); rimW.ensure(n); rimList.ensure(n)
-        wingStamp.ensure(n)
+        cellBuf.ensure(n); touched.ensure(n); marks.ensure(n); recList.ensure(n); rimList.ensure(n)
         frame = 0; recStamp = 0; rimStamp = 0; wingStampN = 0
     }
 
@@ -437,9 +449,9 @@ struct MeadowFrame {
     let HB: CellField<UInt8>, GI: CellField<UInt8>
     let IR: CellField<Float>, IG: CellField<Float>, IB: CellField<Float>, IA: CellField<Float>
     let stamp: CellField<UInt32>, touched: UnsafeMutablePointer<Int32>
-    let recMark: UnsafeMutablePointer<UInt32>, recList: UnsafeMutablePointer<Int32>
-    let rimMark: UnsafeMutablePointer<UInt32>, rimW: UnsafeMutablePointer<Float>, rimList: UnsafeMutablePointer<Int32>
-    let wingStamp: UnsafeMutablePointer<UInt32>
+    let recMark: Field<WingMark, UInt32>, recList: UnsafeMutablePointer<Int32>
+    let rimMark: Field<WingMark, UInt32>, rimW: Field<WingMark, Float>, rimList: UnsafeMutablePointer<Int32>
+    let wingStamp: Field<WingMark, UInt32>
     var ground: UnsafeMutablePointer<SIMD4<Float>>
     /// The same cells as `Cells` (made again when the ground's buffers move).
     var cells: Cells
@@ -484,8 +496,9 @@ struct MeadowFrame {
         BR = cf.BR; BG = cf.BG; BB = cf.BB; HB = cf.HB; GI = cf.GI
         IR = cf.IR; IG = cf.IG; IB = cf.IB; IA = cf.IA
         stamp = cf.stamp; touched = p.touched.p
-        recMark = p.recMark.p; recList = p.recList.p; rimMark = p.rimMark.p; rimW = p.rimW.p; rimList = p.rimList.p
-        wingStamp = p.wingStamp.p
+        recMark = Field(p.marks.p, WingMark.rec0); recList = p.recList.p
+        rimMark = Field(p.marks.p, WingMark.rim0); rimW = Field(p.marks.p, WingMark.rimW0); rimList = p.rimList.p
+        wingStamp = Field(p.marks.p, WingMark.wing0)
         ground = v.gRGB.p
         cells = Cells(BR: cf.BR, BG: cf.BG, BB: cf.BB, HB: cf.HB, GI: cf.GI, IR: cf.IR, IG: cf.IG, IB: cf.IB, IA: cf.IA,
                       stamp: cf.stamp, touched: p.touched.p, ground: v.gRGB.p, frame: p.frame)
@@ -688,11 +701,7 @@ struct MeadowFrame {
         cells = Cells(BR: BR, BG: BG, BB: BB, HB: HB, GI: GI, IR: IR, IG: IG, IB: IB, IA: IA, stamp: stamp, touched: touched,
                       ground: ground, frame: frame)
         let packed = v.packed.p
-        v.tuftCells.removeAll(keepingCapacity: true)
-        v.tuftGlyph.removeAll(keepingCapacity: true)
-        v.tuftK.removeAll(keepingCapacity: true)
-        v.tuftM.removeAll(keepingCapacity: true)
-        v.tuftH.removeAll(keepingCapacity: true)
+        v.tufts.removeAll(keepingCapacity: true)
         v.airRows = -1
         v.releaseFlowers()
         let bgc: MeadowRGB = LIGHT ? PlantInk.paper : MeadowRGB(0, 0, 0)
@@ -716,11 +725,8 @@ struct MeadowFrame {
                 let h = mhash(gcx, gry, 11)
                 if h < dens {
                     let gi = MG.tufts[Int(mhash(gcx, gry, 5) * Double(MG.tufts.count))]
-                    v.tuftCells.append(Int32(i))
-                    v.tuftGlyph.append(gi)
-                    v.tuftK.append(Float((0.45 + 0.55 * mhash(gcx, gry, 7)) * (0.55 + 0.45 * patch)))
-                    v.tuftM.append(Float(mhash(gcx, gry, 17)))
-                    v.tuftH.append(Float(mhash(gcx, gry, 13)))
+                    v.tufts.append(Tuft(cell: Int32(i), glyph: gi, k: Float((0.45 + 0.55 * mhash(gcx, gry, 7)) * (0.55 + 0.45 * patch)),
+                                        m: Float(mhash(gcx, gry, 17)), h: Float(mhash(gcx, gry, 13))))
                 }
             }
         }
@@ -762,7 +768,6 @@ struct MeadowFrame {
         let ref: Double = max(1, 26 * S * max(0.3, tuning.breeze))
         let gr = PlantInk.grass, st = PlantInk.stirred
         let pg = PlantInk.paperGrass, pz = PlantInk.paperGrassStirred
-        let cells = v.tuftCells, glyphs = v.tuftGlyph, ks = v.tuftK, ms = v.tuftM, hs = v.tuftH
         let airN = painter.airCount
         let airX = painter.airX.p, airY = painter.airY.p
         let o = b.origin, spacing = b.spacing, bc = b.columns, brows = b.rows
@@ -788,10 +793,8 @@ struct MeadowFrame {
         if airN > 0 && (v.airRows != brows || v.airKey != key) {
             v.airKey = key
             v.airRows = brows
-            v.tuftAir.removeAll(keepingCapacity: true)
-            v.tuftW.removeAll(keepingCapacity: true)
-            for k in 0..<cells.count {
-                let i = Int(cells[k])
+            for k in 0..<v.tufts.count {
+                let i = Int(v.tufts[k].cell)
                 let c = i % cols, r = i / cols
                 let x: Double = ox + (Double(c) + 0.5) * cw, y: Double = oy + (Double(r) + 0.5) * ch
                 let gx: Double = clamp((x - o.x) / spacing, 0, gxMax)
@@ -802,18 +805,19 @@ struct MeadowFrame {
                 let j1 = ix + 1 < bc ? j + 1 : j
                 let j2 = iy + 1 < brows ? j + bc : j
                 let j3 = ix + 1 < bc ? j2 + 1 : j2
-                v.tuftAir.append(SIMD4(Int32(j), Int32(j1), Int32(j2), Int32(j3)))
-                v.tuftW.append(SIMD2(fx, fy))
+                v.tufts[k].air = SIMD4(Int32(j), Int32(j1), Int32(j2), Int32(j3))
+                v.tufts[k].w = SIMD2(fx, fy)
             }
         }
-        let tuftAir = v.tuftAir, tuftW = v.tuftW
         let C = self.cells
         var tn = touchedN
-        for k in 0..<cells.count {
-            let i = Int(cells[k])
+        v.tufts.withUnsafeBufferPointer { tufts in
+        for k in 0..<tufts.count {
+            let t = tufts[k]
+            let i = Int(t.cell)
             var wx = 0.0, wy = 0.0
             if airN > 0 {
-                let js = tuftAir[k], w = tuftW[k]
+                let js = t.air, w = t.w
                 let fx = w.x, fy = w.y
                 let j = Int(js.x), j1 = Int(js.y), j2 = Int(js.z), j3 = Int(js.w)
                 let axv: Float = (airX[j] * (1 - fx) + airX[j1] * fx) * (1 - fy) + (airX[j2] * (1 - fx) + airX[j3] * fx) * fy
@@ -822,14 +826,15 @@ struct MeadowFrame {
             }
             let m = (wx * wx + wy * wy).squareRoot()
             let s: Double = clamp((m / ref - 0.35) / 1.3, 0, 1)
-            var g = glyphs[k]
-            if s > 0.45 && Double(hs[k]) < 0.25 + 0.6 * s { g = meadowLine(wx, wy, Double(ms[k])) }
+            var g = t.glyph
+            if s > 0.45 && Double(t.h) < 0.25 + 0.6 * s { g = meadowLine(wx, wy, Double(t.m)) }
             // lGlyph (or the paper's glyph) with the meadow pushed back: the ink from this frame's table.
             let col = ink[Int(s * 64 + 0.5)]
             C.touch(i, &tn)
             C.GI[i] = g
             C.IR[i] = col.x; C.IG[i] = col.y; C.IB[i] = col.z
-            C.IA[i] = Float(Double(ks[k]) * (0.42 + 0.58 * s) * alphaK)
+            C.IA[i] = Float(Double(t.k) * (0.42 + 0.58 * s) * alphaK)
+        }
         }
         touchedN = tn
         farPush(0)
