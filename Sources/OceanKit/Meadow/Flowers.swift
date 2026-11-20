@@ -7,7 +7,12 @@ public enum FlowerKind: String, CaseIterable, Sendable {
     case milkweed, coneflower, fennel, mustard, clover, daisy, dandelion, grass
 
     /// Coneflower, fennel and milkweed stand 4–7 rows and sway slowly; the rest are short and quick.
-    public var isTall: Bool { self == .milkweed || self == .coneflower || self == .fennel }
+    public var isTall: Bool {
+        switch self {
+        case .milkweed, .coneflower, .fennel: return true
+        case .mustard, .clover, .daisy, .dandelion, .grass: return false
+        }
+    }
 
     /// Stem height in rows when laid out along the bottom.
     var rows: ClosedRange<Int> {
@@ -40,8 +45,8 @@ public enum FlowerKind: String, CaseIterable, Sendable {
         isTall ? (0.7, 1.2, 4, 7) : (1.5, 2.5, 1, 4)
     }
 
-    static let blooming: [FlowerKind] = allCases.filter { $0 != .grass }
-    static let tall: [FlowerKind] = allCases.filter { $0.isTall }
+    static let blooming: [FlowerKind] = allCases.filter { (k: FlowerKind) -> Bool in k != .grass }
+    static let tall: [FlowerKind] = allCases.filter { (k: FlowerKind) -> Bool in k.isTall }
 }
 
 /// One plant: a stem rooted on a screen's bottom edge whose tip is a single damped spring.
@@ -209,10 +214,14 @@ public final class Meadowland {
             // The head rides an arc as the stem bends (it can't rise past its length), plus a little push from
             // air blowing down on it. Updrafts don't stretch a stem.
             let x: Double = clamp(lean.x, -len, len)
-            target = SIMD2<Double>(x, len - (len * len - x * x).squareRoot() + max(0, lean.y) * Meadowland.verticalLean)
+            let arc: Double = len - (len * len - x * x).squareRoot()
+            let down: Double = max(0, lean.y) * Meadowland.verticalLean
+            target = SIMD2<Double>(x, arc + down)
         }
         let w: Double = TAU * f.f0
-        let acc: SIMD2<Double> = (target - f.tip) * (w * w) - f.tipV * (2 * f.zeta * w)
+        let stiffness: Double = w * w, damping: Double = 2 * f.zeta * w
+        let pull: SIMD2<Double> = (target - f.tip) * stiffness
+        let acc: SIMD2<Double> = pull - f.tipV * damping
         f.tipV += acc * dt
         f.tip += f.tipV * dt
         // A stem can't bend past its own length.

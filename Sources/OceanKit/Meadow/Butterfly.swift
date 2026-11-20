@@ -223,7 +223,9 @@ public final class Butterfly {
         if let a = away {
             prefer = a + 0.6 * gauss(random)
         } else {
-            prefer += gauss(random) * (2 * max(0, time - preferAt) / persist).squareRoot()
+            let since: Double = max(0, time - preferAt)
+            let spread: Double = (2 * since / persist).squareRoot()
+            prefer += gauss(random) * spread
         }
         preferAt = time
         let b = terrain.bounds
@@ -232,7 +234,9 @@ public final class Butterfly {
         for _ in 0..<4 {
             let q = randomPoint(terrain, random, span: span)
             let d: SIMD2<Double> = q - p
-            let score: Double = cos(atan2(d.y, d.x) - prefer) + 0.5 * min(1, simd_length(d) / max(reach, 1))
+            let along: Double = cos(atan2(d.y, d.x) - prefer)
+            let distance: Double = min(1, simd_length(d) / max(reach, 1))
+            let score: Double = along + 0.5 * distance
             if score > bestScore { best = q; bestScore = score }
         }
         let bearing: Double = atan2(best.y - p.y, best.x - p.x)
@@ -294,7 +298,8 @@ public final class Butterfly {
             let bearing: Double = atan2(-d.y, abs(d.x))
             if abs(bearing) > abs(elevation) { elevation = clamp(bearing, -Butterfly.steepDown, Butterfly.steepUp) }
             elevation += Butterfly.wobble * noise1(time * 0.15, wander)
-            want = atan2(-sin(elevation), (d.x >= 0 ? 1 : -1) * cos(elevation))
+            let side: Double = d.x >= 0 ? 1 : -1
+            want = atan2(-sin(elevation), side * cos(elevation))
         }
         if climb > 0 { want = tilted(want, climb) }
         if bound != 0 { want = tilted(want, bound * sp.boundAngle) }
@@ -305,7 +310,8 @@ public final class Butterfly {
         let pushing = push.x != 0 || push.y != 0
         if pushing {
             let w: SIMD2<Double> = push / (7 * margin)
-            want = atan2(sin(want) + 2 * w.y, cos(want) + 2 * w.x)
+            let sy: Double = sin(want) + 2 * w.y, sx: Double = cos(want) + 2 * w.x
+            want = atan2(sy, sx)
             if target == nil && !wasPushing {
                 pickWaypoint(terrain, random, from: p, span: span, away: atan2(push.y, push.x))
             }
@@ -317,7 +323,9 @@ public final class Butterfly {
         let aim: Double = gliding ? glideAngle : want + jink
         jink *= exp(-dt / Butterfly.jinkRelax)
         let k: Double = sp.headingK
-        turnRate += (k * angleDiff(heading, aim) - 2 * sp.headingZeta * k.squareRoot() * turnRate) * dt
+        let spring: Double = k * angleDiff(heading, aim)
+        let damping: Double = 2 * sp.headingZeta * k.squareRoot() * turnRate
+        turnRate += (spring - damping) * dt
         turnRate = clamp(turnRate, -Butterfly.maxTurn, Butterfly.maxTurn)
         heading = fmod(fmod(heading + turnRate * dt, TAU) + TAU, TAU)
         var hx: Double = cos(heading), hy: Double = sin(heading)
@@ -327,8 +335,9 @@ public final class Butterfly {
         let low: Bool = target == nil && y > waypoint.y + 2 * span
         if gliding {
             glideLeft -= dt
-            let ending = glideLeft <= 0
-                || (!held && (cos(want) * glideSense < 0 || pushing || low || state != .fly || !far))
+            let turnedBack: Bool = cos(want) * glideSense < 0
+            let interrupted: Bool = turnedBack || pushing || low || state != .fly || !far
+            let ending: Bool = glideLeft <= 0 || (!held && interrupted)
             if ending {
                 gliding = false
                 held = false
@@ -363,7 +372,8 @@ public final class Butterfly {
                         // of tilt at once, heading and airspeed together.
                         bound = -bound
                         boundLeft = random.int(sp.boundBeats.lowerBound, sp.boundBeats.upperBound)
-                        let kick: Double = -(hx >= 0 ? 1 : -1) * 2 * sp.boundAngle * bound
+                        let side: Double = hx >= 0 ? 1 : -1
+                        let kick: Double = -side * 2 * sp.boundAngle * bound
                         let c: Double = cos(kick), sn: Double = sin(kick)
                         (ux, uy) = (ux * c - uy * sn, ux * sn + uy * c)
                         heading = fmod(fmod(heading + kick, TAU) + TAU, TAU)

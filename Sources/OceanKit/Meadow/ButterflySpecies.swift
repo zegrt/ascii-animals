@@ -103,7 +103,11 @@ public struct ButterflySpecies: Sendable {
     /// Lift on the downstroke, a_up = L·sin θ while sin θ > 0. The half-wave-rectified lift drives the bob at the
     /// beat frequency with amplitude L/2, so L ≈ 2·bob·(2πf)². Drag damps the bob a little and the forward tilt of
     /// the lift takes a little off; `liftTrim` is where that lands the measured bob on the table's value.
-    public var lift: Double { 2 * bobRows * 19 * pow(TAU * beat, 2) * ButterflySpecies.liftTrim }
+    public var lift: Double {
+        let w: Double = TAU * beat
+        let bob: Double = 2 * bobRows * 19
+        return bob * (w * w) * ButterflySpecies.liftTrim
+    }
     /// Gravity, set so lift averages to it over a beat: mean(max(sin θ, 0)) = 1/π.
     public var gravity: Double { lift / .pi }
     /// The forward lurch at the clap, pt/s per beat, as a fraction of cruise.
