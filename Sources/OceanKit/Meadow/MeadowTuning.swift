@@ -36,7 +36,8 @@ public struct MeadowTuning: Equatable, Sendable {
     /// `count`, 1…12: butterflies on the meadow at once (per scene; `areaCount` is off at the director's settings).
     public var count = 7
     /// `areaCount` (html:204): scale the count by screen area (`wantedCount`, html:1382). Off at the director's
-    /// settings; the app turns it on (m8), so `count` is the number on a laptop screen.
+    /// settings; the app turns it on (m8), so `count` is the number on a laptop screen (at most
+    /// `areaCountLimit` in a scene).
     public var areaCount = false
     /// `sizeLow`, 0.2…1.5, and `sizeHigh`, 0.4…2.5: drawn size at ground level and at the top of the flight
     /// (`depthScale`, html:2016). Size up is never below size down.
@@ -100,12 +101,18 @@ public struct MeadowTuning: Equatable, Sendable {
     /// The director's settings: the sketch's defaults.
     public static let director = MeadowTuning()
 
-    /// The screen the count is for (the sketch's 1440 × 900, html:1382).
-    public static let areaCountReference = 1440.0 * 900.0
+    /// The screen the count is for: the director's laptop, 1800 × 1169 points, where the 7 was tuned (board,
+    /// 2026-11-21; the sketch's is 1440 × 900, html:1382), so that screen shows exactly the chosen count.
+    public static let areaCountReference = 1800.0 * 1169.0
+
+    /// The most butterflies in one scene with `areaCount` on, however many screens it spans (the director, 2026-11-21:
+    /// "Scale, but cap at 12 total"), so the Meadow stays within Web's CPU.
+    public static let areaCountLimit = 12
 
     /// `wantedCount` with `areaCount` on, for one screen of `width × height` points: the count in proportion to the
-    /// screen's area, rounded, at most 24 (html:1382). The port's difference: a screen smaller than the reference keeps
-    /// the count, so the small previews (Settings, About) show the line-up itself.
+    /// screen's area, rounded, at most 24 (html:1382); the scene then holds at most `areaCountLimit` in all. The
+    /// port's difference: a screen smaller than the reference keeps the count, so the small previews (Settings,
+    /// About) show the line-up itself.
     public static func areaCount(_ count: Int, width: Double, height: Double) -> Int {
         let area: Double = width * height
         guard area.isFinite, area > 0 else { return count }

@@ -38,7 +38,8 @@ public struct Settings: Codable, Equatable, Sendable {
     public var webJumper = true
     /// The Meadow's species that are on, in `ButterflyKind` order (at least one).
     public var meadowButterflies: [ButterflyKind] = ButterflyKind.allCases
-    /// How many butterflies on a laptop screen, 1…12; a bigger display gets more by area (`MeadowTuning.areaCount`).
+    /// How many butterflies on a laptop screen, 1…12; a bigger display gets more by area, up to 12 in all
+    /// (`MeadowTuning.areaCount`, `areaCountLimit`).
     public var meadowCount = 7
     /// The Meadow has been picked once: its "New" tag in the menu goes.
     public var meadowTried = false

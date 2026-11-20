@@ -163,11 +163,34 @@ func settingsChecks() {
         try expect(line(ButterflyKind.allCases, 2) == "1monarch 1morpho", "fewer than species")
     }
     check("meadowCountByArea") {
+        // The director's laptop (1800 × 1169) shows exactly the chosen count, every count.
+        let exact: [Int] = (1...12).map { (n: Int) -> Int in MeadowTuning.areaCount(n, width: 1800, height: 1169) }
+        try expect(exact == Array(1...12), "director's laptop \(exact)")
+        let air: Int = MeadowTuning.areaCount(7, width: 1470, height: 956)
         let laptop: Int = MeadowTuning.areaCount(7, width: 1440, height: 900)
         let big: Int = MeadowTuning.areaCount(7, width: 2560, height: 1440)
         let small: Int = MeadowTuning.areaCount(7, width: 900, height: 324)
         let huge: Int = MeadowTuning.areaCount(12, width: 6016, height: 3384)
-        try expect(laptop == 7 && big == 20 && small == 7 && huge == 24, "laptop \(laptop) big \(big) small \(small) huge \(huge)")
+        try expect(air == 7 && laptop == 7 && big == 12 && small == 7 && huge == 24, "air \(air) laptop \(laptop) big \(big) small \(small) huge \(huge)")
+        try expect(MeadowTuning.areaCountLimit == 12, "limit \(MeadowTuning.areaCountLimit)")
+        // A scene never holds more than 12 in all, on any desk, at any count.
+        let desks: [[CGRect]] = [
+            [CGRect(x: 0, y: 0, width: 1800, height: 1169)],
+            [CGRect(x: 0, y: 0, width: 6016, height: 3384)],
+            [CGRect(x: 0, y: 0, width: 2560, height: 1440), CGRect(x: 375, y: 1440, width: 1800, height: 1169)],
+            [CGRect(x: 0, y: 0, width: 1800, height: 1169), CGRect(x: 1800, y: 0, width: 1800, height: 1169), CGRect(x: 3600, y: 0, width: 1800, height: 1169)],
+        ]
+        for rects in desks {
+            for n in [1, 3, 7, 12] {
+                var d = Settings.defaults
+                d.habitat = .meadow; d.meadowCount = n
+                let ds = MeadowSim(settings: d, seed: 5)
+                ds.layout(terrain: Terrain(rects: rects), cell: CGSize(width: 13, height: 19), settings: d)
+                let got: Int = ds.world.flies.count
+                let one: Bool = rects.count == 1 && rects[0].width == 1800
+                try expect(got <= 12 && got >= min(n, 12) && (!one || got == n), "\(rects.count) screens, count \(n): \(got)")
+            }
+        }
         // The app's sim: the settings reach the tuning, and a shared scene counts each screen by its own area.
         var s = Settings.defaults
         s.habitat = .meadow; s.meadowButterflies = [.morpho]; s.meadowCount = 5; s.interaction = false
@@ -177,11 +200,19 @@ func settingsChecks() {
         let screens = [CGRect(x: 0, y: 0, width: 2560, height: 1440), CGRect(x: 375, y: 1440, width: 1440, height: 900)]
         sim.layout(terrain: Terrain(rects: screens), cell: CGSize(width: 13, height: 19), settings: s)
         let n: Int = sim.world.flies.count
-        try expect(n == 14 + 5 && sim.world.flies.allSatisfy { $0.kind == .morpho }, "flies \(n)")
+        // 9 + 5 by area, held to 12 in all.
+        try expect(n == 12 && sim.world.flies.allSatisfy { $0.kind == .morpho }, "flies \(n)")
+        // Below the cap the scene holds each screen's share: 3 → 5 + 3.
+        var few = s
+        few.meadowCount = 3
+        let fewSim = MeadowSim(settings: few, seed: 3)
+        fewSim.layout(terrain: Terrain(rects: screens), cell: CGSize(width: 13, height: 19), settings: few)
+        let fewN: Int = fewSim.world.flies.count
+        try expect(fewN == 5 + 3, "count 3 over two screens: \(fewN)")
         s.meadowButterflies = [.monarch, .white]
         sim.update(settings: s)
         let active = sim.world.flies.filter { !$0.leaving }
-        try expect(active.count == 19 && active.allSatisfy { $0.kind != .morpho }, "after a new line-up: \(active.map(\.kind))")
+        try expect(active.count == 12 && active.allSatisfy { $0.kind != .morpho }, "after a new line-up: \(active.map(\.kind))")
     }
     check("settingsRoundTrip") {
         var s = Settings.defaults

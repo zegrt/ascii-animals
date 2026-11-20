@@ -463,7 +463,7 @@ private struct MeadowSection: View {
                 }
             } label: {
                 Text("How many")
-                Text("On a laptop screen. A bigger display gets more in proportion.")
+                Text("On a laptop screen. Bigger displays get more, up to 12 in all.")
             }
             SpeedRow(model: model)
         } header: {

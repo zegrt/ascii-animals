@@ -468,12 +468,13 @@ public final class MeadowWorld {
     }
 
     /// The count on the meadow (`wantedCount`, html:1382; the director's settings have area scaling off). With
-    /// `areaCount` on, each screen counts by its own area (`MeadowTuning.areaCount`) and the scene holds their sum.
+    /// `areaCount` on, each screen counts by its own area (`MeadowTuning.areaCount`) and the scene holds their sum,
+    /// at most `MeadowTuning.areaCountLimit` across all its screens.
     var wantedCount: Int {
         guard tuning.areaCount, !screens.isEmpty else { return tuning.count }
         var n = 0
         for s in screens { n += MeadowTuning.areaCount(tuning.count, width: s.w, height: s.h) }
-        return n
+        return min(MeadowTuning.areaCountLimit, n)
     }
 
     /// `syncFlies(initial)` (html:1386–1446): keeps the number to the setting and the species mix even. At load they
