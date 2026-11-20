@@ -38,7 +38,11 @@ final class OceanDirector {
     func start() {
         screensChanged()
         apply(PowerPolicy.mode(signals.inputs))
+        started = true
     }
+
+    /// Set once `start` has laid out the first screens: later layouts are display changes (attach, detach, resize).
+    private var started = false
 
     // MARK: Policy
 
@@ -52,20 +56,18 @@ final class OceanDirector {
         mode = newMode
         // Stopped animating mid-switch: finish it at once (Review Focus 1).
         if dissolve != nil, !Dissolve.shouldAnimate(newMode) { finishSwitch() }
-        switch newMode {
-        case .live(let fps):
-            for s in screens { s.stillPending = false; s.setFrameRate(fps); s.setRunning(true) }
-        case .still:
-            for s in screens { s.stillPending = true; s.setFrameRate(PowerPolicy.economyFPS); s.setRunning(true) }
-        case .paused:
-            // Do no work, except a still owed to a user pause (see showChangeIfHeld),
-            // drawn once its screen is visible. Covered, locked or asleep: drop
-            // any still left over from `.still`; the next visible mode draws.
-            let owed = Dissolve.drawsStillNow(newMode, userPaused: signals.inputs.userPaused)
-            for s in screens {
-                if !owed { s.stillPending = false }
-                s.setRunning(owed && s.stillPending)
+        // Paused: do no work, except a still owed to a user pause (see showChangeIfHeld), drawn once its screen is
+        // visible. Covered, locked or asleep: drop any still left over from `.still`; the next visible mode draws.
+        let userPaused = signals.inputs.userPaused
+        for s in screens {
+            let link = HeldFrame.link(newMode, stillPending: s.stillPending, userPaused: userPaused)
+            s.stillPending = link.stillPending
+            switch newMode {
+            case .live(let fps): s.setFrameRate(fps)
+            case .still: s.setFrameRate(PowerPolicy.economyFPS)
+            case .paused: break
             }
+            s.setRunning(link.running)
         }
         updatePointer()
     }
@@ -168,7 +170,17 @@ final class OceanDirector {
         if OceanDirector.debug {
             NSLog("scenes: %@", scenes.map { "\($0.screenIDs.sorted()) rects=\($0.plan.terrain.rects.count) \($0.sim.kind)" }.joined(separator: " | "))
         }
-        apply(mode == .paused ? PowerPolicy.mode(signals.inputs) : mode)
+        let next: RunMode = mode == .paused ? PowerPolicy.mode(signals.inputs) : mode
+        // A display change the held frame must show (attach, detach, resize while paused by the user, or a Low Power
+        // or Reduce Motion still): every screen owes a settled still, so the paused desktop shows the settled scenes
+        // (the Meadow's new shares), not stale frames. The first layout at launch is not a change.
+        if started {
+            let userPaused = signals.inputs.userPaused
+            for s in screens {
+                s.stillPending = HeldFrame.stillPending(afterDisplayChange: next, was: s.stillPending, userPaused: userPaused)
+            }
+        }
+        apply(next)
     }
 
     private func report(_ error: Error) {

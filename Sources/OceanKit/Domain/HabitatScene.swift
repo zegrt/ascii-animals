@@ -115,4 +115,10 @@ public final class SceneDesk {
 
     /// The sims on the desk now, in the order they joined.
     public var sims: [HabitatSim] { members.compactMap { $0.sim as? HabitatSim } }
+
+    /// `body` for each sim on the desk now, in the order they joined, without allocating (`sims` builds an array;
+    /// a scene asks this on every step).
+    public func forEachSim(_ body: (HabitatSim) -> Void) {
+        for m in members { if let s = m.sim as? HabitatSim { body(s) } }
+    }
 }

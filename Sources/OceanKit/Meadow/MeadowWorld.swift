@@ -909,8 +909,9 @@ public final class MeadowWorld {
         var anyDead = false
         for b in flies where b.dead { anyDead = true; releaseFlower(b) }
         if anyDead { flies.removeAll { $0.dead } }
-        // With `areaCount` on (the app): newcomers that waited for room on the desk come in once there is.
-        if tuning.areaCount && !screens.isEmpty && flies.count < drawLimit && shortOfCount { syncFlies() }
+        // With `areaCount` on (the app): newcomers that waited for room on the desk come in once there is. The
+        // shortage first: the desk's room is asked only while some are waiting.
+        if tuning.areaCount && !screens.isEmpty && shortOfCount && flies.count < drawLimit { syncFlies() }
         stepDust(dt)
     }
 

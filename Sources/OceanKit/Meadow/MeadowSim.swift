@@ -83,9 +83,12 @@ public final class MeadowSim: CellPainter {
     /// The most butterflies this scene may draw now, its own leaving ones included: the desk's 12 less every butterfly
     /// the desk's other scenes draw, theirs on the way out included (the director's "never more than 12 across all
     /// screens", during changes too). Alone, 12.
+    /// Asked on every step while newcomers wait, so it walks the desk without allocating.
     var room: Int {
         var drawn = 0
-        for m in others { drawn += m.world.flies.count }
+        desk?.forEachSim { (s: HabitatSim) in
+            if s !== self, let m = s as? MeadowSim { drawn += m.world.flies.count }
+        }
         return max(0, MeadowTuning.areaCountLimit - drawn)
     }
 

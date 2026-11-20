@@ -44,12 +44,21 @@ nonisolated(unsafe) private let mallocCount: UnsafeMutablePointer<Int> = {
 }()
 @inline(never) private func mallocCounter() -> UnsafeMutablePointer<Int> { mallocCount }
 
+// Only the thread that called `allocations` is counted: the count measures the Meadow's own frame work, so a system
+// thread allocating meanwhile (CoreText's, the runtime's) can't fail a check (m8 fix round 4, the manager's ruling).
+// Set while counting: the counting thread, as a bit pattern.
+nonisolated(unsafe) private let countingThread: UnsafeMutablePointer<UInt> = {
+    let p = UnsafeMutablePointer<UInt>.allocate(capacity: 1)
+    p.pointee = 0
+    return p
+}()
+
 // Where counted allocations came from, kept without allocating (a fixed buffer, filled from the logger): the first
 // `traceSlots` of them since the last `allocationSites()`, each with its thread and up to `traceDepth` return
 // addresses. Read only to explain a failure; it changes no count.
 private let traceSlots = 8, traceDepth = 24
 nonisolated(unsafe) private let traceState: UnsafeMutablePointer<Int> = {
-    // [0] traces kept, [1] logger busy, [2] counted off the main thread, then per slot: main?, depth.
+    // [0] traces kept, [1] logger busy, [2] seen on other threads (not counted), then per slot: main?, depth.
     let p = UnsafeMutablePointer<Int>.allocate(capacity: 3 + 2 * 8)
     p.initialize(repeating: 0, count: 3 + 2 * 8)
     return p
@@ -62,7 +71,6 @@ nonisolated(unsafe) private let traceFrames: UnsafeMutablePointer<UnsafeMutableR
 @inline(never) private func noteAllocation() {
     let st = traceState
     let main = pthread_main_np() != 0
-    if !main { st[2] += 1 }
     let k = st[0]
     guard k < traceSlots, st[1] == 0 else { return }
     st[1] = 1
@@ -72,14 +80,20 @@ nonisolated(unsafe) private let traceFrames: UnsafeMutablePointer<UnsafeMutableR
     st[1] = 0
 }
 private let countingLogger: MallocLogger = { type, _, _, _, _, _ in
-    if type & 2 != 0 { mallocCounter().pointee += 1; noteAllocation() }
+    guard type & 2 != 0 else { return }
+    if UInt(bitPattern: pthread_self()) == countingThread.pointee {
+        mallocCounter().pointee += 1
+        noteAllocation()
+    } else {
+        traceState[2] += 1  // another thread's: a tally for the report, racy and never counted
+    }
 }
 
-/// The allocations counted since the last call: how many off the main thread, and where the first few were made
-/// (thread, then the frames past the allocator, as symbol+offset). Clears what it read.
+/// The allocations counted since the last call: where the first few were made (thread, then the frames past the
+/// allocator, as symbol+offset), and how many other threads made meanwhile (not counted). Clears what it read.
 func allocationSites() -> String {
     let st = traceState
-    var out = "\(st[2]) off the main thread"
+    var out = "\(st[2]) on other threads (not counted)"
     for k in 0..<min(st[0], traceSlots) {
         out += "\n    allocation \(k + 1) (\(st[3 + 2 * k] == 1 ? "main thread" : "another thread")):"
         var shown = 0
@@ -101,6 +115,9 @@ func allocationSites() -> String {
     return out
 }
 
+/// Allocations seen since the last `allocationSites()` that were not counted (made on other threads); clears nothing.
+func allocationsElsewhere() -> Int { traceState[2] }
+
 /// Heap allocations `body` makes, or nil where the allocator can't be watched.
 func allocations(_ body: () -> Void) -> Int? {
     guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "malloc_logger") else { return nil }
@@ -108,9 +125,11 @@ func allocations(_ body: () -> Void) -> Int? {
     guard slot.pointee == nil else { return nil }
     _ = mallocCounter()
     mallocCount.pointee = 0
+    countingThread.pointee = UInt(bitPattern: pthread_self())
     slot.pointee = countingLogger
     body()
     slot.pointee = nil
+    countingThread.pointee = 0
     return mallocCount.pointee
 }
 

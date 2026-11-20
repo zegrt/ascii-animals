@@ -23,6 +23,7 @@ meadowWorldChecks()
 meadowFixChecks()
 meadowFix2Checks()
 meadowFix3Checks()
+meadowFix4Checks()
 // CI runners have no GPU: OCEAN_SKIP_GPU=1 skips the Metal checks.
 if ProcessInfo.processInfo.environment["OCEAN_SKIP_GPU"] == nil {
     renderChecks()
