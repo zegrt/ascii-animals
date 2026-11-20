@@ -371,7 +371,7 @@ Pushed and clean: not pushed (the brief says do not push); folder clean after th
 
 Status: done with concerns
 Board commit: 0ec3e80
-Commit: see `git log meadow-mp` (the commit that adds this section)
+Commit: 0525235 (the work; this line is filled in by the next commit)
 Files changed: Sources/OceanKit/Meadow/MeadowWorld.swift (`signedOutside`, a `walls` copy),
 Sources/OceanKit/Meadow/MeadowProbes.swift (one probe), Sources/OceanChecks/MeadowChecks.swift (the allocation
 helper now records where counted allocations came from), Sources/OceanChecks/MeadowFixChecks.swift (prints that
