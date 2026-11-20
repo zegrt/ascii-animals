@@ -58,6 +58,8 @@ public final class Breeze {
     // Float32Arrays are, so a replay rounds the same way.
     public private(set) var spacing = 48.0
     private var originX = 0.0, originY = 0.0
+    /// Where grid sample (0, 0) lies (the terrain's top-left), pt: for the painter, which reads the fields per sample.
+    public var origin: SIMD2<Double> { SIMD2(originX, originY) }
     public private(set) var columns = 0
     public private(set) var rows = 0
     private var pfx: [Float] = [], pfy: [Float] = []
@@ -176,11 +178,16 @@ public final class Breeze {
         let swing: Double = W.baseMean + W.baseSwing * MeadowMath.n1(t * W.baseRate, W.baseNoise)
         base = W.baseSpeed * unit * tuning.breeze * swing
         let k: Double = exp(-MeadowTuning.Stir.decay * dt)
-        for i in 0..<pfx.count {
-            pfx[i] = Float(Double(pfx[i]) * k)
-            pfy[i] = Float(Double(pfy[i]) * k)
-            dwx[i] = Float(Double(dwx[i]) * k)
-            dwy[i] = Float(Double(dwy[i]) * k)
+        // The same decay, element by element, through buffer pointers (one access per field per step, not per sample).
+        Breeze.decay(&pfx, k)
+        Breeze.decay(&pfy, k)
+        Breeze.decay(&dwx, k)
+        Breeze.decay(&dwy, k)
+    }
+
+    private static func decay(_ a: inout [Float], _ k: Double) {
+        a.withUnsafeMutableBufferPointer { p in
+            for i in 0..<p.count { p[i] = Float(Double(p[i]) * k) }
         }
     }
 

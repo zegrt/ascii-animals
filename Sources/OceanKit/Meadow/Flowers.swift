@@ -474,6 +474,16 @@ public final class Flowers {
         if let i = index(of: id) { all[i].feeding = on }
     }
 
+    /// Replaces every flower (the sketch's `?sheet=flowers` lays out one of each kind for a close look; a tool aid,
+    /// html:3057–3060).
+    public func showOnly(_ list: [Flower]) { all = list }
+
+    /// Every flower's feeding flag at once, for this step's lift (the sketch's `stepFlowers` asks the butterflies,
+    /// html:960): `fed(id)` says whether a butterfly is feeding on flower `id`.
+    public func updateFeeding(_ fed: (Int) -> Bool) {
+        for i in all.indices { all[i].feeding = fed(all[i].id) }
+    }
+
     // ── clicks ──
 
     /// `clickAt(x, y)`'s flower part (html:890–914): on or near a bloom (within about its drawn radius, from the head

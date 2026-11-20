@@ -96,6 +96,8 @@ struct SettingsView: View {
                     OceanSection(model: model)
                 case .web:
                     WebSection(model: model)
+                case .meadow:
+                    EmptyView()   // Not offered yet (HabitatKind.offered).
                 }
                 LookSection(model: model)
                 BehaviourSection(model: model)
@@ -178,7 +180,7 @@ private struct PreviewHeader: View {
             || (model.s.appearance == .system && NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) != .darkAqua)
         switch model.s.habitat {
         case .ocean: return light ? Color(white: 0.96) : Color(white: 0.02)
-        case .web: return light ? Color(red: 247 / 255, green: 246 / 255, blue: 243 / 255) : .black
+        case .web, .meadow: return light ? Color(red: 247 / 255, green: 246 / 255, blue: 243 / 255) : .black
         }
     }
 }
@@ -192,7 +194,7 @@ private struct HabitatSection: View {
         Section {
             LabeledContent("Habitat") {
                 Picker("Habitat", selection: model.binding(\.habitat)) {
-                    ForEach(HabitatKind.allCases, id: \.self) { Text($0.title).tag($0) }
+                    ForEach(HabitatKind.offered, id: \.self) { Text($0.title).tag($0) }
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)

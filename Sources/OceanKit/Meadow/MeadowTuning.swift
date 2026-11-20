@@ -11,7 +11,8 @@ import Foundation
 /// and the checks and the replay fixture may set others. The nested enums hold the sketch's constants. Each rule is
 /// written here as the sketch runs it; where the port runs a rule differently, the comment says so and why.
 ///
-/// Later tasks add their sliders and constants here.
+/// The flight, the behaviours and the painter (task mp) keep their constants beside the code that uses them, each
+/// with its `html:N` line, since they are the sketch's own expressions copied term for term; their sliders are here.
 public struct MeadowTuning: Equatable, Sendable {
     // ── the director's slider settings (html:200–315, the defaults of 2026-11-20) ──
 
@@ -31,6 +32,66 @@ public struct MeadowTuning: Equatable, Sendable {
     /// `clickLimit`, 1…30 (html:268): clicked flowers kept; beyond it the oldest closes and fades.
     public var clickLimit = 12
 
+    // Butterflies (html:201–210).
+    /// `count`, 1…12: butterflies on the meadow at once (per scene; `areaCount` is off at the director's settings).
+    public var count = 7
+    /// `sizeLow`, 0.2…1.5, and `sizeHigh`, 0.4…2.5: drawn size at ground level and at the top of the flight
+    /// (`depthScale`, html:2016). Size up is never below size down.
+    public var sizeLow = 0.75
+    public var sizeHigh = 1.4
+    /// `species`: which are on (all four at the director's settings), in `ButterflyKind` order.
+    public var species: [Bool] = [true, true, true, true]
+    // Flight (html:212–233).
+    /// `wingbeat`, 0.1…1: share of the real wingbeat (capped at `Flight.beatCap`).
+    public var wingbeat = 0.5
+    /// `lurch`, 0…3: the push forward each downstroke gives.
+    public var lurch = 2.0
+    /// `zigzag`, 0…3: jinks and side-slips at each wingbeat.
+    public var zigzag = 1.29
+    /// `glide`, 0…3: how often and how long they glide.
+    public var glide = 0.1
+    /// `speed`, 0.3…3: travel speed (1 is the measured cruise at screen scale).
+    public var speed = 2.0
+    /// `turning`, 0.2…2: how quickly they swing round to face where they fly.
+    public var turning = 1.23
+    /// `bob`, 0…3: the rise on each downstroke.
+    public var bob = 1.0
+    /// `height`, 0…1: time spent high vs low.
+    public var height = 0.5
+    /// `ease`, 0…3: soft take-off and landing (0: the snap of round 2).
+    public var ease = 1.0
+    // Visits and wants (html:234–250).
+    public var visits = 0.35
+    public var stay = 0.25
+    public var bask = 0.2
+    public var hunger = 1.0
+    public var warmth = 1.0
+    /// `sense`, 3…30 wingspans.
+    public var sense = 12.0
+    public var touchGo = 0.25
+    // Temperament and the air (html:251–262).
+    public var boldness = 1.0
+    /// pt/s at a 13-pt cell.
+    public var airClose = 60.0
+    public var airFlush = 120.0
+    public var relay = 0.6
+    public var spaceByHeight = true
+    // Your pointer (html:263–272).
+    /// `cursorLand`: hold the pointer still and one lands on it (m8 ties it to the app's interaction setting).
+    public var cursorLand = true
+    /// `holdTime`, 1…10 s: how long the pointer stays still before one comes.
+    public var holdTime = 3.0
+    /// `answerGap`, 0…20 s: one butterfly answers a fresh bloom at most this often.
+    public var answerGap = 5.0
+    // Small life (html:273–276).
+    public var life = 1.0
+    // Air and ground, look (html:291–306).
+    public var shadow = 1.0
+    public var green = 0.69
+    public var grass = 1.0
+    public var depth = 1.0
+    public var sparkle = 1.0
+
     public init() {}
 
     /// The director's settings: the sketch's defaults.
@@ -49,6 +110,38 @@ public struct MeadowTuning: Equatable, Sendable {
         t.flowerSize = fit(flowerSize, 0.4, 2, d.flowerSize)
         t.leaves = fit(leaves, 0, 2, d.leaves)
         t.clickLimit = min(30, max(1, clickLimit))
+        t.count = min(12, max(1, count))
+        t.sizeLow = fit(sizeLow, 0.2, 1.5, d.sizeLow)
+        t.sizeHigh = max(t.sizeLow, fit(sizeHigh, 0.4, 2.5, d.sizeHigh))
+        t.species = (0..<4).map { $0 < species.count ? species[$0] : true }
+        t.wingbeat = fit(wingbeat, 0.1, 1, d.wingbeat)
+        t.lurch = fit(lurch, 0, 3, d.lurch)
+        t.zigzag = fit(zigzag, 0, 3, d.zigzag)
+        t.glide = fit(glide, 0, 3, d.glide)
+        t.speed = fit(speed, 0.3, 3, d.speed)
+        t.turning = fit(turning, 0.2, 2, d.turning)
+        t.bob = fit(bob, 0, 3, d.bob)
+        t.height = fit(height, 0, 1, d.height)
+        t.ease = fit(ease, 0, 3, d.ease)
+        t.visits = fit(visits, 0, 1, d.visits)
+        t.stay = fit(stay, 0, 1.5, d.stay)
+        t.bask = fit(bask, 0, 1, d.bask)
+        t.hunger = fit(hunger, 0, 3, d.hunger)
+        t.warmth = fit(warmth, 0, 3, d.warmth)
+        t.sense = fit(sense, 3, 30, d.sense)
+        t.touchGo = fit(touchGo, 0, 0.8, d.touchGo)
+        t.boldness = fit(boldness, 0, 1, d.boldness)
+        t.airClose = fit(airClose, 20, 200, d.airClose)
+        t.airFlush = fit(airFlush, 40, 400, d.airFlush)
+        t.relay = fit(relay, 0, 1, d.relay)
+        t.holdTime = fit(holdTime, 1, 10, d.holdTime)
+        t.answerGap = fit(answerGap, 0, 20, d.answerGap)
+        t.life = fit(life, 0, 3, d.life)
+        t.shadow = fit(shadow, 0, 1.5, d.shadow)
+        t.green = fit(green, 0, 2.5, d.green)
+        t.grass = fit(grass, 0, 2, d.grass)
+        t.depth = fit(depth, 0, 2, d.depth)
+        t.sparkle = fit(sparkle, 0, 3, d.sparkle)
         return t
     }
 

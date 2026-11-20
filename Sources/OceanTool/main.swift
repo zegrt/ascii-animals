@@ -1,14 +1,17 @@
 // OceanTool: offline renders.
 //   OceanTool still <out.png> <W>x<H> [--scale N] [--light] [--calm] [--seed N] [--warmup S] [--sharks a,b,c]
-//                   [--habitat ocean|web] [--spiders a,b] [--live]
+//                   [--habitat ocean|web|meadow] [--spiders a,b] [--live]
 //   OceanTool iconset <dir.iconset>
 //   OceanTool frames <dir> <W>x<H> [--seconds S] [--fps F] [--scale N] [--light] [--calm] [--seed N] [--sharks a,b]
-//                    [--habitat ocean|web] [--spiders a,b] [--warmup S] [--interact]
+//                    [--habitat ocean|web|meadow] [--spiders a,b] [--warmup S] [--interact]
 //     --interact (Web): the parity script (WebScript.swift): the pointer drawn through the near web, a click
 //     dropping a fly on it, the pointer held still near the jumper.
 //   OceanTool bench [--habitat ocean|web]
-//   OceanTool bench --desk [--habitat ocean|web] [--separate] [--laptop WxH] [--density D] [--seconds S]
+//   OceanTool bench --desk [--habitat ocean|web|meadow] [--separate] [--laptop WxH] [--density D] [--seconds S]
 //     CPU per second on the owner's desk (Bench.swift): both viewports drawn as the app draws them, at 30 and 15 fps.
+//   OceanTool meadow-sheet <out.png> <W>x<H> --sheet flowers|flies [--z Z] [--light] [--calm] [--seed N] [--scale N]
+//     The Meadow sketch's ?sheet=flowers|flies at the same seed and size: one bloom of each kind, or each species at
+//     four wing phases at height Z (default 0.5), drawn at load.
 //   OceanTool meadow-air <out.png> <W>x<H> [--seed N] [--seconds S] [--under sketch.png] [--stir]
 //     The Meadow's planting and air (MeadowAir.swift): the port's flowers outlined over the sketch's own render at the
 //     same seed and size, beside the port's air field.
@@ -117,6 +120,29 @@ case "meadow-air":
     guard seconds.isFinite && seconds >= 0 && seconds <= 600 else { fail("--seconds must be 0…600") }
     try MeadowAir.run(out: URL(fileURLWithPath: args[0]), size: CGSize(width: dims[0], height: dims[1]), seed: seed,
                       seconds: seconds, under: under, stir: stir)
+
+case "meadow-sheet":
+    var s = Settings.defaults
+    s.habitat = .meadow
+    if flag("--light") { s.appearance = .light }
+    if flag("--calm") { s.calm = true }
+    let seed = UInt64(option("--seed") ?? "4242") ?? 4242
+    let scale = CGFloat(Double(option("--scale") ?? "1") ?? 1)
+    let z = Double(option("--z") ?? "0.5") ?? 0.5
+    guard let sheet = option("--sheet").flatMap(MeadowWorld.Sheet.init(rawValue:)) else { fail("--sheet flowers|flies") }
+    guard args.count == 2 else { fail("usage: OceanTool meadow-sheet <out.png> <W>x<H> --sheet flowers|flies") }
+    let dims = args[1].split(separator: "x").compactMap { Double($0) }
+    guard dims.count == 2, dims.allSatisfy({ $0.isFinite && $0 >= 16 && $0 <= 8192 }), z.isFinite, z >= 0, z <= 1 else { fail("bad size or --z") }
+    let size = CGSize(width: dims[0], height: dims[1])
+    let cell = GridSpec.cell(forWidth: size.width)
+    let sim = MeadowSim(settings: s.sanitized(), seed: seed)
+    sim.layout(terrain: .single(width: size.width, height: size.height), cell: cell, settings: s)
+    sim.world.showSheet(sheet, z: z)
+    let theme = ThemeParams.make(s, systemIsDark: true, accent: SIMD3(0.2, 0.5, 1))
+    let rec = try SceneRecorder(habitat: sim, viewports: [CGRect(origin: .zero, size: size)], cell: cell, scale: scale, theme: theme)
+    guard let img = try rec.capture().first else { fail("no image") }
+    try StillRenderer.writePNG(img, to: URL(fileURLWithPath: args[0]))
+    print("wrote \(args[0]) \(img.width)x\(img.height)")
 
 case "iconset":
     guard args.count == 1 else { fail("usage: OceanTool iconset <dir.iconset>") }
