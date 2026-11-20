@@ -81,6 +81,8 @@ public final class MeadowWorld {
     /// Screens in different groups have no way between them (a gap, or only a corner).
     var groupOf: [Int] = []
     var groupCount = 0
+    /// The terrain's real edges, the world's own copy (read every step by `signedOutside`).
+    var walls: [Terrain.Edge] = []
     var single: Bool { screens.count == 1 }
 
     // Reused buffers (no allocation per step).
@@ -164,8 +166,10 @@ public final class MeadowWorld {
         wallLength = 0
         groupOf = []
         groupCount = 0
+        walls = []
         guard MeadowWorld.usable(terrain) else { return }
         screens = terrain.rects.map { r in Screen(minX: Double(r.minX), minY: Double(r.minY), w: Double(r.width), h: Double(r.height)) }
+        walls = terrain.edges
         screenArea = screens.reduce(0) { $0 + $1.w * $1.h }
         wallLength = terrain.edges.reduce(0) { $0 + $1.length }
         groupOf = [Int](repeating: -1, count: screens.count)
@@ -317,11 +321,25 @@ public final class MeadowWorld {
 
     /// The terrain's signed distance (`Terrain.signedOutside`: positive off the screens, minus the distance to the
     /// nearest real edge on them), the same numbers, without building an array (it runs every step for entrants).
+    /// It reads only the world's own copies (`screens`, `walls`): no copy of the terrain, no closure, no generic call.
     func signedOutside(_ x: Double, _ y: Double) -> Double {
         let p = SIMD2(x, y)
-        guard terrain.contains(p) else { return simd_length(p - terrain.nearestInside(p)) }
+        if screens.isEmpty { return terrain.signedOutside(p) }
+        if !onScreens(x, y) {
+            // The nearest point on the nearest screen (`Terrain.nearestInside`: the first screen at the least distance).
+            var k = 0
+            var bestD = Double.infinity
+            for (i, s) in screens.enumerated() {
+                let q = SIMD2(min(s.maxX, max(s.minX, x)), min(s.maxY, max(s.minY, y)))
+                let d: Double = simd_length_squared(p - q)
+                if d < bestD { bestD = d; k = i }
+            }
+            let s = screens[k]
+            let near = SIMD2(min(s.maxX, max(s.minX, x)), min(s.maxY, max(s.minY, y)))
+            return simd_length(p - near)
+        }
         var best = Double.infinity
-        for e in terrain.edges {
+        for e in walls {
             let d = e.b - e.a
             let t: Double = min(1, max(0, simd_dot(p - e.a, d) / max(simd_length_squared(d), 1e-12)))
             best = min(best, simd_length(p - (e.a + d * t)))

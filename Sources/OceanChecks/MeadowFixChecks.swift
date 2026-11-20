@@ -388,6 +388,7 @@ private func meadowClicksAllocateNothingLater() throws {
     // Warm: clicks every 20 frames for 1,500 frames (blooms, fades, evictions, the slots filled).
     for f in 0..<1500 { if f % 20 == 0 { click(f) }; frame() }
     var framesAfter = 0, inClicks = 0
+    _ = allocationSites()
     for round in 0..<12 {
         guard let n = allocations({ click(1500 + round) }) else {
             print("  (allocator not watchable here: skipped)")
@@ -398,6 +399,7 @@ private func meadowClicksAllocateNothingLater() throws {
         framesAfter += allocations({ for _ in 0..<150 { frame() } }) ?? 0
     }
     print("  12 clicks: \(inClicks) allocations in the clicks, \(framesAfter) in the 1,800 frames after them")
+    if framesAfter + inClicks > 0 { print("  where: \(allocationSites())") }
     try expect(framesAfter == 0, "\(framesAfter) allocations in the frames after clicks")
     try expect(inClicks == 0, "\(inClicks) allocations in the clicks themselves")
 }

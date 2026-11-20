@@ -4,6 +4,9 @@ import Foundation
 // review's probes did, so a check can hold the exact case that went wrong. Nothing in the app or the tool uses them.
 
 @_spi(Checks) extension MeadowWorld {
+    /// The world's own signed distance to the terrain (what the edge steer and the entry test read every step).
+    public func probeSignedOutside(x: Double, y: Double) -> Double { signedOutside(x, y) }
+
     /// Puts `b` at (x, y) flying at (vx, vy) pt/s, heading that way, with its waypoint ahead.
     public func probeFly(_ b: Butterfly, x: Double, y: Double, vx: Double, vy: Double) {
         if b.landed { takeOff(b) }
