@@ -149,10 +149,17 @@ function mulberry32(a) {
   return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
-let rnd = mulberry32(seed);
+// Two streams from the one seed: the meadow's own (planting, flight, the opening) and the one your input draws on
+// (clicks, the panel, resizing, pointer moves), so an edit or a click never shifts the meadow's draws: a seed with no
+// input replays the same flight. `rnd` is whichever stream is drawing; `ui(fn)` runs fn on the input stream.
+const simRnd = mulberry32(seed), uiRnd = mulberry32(seed ^ 0x5bd1e995);
+let rnd = simRnd;
+const ui = fn => function (...args) { const prev = rnd; rnd = uiRnd; try { return fn.apply(this, args); } finally { rnd = prev; } };
 const R = (a, b) => a + (b - a) * rnd();
 const RI = (a, b) => Math.floor(a + (b - a + 1) * rnd());
 function gauss() { const a = Math.max(rnd(), 1e-12), b = rnd(); return Math.sqrt(-2 * Math.log(a)) * Math.cos(TAU * b); }
+/** A seeded shuffle (Fisher–Yates), the same in every engine (a random sort comparator is not). */
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
 
 /** A stable hash of three integers to [0, 1). */
 function hash3(x, y, z) {
@@ -181,6 +188,8 @@ const SPECIES_LIST = [
 ];
 
 const f2 = v => (+v).toFixed(2), x2 = v => (+v).toFixed(2) + ' ×', sec = v => (+v).toFixed(1) + ' s';
+/** A stay in seconds as the display shows it: whole seconds, with the 0.8 s floor every landing keeps. */
+const stayS = s => s < 0.8 ? '0.8' : s < 1 ? s.toFixed(1) : String(Math.round(s));
 // Defaults: the director's settings of 2026-11-20 ("for now"): more travel and more vigour, then glide 0.1 (after
 // round 3). Every ↺ goes back to them.
 const CONTROLS = [
@@ -190,9 +199,9 @@ const CONTROLS = [
     { k: 'areaCount', type: 'toggle', label: 'Scale the count by screen area', def: false,
       hint: 'On: "How many" is for a 1440 × 900 laptop screen, and a bigger screen gets more in proportion.' },
     { k: 'sizeLow', label: 'Size down on the flowers', min: 0.2, max: 1.5, step: 0.01, def: 0.75, fmt: x2,
-      hint: 'Drawn size at ground level, as a share of the species size (a monarch is 22 cells across at 1 ×).' },
+      hint: 'Drawn size at ground level, as a share of the species size (a monarch is 22 cells across at 1 ×). Never above Size up close: raising it past that takes Size up along.' },
     { k: 'sizeHigh', label: 'Size up close', min: 0.4, max: 2.5, step: 0.01, def: 1.4, fmt: x2,
-      hint: 'Drawn size at the top of their flight, nearest you. The gap between the two is the depth.' },
+      hint: 'Drawn size at the top of their flight, nearest you. The gap between the two is the depth. Never below Size down: lowering it past that takes Size down along.' },
     { k: 'species', type: 'species', label: 'Species' },
   ] },
   { group: 'Flight', items: [
@@ -219,12 +228,12 @@ const CONTROLS = [
   ] },
   { group: 'Visits and wants', items: [
     { k: 'visits', label: 'Flower visits', min: 0, max: 1, step: 0.01, def: 0.35, fmt: f2,
-      hint: 'Chance they head for a flower when they arrive somewhere, rather than travel on. A hungry one is likelier, a full one less.' },
+      hint: 'Chance they head for a flower when they arrive somewhere, rather than travel on. A hungry one is likelier, a full one less. The opening scene is set whatever this is: one on a flower, one basking, one coming in to land.' },
     { k: 'stay', label: 'How long they stay', min: 0, max: 1.5, step: 0.01, def: 0.25,
-      fmt: v => x2(v) + ' · monarch ' + Math.round(10 * v) + '–' + Math.round(40 * v) + ' s',
-      hint: 'Share of the real time spent on a flower or basking (monarch 10–40 s at 1 ×), × each one\'s boldness.' },
+      fmt: v => x2(v) + ' · monarch ' + stayS(10 * v) + '–' + stayS(40 * v) + ' s',
+      hint: 'Share of the real time spent on a flower or basking (monarch 10–40 s at 1 ×), × each one\'s boldness. Never under 0.8 s a stay.' },
     { k: 'bask', label: 'Basking', min: 0, max: 1, step: 0.01, def: 0.2, fmt: f2,
-      hint: 'Chance they settle on the ground with wings open flat instead of travelling on. A cold one is likelier.' },
+      hint: 'Chance they settle on the ground with wings open flat instead of travelling on. A cold one is likelier. The opening scene has one basking whatever this is.' },
     { k: 'hunger', label: 'Hunger', min: 0, max: 3, step: 0.01, def: 1, fmt: v => v < 0.005 ? 'off' : x2(v) + ' · ' + (v * 1).toFixed(1) + ' %/s',
       hint: 'Nectar runs down 1 %/s in flight and fills while nectaring. A hungry one turns aside for a flower it senses. 0: fixed chances, as round 2.' },
     { k: 'warmth', label: 'Warmth', min: 0, max: 3, step: 0.01, def: 1, fmt: v => v < 0.005 ? 'off' : x2(v),
@@ -238,23 +247,23 @@ const CONTROLS = [
     { k: 'boldness', label: 'Boldness spread', min: 0, max: 1, step: 0.01, def: 1, fmt: v => (1 - 0.4 * v).toFixed(2) + '–' + (1 + 0.4 * v).toFixed(2),
       hint: 'Each butterfly gets a boldness: a bold one sits through stronger air, stays a little longer and flies a little higher. 0: all alike.' },
     { k: 'airClose', label: 'Wings close in air of', min: 20, max: 200, step: 1, def: 60, fmt: v => Math.round(v) + ' pt/s',
-      hint: 'A landed butterfly feels the moving air in its cell, gusts and your pointer alike: above this it leans downwind and starts closing its wings.' },
+      hint: 'A landed butterfly feels the moving air in its cell, gusts and your pointer alike. Its wings start closing at 0.6 × this and are closed by this or by 0.9 × the flush air, whichever is more; it leans downwind from 0.5 × this. Both × 0.7 + 0.3 × its boldness.' },
     { k: 'airFlush', label: 'Flushed by air of', min: 40, max: 400, step: 1, def: 120, fmt: v => Math.round(v) + ' pt/s',
-      hint: 'Above this it takes off (× its boldness). Stir the air near one to flush it; a flying one veers off and beats harder.' },
+      hint: 'Above this it takes off (× 0.7 + 0.3 × its boldness), even if that is below the closing air. Stir the air near one to flush it; a flying one veers off and beats harder.' },
     { k: 'relay', label: 'Alarm to neighbours', min: 0, max: 1, step: 0.01, def: 0.6, fmt: f2,
       hint: 'A flushed butterfly startles landed ones within 3 wingspans after 0.15–0.4 s, timid ones likelier. A small relay, never a whole-screen scatter.' },
     { k: 'spaceByHeight', type: 'toggle', label: 'Spacing only at similar heights', def: true,
-      hint: 'On: they keep apart only from butterflies at about their height, so a high one may cross over a low one. Off: apart at any height (round 2).' },
+      hint: 'On: they keep apart fully from butterflies at about their height and less from those higher or lower (from about a third of the height range apart, the steer keeps 70 % and the push a quarter), so a high one may cross over a low one. Off: fully apart at any height (round 2).' },
   ] },
   { group: 'Your pointer', items: [
     { k: 'cursorLand', type: 'toggle', label: 'Land on a still pointer', def: true,
       hint: 'Hold the pointer still and one spirals in and settles on it, up at the glass, opening and closing now and then. Any move sends it off in an escape burst.' },
     { k: 'holdTime', label: 'Still for', min: 1, max: 10, step: 0.1, def: 3, fmt: sec,
-      hint: 'How long the pointer has to stay still (within 2 pt) before one comes.' },
+      hint: 'How long the pointer has to stay still (within 2.5 pt) before one comes.' },
     { k: 'clickLimit', label: 'Clicked flowers kept', min: 1, max: 30, step: 1, def: 12, fmt: v => String(v),
       hint: 'Click open ground to bloom a flower (only where it has room). Beyond this many, the oldest one you planted closes and fades over 2 s, and any butterfly on it takes off.' },
     { k: 'answerGap', label: 'One answers a click every', min: 0, max: 20, step: 0.5, def: 5, fmt: sec,
-      hint: 'A fresh bloom may call the nearest travelling butterfly (7 in 10), but only one at a time: none while one is still on its way to a bloom it was called to, and then not again for this long.' },
+      hint: 'A fresh bloom may call the nearest travelling butterfly (7 in 10), but only one at a time: none while one is still on its way to a bloom it was called to, and none within this long of the last call.' },
   ] },
   { group: 'Small life', items: [
     { k: 'life', label: 'Life when landed', min: 0, max: 3, step: 0.01, def: 1, fmt: x2,
@@ -270,7 +279,7 @@ const CONTROLS = [
     { k: 'density', label: 'Flower density', min: 0.2, max: 3, step: 0.01, def: 0.85, fmt: x2,
       hint: 'How many planted patches across the screen.' },
     { k: 'flowerSize', label: 'Flower size', min: 0.4, max: 2, step: 0.01, def: 1.32, fmt: x2,
-      hint: 'Size of the blooms (a daisy is about 11 cells across at 1 ×).' },
+      hint: 'Size of the blooms (a daisy is about 11 cells across at 1 ×), the ones you clicked too.' },
     { k: 'leaves', label: 'Leaves', min: 0, max: 2, step: 0.01, def: 0.9, fmt: x2,
       hint: 'The dark rosettes of leaves under each bloom.' },
   ] },
@@ -302,18 +311,52 @@ const CONTROLS = [
 
 const DEFAULTS = { species: { monarch: true, morpho: true, swallowtail: true, white: true } };
 for (const g of CONTROLS) for (const c of g.items) if (c.k !== 'species') DEFAULTS[c.k] = c.def;
-// v4: round 4 changed a default (glide 0.1), so values saved by round 3 are not read back.
-const STORE = 'meadow-sketch-settings-v4';
-let set = JSON.parse(JSON.stringify(DEFAULTS));
-try {
-  const saved = JSON.parse(localStorage.getItem(STORE) || 'null');
-  if (saved && typeof saved === 'object') {
-    for (const k in DEFAULTS) if (k in saved && typeof saved[k] === typeof DEFAULTS[k]) set[k] = saved[k];
+// v5: the s1 review's fixes. A new key, so every browser starts once from the true defaults (an older save could
+// still hold a value a later round changed, such as round 4's Leaves 1.24); older keys are left alone, unread.
+const STORE = 'meadow-sketch-settings-v5';
+const CONTROL = {};
+for (const g of CONTROLS) for (const c of g.items) CONTROL[c.k] = c;
+const stepPlaces = c => { const t = String(c.step); return t.includes('.') ? t.length - t.indexOf('.') - 1 : 0; };
+/** One value checked against its control: a finite number in range, on the slider's step (so the thumb, the panel
+ *  and the clipboard all show what the meadow uses); a real boolean; one of the choices; the species as four
+ *  booleans (a missing one stays as it was). Anything else is `undefined`: not accepted. */
+function checkValue(k, v, was) {
+  const c = CONTROL[k];
+  if (!c) return undefined;
+  if (c.type === 'species') {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+    const out = {};
+    for (const s of SPECIES_LIST) out[s.key] = typeof v[s.key] === 'boolean' ? v[s.key] : !!(was || DEFAULTS.species)[s.key];
+    return out;
   }
-} catch (e) { /* storage blocked: defaults */ }
-if (params.get('defaults') === '1') set = JSON.parse(JSON.stringify(DEFAULTS));
+  if (c.type === 'toggle') return typeof v === 'boolean' ? v : undefined;
+  if (c.type === 'choice') return c.options.some(o => o[0] === v) ? v : undefined;
+  if (typeof v !== 'number' || !Number.isFinite(v)) return undefined;
+  const n = c.min + Math.round((clamp(v, c.min, c.max) - c.min) / c.step) * c.step;
+  return +clamp(n, c.min, c.max).toFixed(stepPlaces(c));
+}
+/** A settings object put right: each value checked (a bad one keeps `base`'s), then the one cross-rule, Size up
+ *  never below Size down. */
+function normalize(raw, base) {
+  const out = JSON.parse(JSON.stringify(base || DEFAULTS));
+  if (raw && typeof raw === 'object') for (const k in DEFAULTS) if (k in raw) { const v = checkValue(k, raw[k], out[k]); if (v !== undefined) out[k] = v; }
+  if (out.sizeHigh < out.sizeLow) out.sizeHigh = out.sizeLow;
+  return out;
+}
+/** A URL value (`?s.count=9`, `?s.cursorLand=0`, `?s.theme=light`, `?s.species=monarch,white`) as its control's type. */
+function urlValue(k, v) {
+  const c = CONTROL[k];
+  if (!c) return undefined;
+  if (c.type === 'species') { const on = v.split(','); const o = {}; for (const s of SPECIES_LIST) o[s.key] = on.includes(s.key); return o; }
+  if (c.type === 'toggle') return v === '1' || v === 'true' ? true : v === '0' || v === 'false' ? false : undefined;
+  if (c.type === 'choice') return v;
+  return v.trim() === '' ? undefined : Number(v);
+}
+let set = normalize(null);
+try { set = normalize(JSON.parse(localStorage.getItem(STORE) || 'null')); } catch (e) { /* storage blocked or unreadable: defaults */ }
+if (params.get('defaults') === '1') set = normalize(null);
 if (params.has('theme')) set.theme = params.get('theme') === 'light' ? 'light' : 'dark';
-for (const [k, v] of params) if (k.startsWith('s.') && k.slice(2) in DEFAULTS) set[k.slice(2)] = typeof DEFAULTS[k.slice(2)] === 'boolean' ? v === '1' || v === 'true' : +v;
+{ const u = {}; for (const [k, v] of params) if (k.startsWith('s.') && k.slice(2) in DEFAULTS) u[k.slice(2)] = urlValue(k.slice(2), v); set = normalize(u, set); }
 function save() { try { localStorage.setItem(STORE, JSON.stringify(set)); } catch (e) { /* ignore */ } }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -733,7 +776,7 @@ function makeFlower(kind, x, y, grown) {
   const R0 = K.r * S * set.flowerSize * R(0.82, 1.18);
   const f = { id: flowerId++, kind, x, y, R: R0, rot: R(0, TAU), seed: RI(1, 1e6), age: grown ? 1 : 0,
     n: RI(K.petals[0], K.petals[1]), f0: R(K.f0[0], K.f0[1]), ox: 0, oy: 0, vx: 0, vy: 0, busy: 0, leaves: [], clicked: !grown,
-    dimT: 0, dimMax: 1, lift: 0 };
+    dimT: 0, dimMax: 1, lift: 0, sizeK: set.flowerSize * S };
   // A rosette of leaves on the ground under the bloom (not swaying with it).
   const L = [];
   const add = (a, len, wid, kindL) => L.push({ a, len: len * R0, wid: wid * R0, k: kindL || 0 });
@@ -763,9 +806,8 @@ function pickKind(x, y) {
   let u = rnd() * tot; for (const k of KINDS) { u -= KIND[k].weight; if (u <= 0) return k; } return 'daisy';
 }
 
+/** Plants the meadow's patches around the flowers already there (replant() decides which those are). */
 function plant() {
-  const keep = flowers.filter(f => f.clicked);
-  flowers = keep;
   const area = W * H;
   const patches = Math.max(1, Math.round(area / (190000 * S * S) * set.density));
   const centres = [];
@@ -798,6 +840,38 @@ function plant() {
   flowers.sort((a, b) => a.R - b.R);
 }
 
+/** A clicked flower follows Flower size (and the cell size): its bloom, leaves and florets scale from the size it
+ *  was made at. */
+function sizeFlower(f) {
+  const k = set.flowerSize * S / f.sizeK;
+  if (Math.abs(k - 1) < 1e-9) return;
+  f.R *= k; for (const l of f.leaves) { l.len *= k; l.wid *= k; }
+  if (f.sub) for (const u of f.sub) { u.x *= k; u.y *= k; u.s *= k; }
+  f.sizeK = set.flowerSize * S;
+  f.reach = Math.max(f.R * 1.15, ...f.leaves.map(l => l.len)) + 2 * cw;
+}
+
+let replantTimer = 0;
+/** The one replant, for Reset all, New meadow, a big resize, and Density or Flower size (those after a short pause,
+ *  so a drag replants once): it supersedes a pending replant; keeps the flowers you clicked (none for New meadow),
+ *  the ones still on the screen, at the current Flower size, the newer of two that now overlap closing and fading;
+ *  plants the rest; applies the click limit; and any butterfly whose flower has gone takes off from it (landed) or
+ *  turns away (on its way), through the same take-off as when a flower fades. */
+function replant(fresh) {
+  clearTimeout(replantTimer); replantTimer = 0;
+  flowers = fresh ? [] : flowers.filter(f => f.clicked && f.x >= 0 && f.y >= 0 && f.x <= W && f.y <= H);
+  for (const f of flowers) sizeFlower(f);
+  const mine = flowers.filter(f => !f.fading).sort((a, b) => a.id - b.id);
+  for (let i = 1; i < mine.length; i++) for (let j = 0; j < i; j++) {
+    const o = mine[j];
+    if (!o.fading && Math.hypot(o.x - mine[i].x, o.y - mine[i].y) < (o.R + mine[i].R) * 1.05) { fadeFlower(mine[i]); break; }
+  }
+  plant();
+  limitClicked();
+  for (const b of flies) if (b.flower && !flowerById(b.flower)) leaveFlower(b);
+}
+function replantSoon() { clearTimeout(replantTimer); replantTimer = setTimeout(ui(() => replant(false)), 120); }
+
 // ── Your clicks ──
 // A click on a bloom touches it; a click on open ground blooms a flower where one has room; the flowers you plant are
 // limited (the oldest fades); and only one butterfly at a time answers a fresh bloom.
@@ -815,13 +889,13 @@ function clickAt(x, y) {
   }
   if (hit) { touchFlower(hit, x, y); return; }
   // Open ground: a new bloom only if it would not overlap another (the planting rule); otherwise the click touches
-  // the bloom in the way, the nearest edge first.
+  // the bloom in the way whose edge is nearest the click.
   const f = makeFlower(pickKind(x, y), x, y, false);
   let block = null, bd = 1e9;
   for (const o of flowers) {
     if (o.fading) continue;
-    const gap = Math.hypot(o.x - x, o.y - y) - (o.R + f.R) * 1.05;
-    if (gap < 0 && gap < bd) { bd = gap; block = o; }
+    const d = Math.hypot(o.x - x, o.y - y);
+    if (d - (o.R + f.R) * 1.05 < 0 && Math.abs(d - o.R) < bd) { bd = Math.abs(d - o.R); block = o; }
   }
   if (block) { touchFlower(block, x, y); return; }
   flowers.push(f);
@@ -862,12 +936,13 @@ function limitClicked() {
 }
 function fadeFlower(f) {
   f.fading = true; f.fade = 1;
-  for (const b of flies) {
-    if (b.flower !== f.id) continue;
-    if (isLanded(b)) takeOff(b);
-    else { releaseFlower(b); b.state = 'fly'; b.goal = ''; b.tag = 0; b.circleT = 0; b.called = false; pickWaypoint(b); }
-  }
+  for (const b of flies) if (b.flower === f.id) leaveFlower(b);
   f.busy = 0;
+}
+/** Its flower is going: a landed one takes off (the soft take-off), one on its way turns away to fly on. */
+function leaveFlower(b) {
+  if (isLanded(b)) takeOff(b);
+  else { releaseFlower(b); b.state = 'fly'; b.goal = ''; b.tag = 0; b.circleT = 0; b.called = false; pickWaypoint(b); }
 }
 
 function stepFlowers(dt) {
@@ -1215,6 +1290,19 @@ const boldOf = b => 1 + b.boldU * 0.4 * set.boldness;
 const spanRef = b => b.sp.span * 13 * S * b.size * 0.6;
 /** How far past its centre a butterfly can be drawn, pt (wings and tails), at its height. */
 const drawReach = b => b.sp.span * 13 * S * b.size * depthScale(b.z) * 0.5 * 1.15 + 2 * cw;
+/** What it draws, wings and shadow, at height z, as offsets from its centre: [left, right, up, down], pt. The shadow
+ *  falls away from the light (down and to the right) by z × 150 pt and is drawn at the ground-level size. */
+function footprint(b, z) {
+  const r = b.sp.span * 13 * S * b.size * depthScale(z) * 0.5 * 1.15 + 2 * cw;
+  const g = b.sp.span * 13 * S * b.size * depthScale(0) * 0.5, sr = Math.max(g, g * b.sp.aspect * 1.5) + 3 * cw;
+  const off = z * 150 * S + 3 * S, sx = -LX * off, sy = -LY * off;
+  return [Math.max(r, sr - sx), Math.max(r, sx + sr), Math.max(r, sr - sy), Math.max(r, sy + sr)];
+}
+/** Out of sight: nothing it draws, wings or shadow, is on the screen. */
+function outOfSight(b) {
+  const [l, r, u, d] = footprint(b, b.z);
+  return b.x + r < 0 || b.x - l > W || b.y + d < 0 || b.y - u > H;
+}
 const ease01 = t => t * t * (3 - 2 * t);
 
 function makeFly(kind, mode) {
@@ -1276,7 +1364,9 @@ function sendAway(b) {
   aimAtExit(b);
 }
 function aimAtExit(b) {
-  const dl = b.x, dr = W - b.x, dtp = b.y, db = H - b.y, m = Math.min(dl, dr, dtp, db), out = 400 * S;
+  // Aimed well past the edge: farther than anything it draws at any height, so it is out of sight before it gets there.
+  const dl = b.x, dr = W - b.x, dtp = b.y, db = H - b.y, m = Math.min(dl, dr, dtp, db);
+  const out = Math.max(400 * S, Math.max(...footprint(b, 1), ...footprint(b, 0)) + 200 * S);
   if (m === dl) { b.wx = -out; b.wy = b.y; } else if (m === dr) { b.wx = W + out; b.wy = b.y; }
   else if (m === dtp) { b.wx = b.x; b.wy = -out; } else { b.wx = b.x; b.wy = H + out; }
 }
@@ -1291,23 +1381,45 @@ function syncFlies(initial) {
   for (const b of flies) if (!on.includes(b.kind)) sendAway(b);
   const want = on.length ? wantedCount() : 0;
   let active = flies.filter(b => !b.leaving);
-  while (active.length > want) {
-    // The one that leaves: a flying one, nearest an edge (landed ones and the one on the pointer stay put).
+  const countOf = k => { let n = 0; for (const b of active) if (b.kind === k) n++; return n; };
+  /** The one that leaves, of the given species: a flying one nearest an edge (a landed one only if none is flying).
+   *  `spareCursor`: never the one on or coming to the pointer. */
+  const leaver = (kinds, spareCursor) => {
     let best = null, bs = 1e18;
     for (const b of active) {
+      if (!kinds.includes(b.kind) || (spareCursor && b.goal === 'cursor')) continue;
       const e = Math.min(b.x, W - b.x, b.y, H - b.y) + (isLanded(b) ? 1e6 : 0) + (b.goal === 'cursor' ? 1e7 : 0) + (b.state === 'approach' ? 600 : 0);
       if (e < bs) { bs = e; best = b; }
     }
+    return best;
+  };
+  while (active.length > want) {
+    // Fewer: one of the commonest species leaves, so the mix stays even.
+    let m = 0; for (const k of on) m = Math.max(m, countOf(k));
+    const best = leaver(on.filter(k => countOf(k) === m), false);
     if (initial) { releaseFlower(best); flies.splice(flies.indexOf(best), 1); } else sendAway(best);
     active = flies.filter(b => !b.leaving);
   }
-  // Raising it again turns leavers back before anyone new comes in.
-  for (const b of flies) if (active.length < want && b.leaving && on.includes(b.kind)) { b.leaving = false; pickWaypoint(b); active.push(b); }
+  // The mix at a full count: each species turned on has its share, `want` split as evenly as it goes (the odd ones
+  // to the species that already have the most, so a settled mix is never churned).
+  const share = {};
+  if (on.length) {
+    const base = Math.floor(want / on.length), extra = want - base * on.length;
+    on.slice().sort((a, c) => countOf(c) - countOf(a)).forEach((k, i) => { share[k] = base + (i < extra ? 1 : 0); });
+  }
+  // More again: leavers of a species short of its share turn back before anyone new comes in.
+  for (const b of flies) if (active.length < want && b.leaving && on.includes(b.kind) && countOf(b.kind) < share[b.kind]) { b.leaving = false; pickWaypoint(b); active.push(b); }
+  // A species over its share (another was turned back on) sends its spare ones out through an edge; the fill below
+  // brings the short species in from an edge. Nobody pops.
+  if (!initial) for (const k of on) while (countOf(k) > share[k]) {
+    const b = leaver([k], true); if (!b) break;
+    sendAway(b); active = flies.filter(o => !o.leaving);
+  }
   let wait = 0;
   while (active.length < want) {
     // The species with the fewest on screen, so 4 butterflies are one of each.
-    let best = null, bc = 1e9; const order = on.slice().sort(() => rnd() - 0.5);
-    for (const k of order) { const c = active.filter(b => b.kind === k).length; if (c < bc) { bc = c; best = k; } }
+    let best = null, bc = 1e9; const order = shuffle(on.slice());
+    for (const k of order) { const c = countOf(k); if (c < bc) { bc = c; best = k; } }
     const b = makeFly(best, initial ? 'inside' : 'edge');
     // Newcomers trickle in, one every 0.4–0.9 s, rather than all at once.
     if (!initial) { b.wait = wait; wait += R(0.4, 0.9); }
@@ -1386,7 +1498,10 @@ function chooseNext(b) {
 function cursorSpot(b) {
   const hh = b.sp.span * 13 * S * b.size * depthScale(b.z) * b.sp.aspect / 2;
   const off = 0.4 * hh + 1.0 * cw;
-  return [ptr.x - Math.cos(b.heading) * off, ptr.y - Math.sin(b.heading) * off];
+  // Near an edge the body stays inside the meadow (it runs 0.78 half-heights behind its centre): the spot is held
+  // that far in, and a cell more for its lean, so it sits beside the pointer instead of off the screen.
+  const mx = Math.min(0.78 * hh + cw, 0.5 * W), my = Math.min(0.78 * hh + cw, 0.5 * H);
+  return [clamp(ptr.x - Math.cos(b.heading) * off, mx, W - mx), clamp(ptr.y - Math.sin(b.heading) * off, my, H - my)];
 }
 
 function target(b) {
@@ -1504,6 +1619,11 @@ function stepFly(b, dt) {
   b.t += dt;
   if (b.startleCd > 0) b.startleCd -= dt;
   if (b.wait > 0) { b.wait -= dt; return; }   // still out of sight, waiting its turn to come in
+  // In once it is 0.6 wingspans inside every edge, or, on a screen too small for that, 0.15 of the way in.
+  if (b.entering) {
+    const span = spanRef(b), ix = Math.min(0.6 * span, 0.15 * W), iy = Math.min(0.6 * span, 0.15 * H);
+    if (b.x > ix && b.y > iy && b.x < W - ix && b.y < H - iy) b.entering = false;
+  }
   if (isLanded(b)) { stepLanded(b, dt); return; }
   // ── wants: nectar runs down in flight; after a minute in the air it cools ──
   b.energy = Math.max(0, b.energy - 0.01 * set.hunger * dt);
@@ -1513,13 +1633,11 @@ function stepFly(b, dt) {
   let tx, ty;
   if (b.leaving) {
     tx = b.wx; ty = b.wy;
-    const out = drawReach(b);
-    if (b.x < -out || b.y < -out || b.x > W + out || b.y > H + out) { b.dead = true; return; }
+    if (outOfSight(b)) { b.dead = true; return; }
   } else if (b.state === 'approach') {
     if (b.goal === 'nectar' && !flowerById(b.flower)) { b.state = 'fly'; b.goal = ''; b.flower = 0; b.called = false; pickWaypoint(b); }
     if (b.state === 'approach') [tx, ty] = target(b); else { tx = b.wx; ty = b.wy; }
   } else { tx = b.wx; ty = b.wy; }
-  if (b.entering && b.x > 0.6 * span && b.y > 0.6 * span && b.x < W - 0.6 * span && b.y < H - 0.6 * span) b.entering = false;
   let dx = tx - b.x, dy = ty - b.y, dist = Math.hypot(dx, dy);
   // The pointer spiral: 1.5–2.2 loose, shrinking circles round the pointer, then in to sit on it.
   if (b.goal === 'cursor' && b.state === 'approach' && b.spiral) {
@@ -1579,7 +1697,7 @@ function stepFly(b, dt) {
   let px = 0, py = 0;
   for (const o of flies) {
     if (o === b) continue;
-    // Spacing among similar heights (|Δz| < 0.25) in full; across heights a softer steer and a light push, so a high
+    // Spacing among similar heights (|Δz| < 0.15) in full; from 0.35 apart a softer steer and a light push, so a high
     // one and a low one may cross over each other but don't linger stacked (switchable).
     const hk = set.spaceByHeight ? smooth(0.35, 0.15, Math.abs(b.z - o.z)) : 1;
     const ox = b.x - o.x, oy = b.y - o.y, d = Math.hypot(ox, oy), lim = 2.4 * (span + spanRef(o)) / 2;
@@ -1589,10 +1707,11 @@ function stepFly(b, dt) {
     const touch = 0.8 * (span + spanRef(o));
     if (d < touch && d > 0.1) { const push = (1 - d / touch) * 260 * S * dt * (0.25 + 0.75 * hk); b.ux += ox / d * push; b.uy += oy / d * push; }
   }
-  // They may flutter a little off screen, then turn back (not when entering or leaving through an edge).
+  // They may flutter a little off screen, then turn back (not when leaving through an edge). One still coming in
+  // turns back too: on a small screen it can cross and overshoot before it is properly in.
   const m = -0.25 * span;
   let ex = 0, ey = 0;
-  if (!b.leaving && !b.entering) {
+  if (!b.leaving) {
     if (b.x < m) ex = 1; else if (b.x > W - m) ex = -1;
     if (b.y < m) ey = 1; else if (b.y > H - m) ey = -1;
   }
@@ -1722,7 +1841,8 @@ function stepLanded(b, dt) {
   const sp = b.sp, life = set.life;
   b.timer -= dt;
   b.slow += dt; b.stillT += dt;
-  if (b.state === 'cursor' && !ptr.has) { takeOff(b); return; }
+  if (b.state === 'cursor' && (!ptr.has || !set.cursorLand)) { takeOff(b); return; }
+  if (b.state === 'nectar' && !flowerById(b.flower)) { takeOff(b); return; }
   // Wants: nectar fills while it drinks; basking (and a little, sitting in the sun on a flower) warms it.
   if (b.state === 'nectar') b.energy = Math.min(1, b.energy + 0.08 * dt);
   if (b.state === 'bask') b.warmth = Math.min(1, b.warmth + 0.12 * dt);
@@ -1791,14 +1911,22 @@ function pointerMoved(x, y) {
   ptr.still = 0;
   for (const b of flies) {
     if (b.state === 'cursor') { takeOff(b, x, y, true); cursorCd = 3; }
-    else if (b.goal === 'cursor') { b.state = 'fly'; b.goal = ''; b.spiral = null; b.boost = Math.max(b.boost, 0.4); b.boostK = 1.8; pickWaypoint(b); cursorCd = 3; }
+    else if (b.goal === 'cursor') giveUpCursor(b);
   }
+}
+/** One on its way to the pointer gives up and flies on. */
+function giveUpCursor(b) { b.state = 'fly'; b.goal = ''; b.spiral = null; b.boost = Math.max(b.boost, 0.4); b.boostK = 1.8; pickWaypoint(b); cursorCd = 3; }
+/** The pointer has gone (it left the meadow, or a resize left it outside): there is nothing to land on. The one on
+ *  its way gives up now; the one on it takes off (stepLanded). The still time starts again on the next entry. */
+function pointerGone() {
+  ptr.has = false; ptr.still = 0;
+  for (const b of flies) if (b.goal === 'cursor' && b.state !== 'cursor') giveUpCursor(b);
 }
 
 /** The opening moment, as Web staggers its start: one already nectaring, one basking, one about to land on a flower,
  *  the rest flying. */
 function openingMoment() {
-  const fl = flies.slice().sort(() => rnd() - 0.5);
+  const fl = shuffle(flies.slice());
   const onScreen = f => f.x > 0.08 * W && f.x < 0.92 * W && f.y > 0.08 * H && f.y < 0.92 * H && !f.busy;
   let i = 0;
   const nect = fl[i];
@@ -1834,9 +1962,27 @@ function stepDust(dt) {
   }
 }
 
+/** The pointer's air, integrated in simulation time: each step stirs along the way the pointer went since the last
+ *  step, at its speed as you moved it (time-scaled steps are 1/60 s of your time each, so the speed is d / (dt / time
+ *  scale)), with an impulse of 60 × dt × that speed. So the same gesture stirs the same air whether the browser sends
+ *  30, 60 or 120 moves a second; at 60 a second, one move a step, it is the stir the director approved. */
+function stirStep(dt) {
+  if (!ptr.has) return;
+  const dx = ptr.x - ptr.sx, dy = ptr.y - ptr.sy;
+  ptr.sx = ptr.x; ptr.sy = ptr.y;
+  if (!dx && !dy) return;
+  const real = dt / set.timeScale, k = 60 * dt;
+  const vx = clamp(dx / real, -1500, 1500) * k, vy = clamp(dy / real, -1500, 1500) * k;
+  const n = Math.max(1, Math.ceil(Math.hypot(dx, dy) / PG));
+  for (let i = 1; i <= n; i++) stir(ptr.x - dx * (n - i) / n, ptr.y - dy * (n - i) / n, vx / n, vy / n);
+}
+
 function step(dt) {
   simT += dt;
   updateWind(simT, dt);
+  // A move made while paused counts once time runs again.
+  if (ptr.held) { ptr.held = false; ui(pointerMoved)(ptr.x, ptr.y); }
+  stirStep(dt);
   stepPointer(dt);
   stepFlowers(dt);
   for (const b of flies) stepFly(b, dt);
@@ -2514,24 +2660,36 @@ function blit() {
 //  Pointer: stir the breeze, flush the butterflies near a fast pointer, click to bloom or touch a bloom
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-const ptr = { x: 0, y: 0, t: 0, down: false, moved: 0, has: false, ax: 0, ay: 0, still: 0 };
-canvas.addEventListener('pointermove', e => {
-  const now = performance.now() / 1000;
-  if (ptr.has) {
-    const dt = Math.max(0.008, now - ptr.t);
-    const vx = (e.clientX - ptr.x) / dt, vy = (e.clientY - ptr.y) / dt;
-    // The pointer only stirs the air; butterflies feel the stirred air (stepFly, stepLanded), they don't see the pointer.
-    stir(e.clientX, e.clientY, clamp(vx, -1500, 1500), clamp(vy, -1500, 1500));
-    ptr.moved += Math.hypot(e.clientX - ptr.x, e.clientY - ptr.y);
-  } else { ptr.ax = e.clientX; ptr.ay = e.clientY; ptr.still = 0; }
-  ptr.x = e.clientX; ptr.y = e.clientY; ptr.t = now; ptr.has = true;
+// x, y: where it is; sx, sy: where the air was last stirred to (stirStep); ax, ay: where it came to rest; down, downId:
+// the press a click needs (the primary button's own); held: it moved while paused.
+const ptr = { x: 0, y: 0, sx: 0, sy: 0, down: false, downId: -1, moved: 0, has: false, ax: 0, ay: 0, still: 0, held: false };
+canvas.addEventListener('pointermove', ui(e => {
+  const x = e.clientX, y = e.clientY;
+  // The pointer only stirs the air (stirStep, in simulation time); butterflies feel the stirred air (stepFly,
+  // stepLanded), they don't see the pointer.
+  if (ptr.has) ptr.moved += Math.hypot(x - ptr.x, y - ptr.y);
+  else { ptr.ax = x; ptr.ay = y; ptr.still = 0; ptr.sx = x; ptr.sy = y; }
+  ptr.x = x; ptr.y = y; ptr.has = true;
+  if (paused) { ptr.sx = x; ptr.sy = y; }   // stopped time stirs no air
   // Still means within 2.5 pt of where it came to rest.
-  if (Math.hypot(e.clientX - ptr.ax, e.clientY - ptr.ay) > 2.5) { ptr.ax = e.clientX; ptr.ay = e.clientY; pointerMoved(e.clientX, e.clientY); }
-});
-canvas.addEventListener('pointerdown', e => { ptr.down = true; ptr.moved = 0; });
-// A click is not holding still: it restarts the still timer and sends off one on (or coming to) the pointer.
-canvas.addEventListener('pointerup', e => { if (ptr.down && ptr.moved < 6) { pointerMoved(e.clientX, e.clientY); clickAt(e.clientX, e.clientY); } ptr.down = false; });
-canvas.addEventListener('pointerleave', () => { ptr.has = false; });
+  if (Math.hypot(x - ptr.ax, y - ptr.ay) > 2.5) { ptr.ax = x; ptr.ay = y; if (paused) ptr.held = true; else pointerMoved(x, y); }
+}));
+// A click is the primary button's own press and release on the meadow, moving less than 6 pt between. Anything that
+// takes the pointer away (leaving, a cancel, losing capture, the window losing focus) ends the press.
+const endPress = () => { ptr.down = false; ptr.downId = -1; };
+canvas.addEventListener('pointerdown', e => { if (!e.isPrimary || e.button !== 0) return; ptr.down = true; ptr.downId = e.pointerId; ptr.moved = 0; });
+// A click is not holding still: it restarts the still timer and sends off one on (or coming to) the pointer. While
+// paused a click does nothing: in stopped time nothing could grow, fade or answer it, so nothing piles up.
+canvas.addEventListener('pointerup', ui(e => {
+  const mine = ptr.down && e.pointerId === ptr.downId && e.button === 0;
+  endPress();
+  if (!mine || ptr.moved >= 6 || paused) return;
+  pointerMoved(e.clientX, e.clientY); clickAt(e.clientX, e.clientY);
+}));
+canvas.addEventListener('pointercancel', endPress);
+canvas.addEventListener('lostpointercapture', endPress);
+window.addEventListener('blur', endPress);
+canvas.addEventListener('pointerleave', ui(() => { endPress(); pointerGone(); }));
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 //  The panel
@@ -2547,16 +2705,20 @@ function setPanel(open) {
 }
 toggle.addEventListener('click', () => setPanel(panel.classList.contains('hidden')));
 
-function onChange(k) {
+const onChange = ui(function onChange(k) {
+  // The one cross-rule: Size up close never below Size down; the one you moved takes the other along.
+  if (k === 'sizeLow' && set.sizeHigh < set.sizeLow) { set.sizeHigh = set.sizeLow; refresh.sizeHigh(); }
+  if (k === 'sizeHigh' && set.sizeLow > set.sizeHigh) { set.sizeLow = set.sizeHigh; refresh.sizeLow(); }
   save();
   if (k === 'count' || k === 'species' || k === 'areaCount') syncFlies();
   if (k === 'clickLimit') limitClicked();
-  if (k === 'density' || k === 'flowerSize') { clearTimeout(onChange.t); onChange.t = setTimeout(() => { plant(); for (const b of flies) if (b.flower && !flowerById(b.flower)) { b.flower = 0; if (b.state !== 'fly') { b.state = 'fly'; pickWaypoint(b); } } }, 120); }
+  if (k === 'density' || k === 'flowerSize') replantSoon();
+  if (k === 'cursorLand' && !set.cursorLand) for (const b of flies) if (b.goal === 'cursor' && b.state !== 'cursor') giveUpCursor(b);
   if (k === 'green' || k === 'grass') groundDirty = true;
   if (k === 'theme') setTheme();
   if (k === 'grid') gridDirty = true;
   if (k === 'leaves') for (const f of flowers) f.reach = Math.max(f.R * 1.15, ...f.leaves.map(l => l.len * Math.min(1, 0.4 + 0.6 * set.leaves))) + 2 * cw;
-}
+});
 
 /** A reset beside a control: back to its default. Dimmed while the control is at its default. */
 function addReset(row, label, defText, isDef, reset) {
@@ -2631,10 +2793,11 @@ function buildPanel() {
 }
 function refreshAll() { for (const k in refresh) { const r = refresh[k]; if (Array.isArray(r)) r.forEach(f => f()); else r(); } }
 
-document.getElementById('reset').addEventListener('click', () => {
-  set = JSON.parse(JSON.stringify(DEFAULTS)); save(); refreshAll(); setTheme(); syncFlies(); plant(); groundDirty = true; gridDirty = true;
-});
-document.getElementById('replant').addEventListener('click', () => { flowers = flowers.filter(() => false); for (const b of flies) { b.flower = 0; if (b.state !== 'cursor' && b.goal !== 'cursor') { if (isLanded(b)) takeOff(b); b.state = 'fly'; b.goal = ''; pickWaypoint(b); } } plant(); });
+document.getElementById('reset').addEventListener('click', ui(() => {
+  set = normalize(null); save(); refreshAll(); setTheme(); syncFlies(); replant(false); groundDirty = true; gridDirty = true;
+}));
+// A new meadow: every flower new, the clicked ones gone too; butterflies on or bound for a flower take off or turn away.
+document.getElementById('replant').addEventListener('click', ui(() => replant(true)));
 let paused = false;
 const pauseBtn = document.getElementById('pause');
 pauseBtn.addEventListener('click', () => { paused = !paused; pauseBtn.textContent = paused ? 'Play' : 'Pause'; });
@@ -2650,8 +2813,9 @@ document.getElementById('copy').addEventListener('click', async () => {
   btn.textContent = ok ? 'Copied' : 'Copy failed';
   setTimeout(() => { btn.textContent = 'Copy settings'; }, 1400);
 });
+// Shortcuts only outside the controls: on a focused button or slider, Space and the keys do what they do there.
 window.addEventListener('keydown', e => {
-  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+  if (e.target && e.target.closest && e.target.closest('input, textarea, select, button, a, [contenteditable]')) return;
   if (e.key === 'h' || e.key === 'H') setPanel(panel.classList.contains('hidden'));
   if (e.key === ' ') { e.preventDefault(); pauseBtn.click(); }
 });
@@ -2689,7 +2853,9 @@ function start() {
   buildPanel();
   setPanel(params.has('panel') ? params.get('panel') !== '0' : window.innerWidth > 900);
   // ?warm=S runs S seconds of meadow before the first frame (for screenshots); ?freeze=1 holds it there.
-  if (params.get('debug') === '1') window.__meadow = { step, render, clickAt, syncFlies, onChange, get flies() { return flies; }, get flowers() { return flowers; }, get set() { return set; }, get t() { return simT; }, get ptr() { return ptr; }, wind, windAt, get DWX() { return DWX; } };
+  if (params.get('debug') === '1') window.__meadow = { step, render, clickAt: ui(clickAt), syncFlies: ui(syncFlies), onChange, replant: ui(replant), depthScale,
+    get flies() { return flies; }, get flowers() { return flowers; }, get set() { return set; }, get t() { return simT; }, get ptr() { return ptr; },
+    get dust() { return dust; }, get paused() { return paused; }, get W() { return W; }, get H() { return H; }, get S() { return S; }, wind, windAt, get DWX() { return DWX; }, get PFX() { return PFX; }, get PFY() { return PFY; } };
   // ?sheet=flowers or ?sheet=flies lays out every kind for a close look (a development aid).
   const sheet = params.get('sheet');
   if (sheet === 'flowers') {
@@ -2706,12 +2872,19 @@ function start() {
     }));
     paused = true; render(); document.body.dataset.ready = '1'; return;
   }
-  const warm = +(params.get('warm') || 0);
+  const warm = clamp(+(params.get('warm') || 0) || 0, 0, 600);   // at most 10 minutes of warm-up
   for (let t = 0; t < warm; t += 1 / 60) step(1 / 60);
   if (params.get('freeze') === '1') { paused = true; pauseBtn.textContent = 'Play'; render(); document.body.dataset.ready = '1'; return; }
   requestAnimationFrame(loop);
 }
-window.addEventListener('resize', () => { const oldW = W, oldH = H; resize(); if (Math.abs(W - oldW) > 80 || Math.abs(H - oldH) > 80) plant(); if (set.areaCount) syncFlies(); });
+window.addEventListener('resize', ui(() => {
+  const oldW = W, oldH = H; resize();
+  // A pointer the new screen no longer holds has gone; a landed one now off the screen takes off.
+  if (ptr.has && (ptr.x < 0 || ptr.y < 0 || ptr.x > W || ptr.y > H)) pointerGone();
+  for (const b of flies) if (isLanded(b) && b.state !== 'cursor' && (b.x < 0 || b.y < 0 || b.x > W || b.y > H)) takeOff(b);
+  if (Math.abs(W - oldW) > 80 || Math.abs(H - oldH) > 80) replant(false);
+  if (set.areaCount) syncFlies();
+}));
 
 const fontReady = document.fonts && document.fonts.load ? document.fonts.load('600 14px "Geist Mono"') : Promise.resolve();
 Promise.race([fontReady, new Promise(r => setTimeout(r, 1500))]).then(start, start);
