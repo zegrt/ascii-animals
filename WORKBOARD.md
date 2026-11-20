@@ -45,6 +45,8 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-20: "pause after m1". Applies: new (m1 finishes its fix round and Codex re-check, and its CI; then all
+  work stops; m2 does not start until the director resumes).
 - 2026-11-20: "continue also whats new doesnt need a full screen thing i think". Applies: new (t9: the 3.1
   what's-new for existing users is not the full-screen welcome window the Web card uses today; the manager
   proposes a small card under the menu bar icon, shown once, with "Try the Meadow" and "Not now", and a "New" tag
