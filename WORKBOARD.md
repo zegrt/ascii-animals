@@ -68,7 +68,7 @@ Director's profile: none
 
 | Id | Task | Size | Files | Branch | Builder | Reviewer | Rounds | State | Brief |
 |---|---|---|---|---|---|---|---|---|---|
-| t1-2 | Breeze, flowers and butterfly flight (plan T1 + T2), with the director's path fix | Content | Sources/OceanKit/Meadow/{Breeze,Flowers,ButterflySpecies,Butterfly}.swift, Sources/OceanChecks/MeadowChecks.swift, Sources/OceanTool/{Paths,main}.swift | meadow-t1-2 | builder-t1-2 (Claude Opus, T3 child thread; fix round 1) | reviewer-t1-2 (Claude Opus, T3 child thread) | 1 | in review (re-check of fix round 1, meadow-t1-2 @ 1e11a1b) | briefs/t1-2.md |
+| t1-2 | Breeze, flowers and butterfly flight (plan T1 + T2), with the director's path fix | Content | Sources/OceanKit/Meadow/{Breeze,Flowers,ButterflySpecies,Butterfly}.swift, Sources/OceanChecks/MeadowChecks.swift, Sources/OceanTool/{Paths,main}.swift | meadow-t1-2 | builder-t1-2 (Claude Opus, T3 child thread; fix round 1) | reviewer-t1-2 (Claude Opus, T3 child thread) | 1 | reviewed (re-check passed, review-t1-2 @ 68288c7); waits on CI (PR #1) | briefs/t1-2.md |
 | t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered) | Content | to brief | meadow-t5 | | | 0 | open (waits on t1-2 merged) | |
 | t3 | Meadow world and behaviours (plan T3) | Content | to brief | meadow-t3 | | | 0 | open (waits on t5) | |
 | t4 | Cursor landing, courtship, crossings, monarch life cycle (plan T4) | Content | to brief | meadow-t4 | | | 0 | open (waits on t3) | |
@@ -91,6 +91,9 @@ Director's profile: none
   - Fix round 1 reported 2026-11-20 (1e11a1b, done with concerns): CI not yet run; a new per-beat speed surge for
     the white (0.45) to meet the strengthened 4(b); the morpho exempt from the frozen-wings sink part of 4(a). The
     re-check judges both.
+  - Re-check 68288c7 (2026-11-20): all nine fixed. The white's surge judged faithful to the research; the morpho's
+    exemption judged a model fact, nothing loosened. Two leftovers routed later (Noticed): a tighter morpho sink
+    form, and a code comment's citation.
   - Before approval: t1-2 must pass CI (Swift 6.3.3), not only local checks.
 
 ## Noticed
@@ -102,3 +105,5 @@ Director's profile: none
   3. `Meadowland.bloom(time:)` overwrites the land's own clock.
   4. A clicked flower's index can be reused after it is replaced, so T3 must tolerate stale indices.
   5. The check `breezeWriteIsLocal` passes mostly because of truncation; it is weak.
+- From t1-2's re-check (2026-11-20): the morpho could be held to "sinks at least 0 pt" with frozen wings instead of
+  skipping that part; the white's surge comment cites a between-flight speed spread, not a beat-to-beat one.
