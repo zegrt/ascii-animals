@@ -105,16 +105,23 @@ extension MeadowFrame {
                     }
                 }
             }
+            // The writers' own arithmetic (`putFarred`, `putGlyphFarred`, `shade`) through local copies of the cells.
+            let C = cells
+            let inkK = INK_K, flat = FAR_FLAT, faint = FAR_FAINT, light = LIGHT, recOn = REC
+            var tn = touchedN
             cache.ops.withUnsafeMutableBufferPointer { ops in
                 for k in 0..<ops.count {
                     let i = Int(ops[k].cell)
                     switch ops[k].kind {
                     case .block:
-                        if pushed { putFarred(i, ops[k].fr, ops[k].fg, ops[k].fb, Double(ops[k].a)) }
-                        else { putFarred(i, Double(ops[k].r), Double(ops[k].g), Double(ops[k].b), Double(ops[k].a)) }
+                        C.touch(i, &tn)
+                        if recOn { rec(i) }
+                        if pushed { C.block(i, ops[k].fr, ops[k].fg, ops[k].fb, Double(ops[k].a) * inkK) }
+                        else { C.block(i, Double(ops[k].r), Double(ops[k].g), Double(ops[k].b), Double(ops[k].a) * inkK) }
                     case .glyph:
-                        if pushed { putGlyphFarred(i, ops[k].gi, ops[k].fr, ops[k].fg, ops[k].fb, Double(ops[k].a)) }
-                        else { putGlyphFarred(i, ops[k].gi, Double(ops[k].r), Double(ops[k].g), Double(ops[k].b), Double(ops[k].a)) }
+                        C.touch(i, &tn)
+                        if pushed { C.glyph(i, ops[k].gi, ops[k].fr, ops[k].fg, ops[k].fb, Double(ops[k].a), far: true, flat: flat, faint: faint, inkK: inkK) }
+                        else { C.glyph(i, ops[k].gi, Double(ops[k].r), Double(ops[k].g), Double(ops[k].b), Double(ops[k].a), far: false, flat: flat, faint: faint, inkK: inkK) }
                     case .shimmerGlyph:
                         // `shimmer` (html:597–602), its roll kept until the cell's next tick.
                         let key = ops[k].key
@@ -128,25 +135,28 @@ extension MeadowFrame {
                             let roll = Double(ops[k].roll)
                             s = !LIGHT && roll < accK ? 1 : roll < fleckK ? 2 : 0
                         }
-                        if s != 0 { shimmerGlyph(i, ops[k].gi, s, key, false) }
-                        else if pushed { putGlyphFarred(i, ops[k].gi, ops[k].fr, ops[k].fg, ops[k].fb, Double(ops[k].a)) }
-                        else { putGlyphFarred(i, ops[k].gi, Double(ops[k].r), Double(ops[k].g), Double(ops[k].b), Double(ops[k].a)) }
-                    case .clearGlyph: touch(i); GI[i] = MG.none
-                    case .shade: shadeNow(i, Double(ops[k].a))
+                        if s != 0 {
+                            touchedN = tn
+                            shimmerGlyph(i, ops[k].gi, s, key, false)
+                            tn = touchedN
+                        } else {
+                            C.touch(i, &tn)
+                            if pushed { C.glyph(i, ops[k].gi, ops[k].fr, ops[k].fg, ops[k].fb, Double(ops[k].a), far: true, flat: flat, faint: faint, inkK: inkK) }
+                            else { C.glyph(i, ops[k].gi, Double(ops[k].r), Double(ops[k].g), Double(ops[k].b), Double(ops[k].a), far: false, flat: flat, faint: faint, inkK: inkK) }
+                        }
+                    case .clearGlyph: C.touch(i, &tn); C.GI[i] = MG.none
+                    case .shade:
+                        // `shade` (never recorded while replaying).
+                        let kk = Double(ops[k].a)
+                        if kk > 0 { C.touch(i, &tn); C.shade(i, kk, light: light) }
                     }
                 }
             }
+            touchedN = tn
             INK_K = 1
             farPush(0)
         }
         if viewPaints % ViewportCache.sweepEvery == 0 { v.sweep(viewPaints, keepLast: false) }
-    }
-
-    @inline(__always) mutating func shadeNow(_ i: Int, _ k: Double) {
-        let saved = recording
-        recording = nil
-        shade(i, k)
-        recording = saved
     }
 
     /// `drawFlower` (html:1198–1281), recorded: the head by the family's coverage rule, the leaves under it and the

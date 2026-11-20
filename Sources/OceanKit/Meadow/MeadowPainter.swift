@@ -326,6 +326,69 @@ public final class MeadowPainter {
     }
 }
 
+/// This frame's cells as plain pointers, with the cell writers' own arithmetic (html:694–713). A hot loop copies it
+/// into a local, where nothing it stores through the pointers can move them, so they stay in registers (read through
+/// the frame, every store makes the compiler load them again).
+struct Cells {
+    let BR: UnsafeMutablePointer<Float>, BG: UnsafeMutablePointer<Float>, BB: UnsafeMutablePointer<Float>
+    let HB: UnsafeMutablePointer<UInt8>, GI: UnsafeMutablePointer<UInt8>
+    let IR: UnsafeMutablePointer<Float>, IG: UnsafeMutablePointer<Float>, IB: UnsafeMutablePointer<Float>, IA: UnsafeMutablePointer<Float>
+    let stamp: UnsafeMutablePointer<UInt32>, touched: UnsafeMutablePointer<Int32>
+    let gR: UnsafeMutablePointer<Float>, gG: UnsafeMutablePointer<Float>, gB: UnsafeMutablePointer<Float>
+    let frame: UInt32
+
+    /// The cell's first write this frame starts it from the ground (`n` counts the cells touched).
+    @inline(__always) func touch(_ i: Int, _ n: inout Int) {
+        if stamp[i] != frame {
+            stamp[i] = frame
+            touched[n] = Int32(i)
+            n += 1
+            BR[i] = gR[i]; BG[i] = gG[i]; BB[i] = gB[i]
+            HB[i] = 0
+            GI[i] = MG.none
+            IA[i] = 0
+        }
+    }
+
+    /// `put`'s block, the cell touched: colour (pushed back already) at alpha `a` (the ink's fade applied).
+    @inline(__always) func block(_ i: Int, _ r: Double, _ g: Double, _ b: Double, _ a: Double) {
+        if a >= 1 {
+            BR[i] = Float(r); BG[i] = Float(g); BB[i] = Float(b); HB[i] = 1
+        } else if a > 0 {
+            let fa = Float(a)
+            BR[i] += (Float(r) - BR[i]) * fa; BG[i] += (Float(g) - BG[i]) * fa; BB[i] += (Float(b) - BB[i]) * fa; HB[i] = 1
+        }
+    }
+
+    /// `putGlyph`'s glyph, the cell touched: colour pushed back already when `far`; then flattened toward a block
+    /// under it, or fainter with none (`FAR_FLAT`, `FAR_FAINT`), and faded by `inkK` (`INK_K`).
+    @inline(__always) func glyph(_ i: Int, _ gi: UInt8, _ r0: Double, _ g0: Double, _ b0: Double, _ a0: Double, far: Bool,
+                                 flat: Double, faint: Double, inkK: Double) {
+        var r = r0, g = g0, b = b0, a = a0
+        if far {
+            if HB[i] == 1 {
+                let fl = flat
+                r += (Double(BR[i]) - r) * fl; g += (Double(BG[i]) - g) * fl; b += (Double(BB[i]) - b) * fl
+            } else {
+                a *= faint
+            }
+        }
+        GI[i] = gi
+        IR[i] = Float(r); IG[i] = Float(g); IB[i] = Float(b); IA[i] = Float(a * inkK)
+    }
+
+    /// `shade`, the cell touched and k > 0.
+    @inline(__always) func shade(_ i: Int, _ k: Double, light: Bool) {
+        if HB[i] == 0 { HB[i] = 2 }
+        if light {
+            BR[i] *= Float(1 - 0.24 * k); BG[i] *= Float(1 - 0.21 * k); BB[i] *= Float(1 - 0.15 * k); IA[i] *= Float(1 - 0.5 * k)
+        } else {
+            let m = Float(1 - k)
+            BR[i] *= m; BG[i] *= m; BB[i] *= m; IA[i] *= Float(1 - 0.9 * k)
+        }
+    }
+}
+
 /// One frame of one screen: the sketch's cell writers and drawing over the painter's buffers.
 struct MeadowFrame {
     unowned let painter: MeadowPainter
@@ -341,6 +404,8 @@ struct MeadowFrame {
     let rimMark: UnsafeMutablePointer<UInt32>, rimW: UnsafeMutablePointer<Float>, rimList: UnsafeMutablePointer<Int32>
     let wingStamp: UnsafeMutablePointer<UInt32>
     var gR: UnsafeMutablePointer<Float>, gG: UnsafeMutablePointer<Float>, gB: UnsafeMutablePointer<Float>
+    /// The same cells as `Cells` (made again when the ground's buffers move).
+    var cells: Cells
     let spans: WingSpans
     let veins: UnsafeMutablePointer<VeinSeg>
     let edges: UnsafeMutablePointer<EdgeSeg>, edgeN: UnsafeMutablePointer<Int>
@@ -384,6 +449,8 @@ struct MeadowFrame {
         recMark = p.recMark.p; recList = p.recList.p; rimMark = p.rimMark.p; rimW = p.rimW.p; rimList = p.rimList.p
         wingStamp = p.wingStamp.p
         gR = v.gR.p; gG = v.gG.p; gB = v.gB.p
+        cells = Cells(BR: p.BR.p, BG: p.BG.p, BB: p.BB.p, HB: p.HB.p, GI: p.GI.p, IR: p.IR.p, IG: p.IG.p, IB: p.IB.p, IA: p.IA.p,
+                      stamp: p.stamp.p, touched: p.touched.p, gR: v.gR.p, gG: v.gG.p, gB: v.gB.p, frame: p.frame)
         spans = p.spans
         veins = p.veins.p
         edges = p.edges.p; edgeN = p.edgeN.p
@@ -411,15 +478,7 @@ struct MeadowFrame {
     // ── the cell writers (html:694–713) ──
 
     @inline(__always) mutating func touch(_ i: Int) {
-        if stamp[i] != frame {
-            stamp[i] = frame
-            touched[touchedN] = Int32(i)
-            touchedN += 1
-            BR[i] = gR[i]; BG[i] = gG[i]; BB[i] = gB[i]
-            HB[i] = 0
-            GI[i] = MG.none
-            IA[i] = 0
-        }
+        cells.touch(i, &touchedN)
     }
 
     /// `far` (html:684–690).
@@ -460,13 +519,7 @@ struct MeadowFrame {
     @inline(__always) mutating func putFarred(_ i: Int, _ r: Double, _ g: Double, _ b: Double, _ a0: Double) {
         touch(i)
         if REC { rec(i) }
-        let a = a0 * INK_K
-        if a >= 1 {
-            BR[i] = Float(r); BG[i] = Float(g); BB[i] = Float(b); HB[i] = 1
-        } else if a > 0 {
-            let fa = Float(a)
-            BR[i] += (Float(r) - BR[i]) * fa; BG[i] += (Float(g) - BG[i]) * fa; BB[i] += (Float(b) - BB[i]) * fa; HB[i] = 1
-        }
+        cells.block(i, r, g, b, a0 * INK_K)
     }
 
     /// `glyphAt` (html:701–706).
@@ -484,17 +537,7 @@ struct MeadowFrame {
     /// `putGlyph` of a colour already pushed back (`far`) when `FAR` is set.
     @inline(__always) mutating func putGlyphFarred(_ i: Int, _ gi: UInt8, _ r0: Double, _ g0: Double, _ b0: Double, _ a0: Double) {
         touch(i)
-        var r = r0, g = g0, b = b0, a = a0
-        if FAR != 0 {
-            if HB[i] == 1 {
-                let fl = FAR_FLAT
-                r += (Double(BR[i]) - r) * fl; g += (Double(BG[i]) - g) * fl; b += (Double(BB[i]) - b) * fl
-            } else {
-                a *= FAR_FAINT
-            }
-        }
-        GI[i] = gi
-        IR[i] = Float(r); IG[i] = Float(g); IB[i] = Float(b); IA[i] = Float(a * INK_K)
+        cells.glyph(i, gi, r0, g0, b0, a0, far: FAR != 0, flat: FAR_FLAT, faint: FAR_FAINT, inkK: INK_K)
     }
 
     @inline(__always) mutating func clearGlyph(_ i: Int) {
@@ -508,13 +551,7 @@ struct MeadowFrame {
         if k <= 0 { return }
         if let rc = recording { rc.ops.append(FlowerOp(kind: .shade, gi: 0, cell: Int32(i), r: 0, g: 0, b: 0, a: Float(k), key: 0)); return }
         touch(i)
-        if HB[i] == 0 { HB[i] = 2 }
-        if LIGHT {
-            BR[i] *= Float(1 - 0.24 * k); BG[i] *= Float(1 - 0.21 * k); BB[i] *= Float(1 - 0.15 * k); IA[i] *= Float(1 - 0.5 * k)
-        } else {
-            let m = Float(1 - k)
-            BR[i] *= m; BG[i] *= m; BB[i] *= m; IA[i] *= Float(1 - 0.9 * k)
-        }
+        cells.shade(i, k, light: LIGHT)
     }
 
     @inline(__always) mutating func rec(_ i: Int) {
@@ -610,6 +647,8 @@ struct MeadowFrame {
         let count = cols * rows
         v.gR.ensure(count); v.gG.ensure(count); v.gB.ensure(count); v.packed.ensure(count)
         gR = v.gR.p; gG = v.gG.p; gB = v.gB.p
+        cells = Cells(BR: BR, BG: BG, BB: BB, HB: HB, GI: GI, IR: IR, IG: IG, IB: IB, IA: IA, stamp: stamp, touched: touched,
+                      gR: gR, gG: gG, gB: gB, frame: frame)
         let packed = v.packed.p
         v.tuftCells.removeAll(keepingCapacity: true)
         v.tuftGlyph.removeAll(keepingCapacity: true)
@@ -730,6 +769,8 @@ struct MeadowFrame {
             }
         }
         let tuftAir = v.tuftAir, tuftW = v.tuftW
+        let C = self.cells
+        var tn = touchedN
         for k in 0..<cells.count {
             let i = Int(cells[k])
             var wx = 0.0, wy = 0.0
@@ -747,11 +788,12 @@ struct MeadowFrame {
             if s > 0.45 && Double(hs[k]) < 0.25 + 0.6 * s { g = meadowLine(wx, wy, Double(ms[k])) }
             // lGlyph (or the paper's glyph) with the meadow pushed back: the ink from this frame's table.
             let col = ink[Int(s * 64 + 0.5)]
-            touch(i)
-            GI[i] = g
-            IR[i] = col.x; IG[i] = col.y; IB[i] = col.z
-            IA[i] = Float(Double(ks[k]) * (0.42 + 0.58 * s) * alphaK)
+            C.touch(i, &tn)
+            C.GI[i] = g
+            C.IR[i] = col.x; C.IG[i] = col.y; C.IB[i] = col.z
+            C.IA[i] = Float(Double(ks[k]) * (0.42 + 0.58 * s) * alphaK)
         }
+        touchedN = tn
         farPush(0)
         drawMotes()
     }
