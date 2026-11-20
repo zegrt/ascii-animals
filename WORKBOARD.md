@@ -45,6 +45,11 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-20: "i have a wing beat referene, look properly. also dont take anything else from this it doesnt have the
+  life stuff we have. also want the butterflies to like rotatea around when moving (idk how much is possible)",
+  with https://www.pocketstudio.design/ascii-animals-app/. Applies: new (t5w rewritten before it started: the
+  reference's symmetric wingbeat and turning only; the checks of the replaced wing design are replaced on this
+  decision).
 - 2026-11-20, on the first films: "also it looks like onyl the left wing is moving and the right wing dissapears on
   motion towards close". Applies: task.change (t3 is building and lists MeadowPainter.swift, so this becomes a new
   task t5w after t3, not a change to t3).
@@ -113,7 +118,7 @@ Director's profile: none
 | t1-2 | Breeze, flowers and butterfly flight (plan T1 + T2), with the director's path fix | Content | Sources/OceanKit/Meadow/{Breeze,Flowers,ButterflySpecies,Butterfly}.swift, Sources/OceanChecks/MeadowChecks.swift, Sources/OceanTool/{Paths,main}.swift | meadow-t1-2 | builder-t1-2 (Claude Opus, T3 child thread; fix round 1) | reviewer-t1-2 (Claude Opus, T3 child thread) | 1 | reviewed, waits for the end of the stack (director: no merge yet): reviewed (review-t1-2 @ 68288c7), CI passed on 1e11a1b (PR #1), merge rehearsed 2026-11-20 (200 passed, app builds) | briefs/t1-2.md |
 | t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered); fix round 1 adds the director's bigger butterflies and better flowers | Content (grown: now also t1-2's sizes and flower shapes; the director set the look, so no separate plan) | Meadow/MeadowPainter.swift (new), OceanTool/{MeadowStill,main}.swift, OceanChecks/MeadowChecks.swift, Render/GlyphAtlas.swift (append only); fix round 1 adds Meadow/ButterflySpecies.swift (sizes) and Meadow/Flowers.swift (heads, leaves, clumps) | meadow-t5 (from meadow-t1-2); restart on meadow-t5r | builder-t5 (Claude Opus, T3 child thread) | reviewer-t5 (Codex) | 2 before the restart; 2 after it; restart 2: 0 | reviewed (review-t5r2 @ 57f880a); clap findings to Noticed after the director's watch | briefs/t5.md |
 | t5v | A 30 s film of the butterflies flying, for the director to judge the motion | Content (small) | OceanTool/MeadowFrames.swift (new), OceanTool/main.swift | meadow-t5v (from meadow-t5r) | builder-t5v (Claude Opus, T3 child thread) | Codex | 0 | reviewed (review-t5v @ 94d9d2b); its 4 tool fixes moved into t3 (which rewrites meadow-frames) | briefs/t5v.md |
-| t5w | Both wings beat together (the director: one wing seems to vanish at the top of each beat) | Content | Meadow/MeadowPainter.swift, OceanChecks/MeadowChecks.swift | meadow-t5w (from meadow-t3) | | Codex | 0 | open (waits on t3: same files) | briefs/t5w.md |
+| t5w | The reference's wingbeat (both wings together) and butterflies that turn to face where they fly | Content | Meadow/MeadowPainter.swift, Meadow/Butterfly.swift (drawn heading, open), OceanChecks/MeadowChecks.swift | meadow-t5w (from meadow-t3) | | Codex | 0 | open (waits on t3: same files) | briefs/t5w.md |
 | t3 | Meadow world and behaviours (plan T3), with the director's film verdict | Content | Meadow/{MeadowWorld,Behaviour}.swift (new), OceanChecks/MeadowChecks.swift, Meadow/MeadowPainter.swift (convenience paint, breeze trail), Meadow/Breeze.swift (pointer field), Meadow/{Butterfly,ButterflySpecies}.swift (roaming, spacing, stays), OceanTool/{MeadowStill,MeadowFrames,main}.swift | meadow-t3 (from meadow-t5v) | builder-t3 (Claude Opus, T3 child thread) | Codex | 0 | building | briefs/t3.md |
 | t4 | Cursor landing, courtship, crossings, monarch life cycle (plan T4) | Content | to brief | meadow-t4 | | | 0 | open (waits on t3) | |
 | t6 | Meadow habitat, settings and tools (plan T6) | Content | to brief | meadow-t6 | | | 0 | open (waits on t4) | |
