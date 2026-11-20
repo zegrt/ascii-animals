@@ -145,6 +145,13 @@ Director's profile: none
 
 ## Decisions
 
+- 2026-11-20: The port is reshaped (the director: "mm ok and preformant"; docs/plans/2026-11-20-meadow-port-plan.md,
+  "Revised the same day"): m1 and m3 stand; one translation pass, mp, replaces m2, m4, m5, m6, m7; the director
+  judges fidelity by eye on films next to the sketch; the Meadow must cost no more CPU than Web at 30 and 15 fps and
+  allocate nothing per frame; one review of the whole port guards what can hurt. "Pause after m1" is lifted by
+  this approval. m1's fix round 2 finishes without another Codex round: the manager checks it, and mp's review
+  covers it. Lesson recorded: briefs ask for what the director asked for and what the sketch does, nothing more.
+
 - 2026-11-20: (withdrawn the same day) m1's pointer air trailing by 0.14 s. Replaced by the sketch's own per-step
   stir with no lag (Review routing, m1, re-check); the 5 % burst rule was the manager's, not the director's
   (manager).
@@ -243,13 +250,14 @@ Director's profile: none
 | t8 | Energy, measured with the director (plan T8) | Content | to brief | meadow-t8 | | | 0 | open (waits on t7) | |
 | t9 | Choosing the Meadow: menu, Settings, welcome (plan T9) | Content | to brief | meadow-t9 | | | 0 | open (waits on t8); the what's-new is not full screen (Corrections, 2026-11-20) | |
 | t10 | Words, watch and release 3.1 (plan T10; outward-facing, the director approves the release) | Content | to brief | meadow-t10 | | | 0 | open (waits on t9) | |
-| m1 | Air and flowers from above (breeze, pointer air, downwash, flowers, planting, clicks on flowers, the tuning file) | Content | Sources/OceanKit/Meadow/{MeadowTuning,MeadowMath,Breeze,Flowers}.swift (new), Sources/OceanChecks/MeadowChecks.swift (new), Sources/OceanChecks/main.swift, Sources/OceanTool/{MeadowAir,main}.swift (optional), a copy of the sketch fixture in the checks' resources, Package.swift (grown: bundles the fixtures as the checks' resources; for the review to judge) | meadow-m1 (from main) | builder-m1 (Claude Opus, T3 child thread) | 0 | 2 | built (meadow-m1 @ 5965216, done with concerns); Codex review af7dbb1 in (7 findings, routed below); CI green on 5965216 (draft PR #3); fix round 1 done with concerns (meadow-m1 @ 3e54973); re-check 9cc9790: 4 fixed, 3 not (routed below; the pointer timing rewritten); CI green on 3e54973 (PR #3); fix round 2 building
-| m2 | Flight from above | Content | Sources/OceanKit/Meadow/{ButterflySpecies,Butterfly}.swift (new), Meadow/MeadowTuning.swift (additions), Sources/OceanChecks/{MeadowFlightChecks,main}.swift, Sources/OceanTool/{MeadowPaths,main}.swift | meadow-m2 (from meadow-m1) | | Codex | 0 | open (waits on m1) | briefs/m2.md |
+| m1 | Air and flowers from above (breeze, pointer air, downwash, flowers, planting, clicks on flowers, the tuning file) | Content | Sources/OceanKit/Meadow/{MeadowTuning,MeadowMath,Breeze,Flowers}.swift (new), Sources/OceanChecks/MeadowChecks.swift (new), Sources/OceanChecks/main.swift, Sources/OceanTool/{MeadowAir,main}.swift (optional), a copy of the sketch fixture in the checks' resources, Package.swift (grown: bundles the fixtures as the checks' resources; for the review to judge) | meadow-m1 (from main) | builder-m1 (Claude Opus, T3 child thread) | 0 | 2 | built (meadow-m1 @ 5965216, done with concerns); Codex review af7dbb1 in (7 findings, routed below); CI green on 5965216 (draft PR #3); fix round 1 done with concerns (meadow-m1 @ 3e54973); re-check 9cc9790: 4 fixed, 3 not (routed below; the pointer timing rewritten); CI green on 3e54973 (PR #3); fix round 2 building (no further Codex round: the manager checks it; mp's review covers it)
+| m2 | Flight from above | Content | Sources/OceanKit/Meadow/{ButterflySpecies,Butterfly}.swift (new), Meadow/MeadowTuning.swift (additions), Sources/OceanChecks/{MeadowFlightChecks,main}.swift, Sources/OceanTool/{MeadowPaths,main}.swift | meadow-m2 (from meadow-m1) | | Codex | 0 | open (waits on m1) | superseded by mp (one translation pass, 2026-11-20)
 | m3 | A ground colour per cell in the shared canvas | Content | Sources/OceanKit/Render/{CellCanvas,OceanRenderer,Shaders}.swift, Sources/OceanChecks/CanvasChecks.swift, Sources/OceanChecks/main.swift (only if a new check group needs registering) | meadow-m3 (from main) | builder-m3 (Claude Opus, T3 child thread) | Codex | 1 | reviewed (meadow-m3 @ 796d61e: review 3f52b22, fix round 1 5d12bea, re-check e811cc2 passed, CI green on 796d61e); waits for the end of the stack | briefs/m3.md |
-| m4 | Painter: the meadow | Content | to brief (port plan m4) | meadow-m4 (from meadow-m2, with m3 merged up the stack) | | Codex | 0 | open (waits on m2, m3) | |
-| m5 | Painter: the butterflies | Content | to brief (port plan m5) | meadow-m5 | | Codex | 0 | open (waits on m4) | |
-| m6 | World and behaviours, several screens | Content | to brief (port plan m6) | meadow-m6 | | Codex | 0 | open (waits on m5) | |
-| m7 | Pointer and clicks | Content | to brief (port plan m7) | meadow-m7 | | Codex | 0 | open (waits on m6) | |; feeds the Meadow the latest pointer position per step, as Web does (m1's pointer rewrite)
+| m4 | Painter: the meadow | Content | to brief (port plan m4) | meadow-m4 (from meadow-m2, with m3 merged up the stack) | | Codex | 0 | open (waits on m2, m3) | superseded by mp (one translation pass, 2026-11-20)
+| m5 | Painter: the butterflies | Content | to brief (port plan m5) | meadow-m5 | | Codex | 0 | open (waits on m4) | superseded by mp (one translation pass, 2026-11-20)
+| m6 | World and behaviours, several screens | Content | to brief (port plan m6) | meadow-m6 | | Codex | 0 | open (waits on m5) | superseded by mp (one translation pass, 2026-11-20)
+| m7 | Pointer and clicks | Content | to brief (port plan m7) | meadow-m7 | | Codex | 0 | open (waits on m6) | superseded by mp (one translation pass, 2026-11-20)
+| mp | One translation pass: the rest of the sketch (flight, butterflies, behaviours, pointer, painter) into the family's shape, runnable in OceanTool, films next to the sketch, within Web's CPU | Content (large; judged by eye, one review) | Sources/OceanKit/Meadow/* (new files; additions to MeadowTuning; m1's files only where the world needs hooks), Sources/OceanChecks/Meadow*.swift, Sources/OceanChecks/main.swift, Sources/OceanTool/{Meadow*,main,Bench}.swift, Sources/OceanKit/Domain/{HabitatKind,HabitatSim}.swift and the minimal `.meadow` switch cases in Sources/ASCIIAnimals (not offered in the app) | meadow-mp (from meadow-m1 after its fix round 2, with meadow-m3 merged in) | | Codex | 0 | briefed; starts when m1's fix round 2 lands | briefs/mp.md |
 | m8 | The Meadow habitat, its presets and settings, OceanTool | Content | to brief (port plan m8) | meadow-m8 | | Codex | 0 | open (waits on m7) | |
 
 ## Review routing

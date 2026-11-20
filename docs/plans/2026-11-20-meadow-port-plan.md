@@ -72,3 +72,21 @@ m3 runs beside m1 and m2 (different files). Files never overlap between open tas
 3. **What users can change:** "presets like the other two animas": named butterfly line-ups, like Ocean's shark
    presets and Web's spider presets, with Custom (m8). "Land on a still pointer" follows the app's interaction
    setting; everything else stays fixed at the director's numbers.
+
+## Revised the same day: one translation pass, judged by eye (approved: "mm ok and preformant")
+The director asked why things were slow, then to step back. The port had been split into eight serial tasks with
+exact-proof checks and repeated review rounds, and nothing from the app had been shown for hours. The sketch went
+fast because the director looked and tuned. So:
+1. **m1** (air and flowers) and **m3** (ground colour) stand as built.
+2. **mp, one translation pass**, replaces m2, m4, m5, m6 and m7: one builder ports the rest of the sketch (flight,
+   butterflies, behaviours, pointer, the painter for meadow and butterflies) into the family's shape on top of m1
+   and m3, with the Meadow runnable in `OceanTool` (not offered in the app yet). Output: films of the app next to
+   the sketch at the same seed, dark and light, for the director.
+3. **The director looks**; what they see becomes the fix list, as with the sketch.
+4. **Performant** (the director's word): the Meadow costs no more CPU than Web on the same screens at 30 and 15 fps
+   (`OceanTool bench --desk`), allocates nothing per frame once warm, and caches what doesn't move.
+5. **Reviews guard what can hurt**, once for the whole port: Ocean and Web unchanged, no crashes or non-finite
+   values, the performance budget, several screens. Fidelity is judged by eye on the films; no review rounds on
+   internal precision; the manager checks small fixes himself.
+6. Then **m8** (the Meadow offered in the app, its presets and settings), t7 films, t8 energy with the director,
+   t9 menu and welcome, t10 release, as before.
