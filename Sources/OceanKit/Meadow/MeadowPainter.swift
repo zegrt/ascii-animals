@@ -112,6 +112,8 @@ struct FlowerOp {
     /// The shimmer's last roll and the tick it was rolled on (it re-rolls 2.4 times a second, html:599).
     var tick: Int32 = Int32.min
     var roll: Float = 1
+    /// The colour pushed back with the meadow (`far` of r, g, b), for the push its cache's `farKey` names.
+    var fr = 0.0, fg = 0.0, fb = 0.0
 }
 
 /// A flower's recorded cells on one screen, with what they were drawn at: a slot, reused for another flower once
@@ -121,9 +123,12 @@ final class FlowerCache {
     var hx = Double.nan, hy = Double.nan
     var grow = -1.0, leafGrow = -1.0, fk = -1.0, vd = -1.0, radius = -1.0
     var used = 0
+    /// The push (`FAR`, `FAR_DIM`, `FAR_SAT`, paper) the ops' `fr`, `fg`, `fb` were made for; NaN when none.
+    var farKey = SIMD4<Double>(.nan, .nan, .nan, .nan)
     /// Ready for another flower: nothing recorded, drawn next time.
     func reset() {
         ops.removeAll(keepingCapacity: true)
+        farKey = SIMD4(.nan, .nan, .nan, .nan)
         hx = .nan; hy = .nan
         grow = -1; leafGrow = -1; fk = -1; vd = -1; radius = -1
     }
@@ -165,6 +170,12 @@ final class ViewportCache {
     var tuftM: [Float] = []
     /// Each tuft's `hash3(c, r, 13)` (whether it lies over in a gust), fixed per cell.
     var tuftH: [Float] = []
+    /// Each tuft's four air samples (`j`, `j1`, `j2`, `j3`) and its weights between them on the breeze's grid laid
+    /// as `airKey` says (the grid's origin, spacing, columns and rows); made again when the tufts or the grid change.
+    var tuftAir: [SIMD4<Int32>] = []
+    var tuftW: [SIMD2<Float>] = []
+    var airKey = SIMD4<Double>(.nan, .nan, .nan, .nan)
+    var airRows = -1
     /// The flowers' recordings by flower id, in slots that are reused: `slots` holds every slot made, `free` the
     /// ones not in use. Sized by the world's flower bound (`Flowers.most`) before drawing, so a new flower (a click)
     /// takes a slot without allocating; slots of flowers not drawn are handed back every `sweepEvery` of this
@@ -243,6 +254,8 @@ public final class MeadowPainter {
     var paintCount = 0
     var airX = MBuf<Float>(0), airY = MBuf<Float>(0)
     var airTime = -1.0, airSteps = -1, airCount = -1
+    /// The gust noise's corner hashes over this frame's grid, one table per octave (`GustReader`).
+    var lattice1 = MBuf<Double>(0), lattice2 = MBuf<Double>(0)
     var order = MBuf<Int>(0)
     let spans = WingSpans.make()
     var veins = MBuf<VeinSeg>(VeinSeg())
@@ -255,7 +268,7 @@ public final class MeadowPainter {
     deinit {
         BR.free(); BG.free(); BB.free(); HB.free(); GI.free(); IR.free(); IG.free(); IB.free(); IA.free()
         stamp.free(); touched.free(); recMark.free(); recList.free(); rimMark.free(); rimW.free(); rimList.free()
-        wingStamp.free(); airX.free(); airY.free(); order.free(); veins.free(); spans.free(); grassInk.free(); edges.free(); edgeN.free()
+        wingStamp.free(); airX.free(); airY.free(); lattice1.free(); lattice2.free(); order.free(); veins.free(); spans.free(); grassInk.free(); edges.free(); edgeN.free()
     }
 
     private func ensure(_ count: Int) {
@@ -438,10 +451,15 @@ struct MeadowFrame {
     }
 
     @inline(__always) mutating func put(_ i: Int, _ r0: Double, _ g0: Double, _ b0: Double, _ a0: Double) {
-        touch(i)
-        if REC { rec(i) }
         var r = r0, g = g0, b = b0
         if FAR != 0 { far(&r, &g, &b) }
+        putFarred(i, r, g, b, a0)
+    }
+
+    /// `put` of a colour already pushed back (`far`) when `FAR` is set.
+    @inline(__always) mutating func putFarred(_ i: Int, _ r: Double, _ g: Double, _ b: Double, _ a0: Double) {
+        touch(i)
+        if REC { rec(i) }
         let a = a0 * INK_K
         if a >= 1 {
             BR[i] = Float(r); BG[i] = Float(g); BB[i] = Float(b); HB[i] = 1
@@ -458,10 +476,16 @@ struct MeadowFrame {
     }
 
     @inline(__always) mutating func putGlyph(_ i: Int, _ gi: UInt8, _ r0: Double, _ g0: Double, _ b0: Double, _ a0: Double) {
+        var r = r0, g = g0, b = b0
+        if FAR != 0 { far(&r, &g, &b) }
+        putGlyphFarred(i, gi, r, g, b, a0)
+    }
+
+    /// `putGlyph` of a colour already pushed back (`far`) when `FAR` is set.
+    @inline(__always) mutating func putGlyphFarred(_ i: Int, _ gi: UInt8, _ r0: Double, _ g0: Double, _ b0: Double, _ a0: Double) {
         touch(i)
         var r = r0, g = g0, b = b0, a = a0
         if FAR != 0 {
-            far(&r, &g, &b)
             if HB[i] == 1 {
                 let fl = FAR_FLAT
                 r += (Double(BR[i]) - r) * fl; g += (Double(BG[i]) - g) * fl; b += (Double(BB[i]) - b) * fl
@@ -592,6 +616,7 @@ struct MeadowFrame {
         v.tuftK.removeAll(keepingCapacity: true)
         v.tuftM.removeAll(keepingCapacity: true)
         v.tuftH.removeAll(keepingCapacity: true)
+        v.airRows = -1
         v.releaseFlowers()
         let bgc: MeadowRGB = LIGHT ? PlantInk.paper : MeadowRGB(0, 0, 0)
         let gc: MeadowRGB = LIGHT ? PlantInk.groundPaper : PlantInk.ground
@@ -638,10 +663,11 @@ struct MeadowFrame {
         let ax = p.airX.p, ay = p.airY.p
         let o = b.origin
         let dx = b.directionX, dy = b.directionY, base = b.base
+        let gust = GustReader(b, columns: b.columns, rows: b.rows, painter: p)
         for r in 0..<b.rows {
             for c in 0..<b.columns {
                 let x: Double = o.x + Double(c) * b.spacing, y: Double = o.y + Double(r) * b.spacing
-                let g = b.gust(x, y)
+                let g = gust.at(x, y)
                 let m: Double = base * (MeadowTuning.Wind.lull + MeadowTuning.Wind.gustGain * g)
                 let ps = b.stirSample(c, r), w = b.washSample(c, r)
                 let i = r * b.columns + c
@@ -680,12 +706,17 @@ struct MeadowFrame {
             ink[q] = SIMD3(Float(r), Float(g), Float(bl))
         }
         let alphaK: Double = (LIGHT ? 0.75 : 1) * grassAmt * (FAR != 0 ? FAR_FAINT : 1) * INK_K
-        for k in 0..<cells.count {
-            let i = Int(cells[k])
-            let c = i % cols, r = i / cols
-            let x: Double = ox + (Double(c) + 0.5) * cw, y: Double = oy + (Double(r) + 0.5) * ch
-            var wx = 0.0, wy = 0.0
-            if airN > 0 {
+        // Where each tuft reads the air (fixed while the tufts and the grid stay).
+        let key = SIMD4<Double>(o.x, o.y, spacing, Double(bc))
+        if airN > 0 && (v.airRows != brows || v.airKey != key) {
+            v.airKey = key
+            v.airRows = brows
+            v.tuftAir.removeAll(keepingCapacity: true)
+            v.tuftW.removeAll(keepingCapacity: true)
+            for k in 0..<cells.count {
+                let i = Int(cells[k])
+                let c = i % cols, r = i / cols
+                let x: Double = ox + (Double(c) + 0.5) * cw, y: Double = oy + (Double(r) + 0.5) * ch
                 let gx: Double = clamp((x - o.x) / spacing, 0, gxMax)
                 let gy: Double = clamp((y - o.y) / spacing, 0, gyMax)
                 let ix = Int(gx), iy = Int(gy)
@@ -694,6 +725,18 @@ struct MeadowFrame {
                 let j1 = ix + 1 < bc ? j + 1 : j
                 let j2 = iy + 1 < brows ? j + bc : j
                 let j3 = ix + 1 < bc ? j2 + 1 : j2
+                v.tuftAir.append(SIMD4(Int32(j), Int32(j1), Int32(j2), Int32(j3)))
+                v.tuftW.append(SIMD2(fx, fy))
+            }
+        }
+        let tuftAir = v.tuftAir, tuftW = v.tuftW
+        for k in 0..<cells.count {
+            let i = Int(cells[k])
+            var wx = 0.0, wy = 0.0
+            if airN > 0 {
+                let js = tuftAir[k], w = tuftW[k]
+                let fx = w.x, fy = w.y
+                let j = Int(js.x), j1 = Int(js.y), j2 = Int(js.z), j3 = Int(js.w)
                 let axv: Float = (airX[j] * (1 - fx) + airX[j1] * fx) * (1 - fy) + (airX[j2] * (1 - fx) + airX[j3] * fx) * fy
                 let ayv: Float = (airY[j] * (1 - fx) + airY[j1] * fx) * (1 - fy) + (airY[j2] * (1 - fx) + airY[j3] * fx) * fy
                 wx = Double(axv); wy = Double(ayv)
@@ -813,5 +856,106 @@ struct MeadowFrame {
                 }
             }
         }
+    }
+}
+
+/// `Breeze.gust` over the breeze's grid, the same numbers with fewer hashes: `vnoise` hashes the four whole-number
+/// corners round each point, and the grid's points share a few hundred corners a frame (the gust bands are 300 and 520
+/// pt, the grid 48), so each octave's corners are hashed once into a table and read from it. Every sum is the one
+/// `gust` and `vnoise` make, in the same order; a corner outside the table is hashed as `vnoise` hashes it.
+struct GustReader {
+    /// One octave's table: `hash3(x0 + i, y0 + j, s)` at `p[j * w + i]`; `w == 0` when there is none.
+    struct Lattice {
+        var p: UnsafeMutablePointer<Double>
+        var x0 = 0, y0 = 0, w = 0, h = 0
+        let s: Double
+
+        /// The corners `noise` can meet for a, b in lo…hi (one corner of slack each way, for rounding).
+        init(_ buf: inout MBuf<Double>, s: Double, loA: Double, hiA: Double, loB: Double, hiB: Double) {
+            self.s = s
+            p = buf.p
+            let most: Double = 65536
+            guard loA.isFinite && hiA.isFinite && loB.isFinite && hiB.isFinite, abs(loA) < 1e9 && abs(hiA) < 1e9 && abs(loB) < 1e9 && abs(hiB) < 1e9
+            else { return }
+            let fa: Double = floor(loA) - 1, ta: Double = floor(hiA) + 2
+            let fb: Double = floor(loB) - 1, tb: Double = floor(hiB) + 2
+            let cw: Double = ta - fa + 1, chh: Double = tb - fb + 1
+            guard cw * chh <= most else { return }
+            x0 = Int(fa); y0 = Int(fb); w = Int(cw); h = Int(chh)
+            buf.ensure(w * h)
+            p = buf.p
+            for j in 0..<h {
+                for i in 0..<w { p[j * w + i] = MeadowMath.hash3(Double(x0 + i), Double(y0 + j), s) }
+            }
+        }
+
+        /// `MeadowMath.vnoise(x, y, s)`.
+        @inline(__always) func noise(_ x: Double, _ y: Double) -> Double {
+            let xi = floor(x), yi = floor(y)
+            var xf: Double = x - xi
+            var yf: Double = y - yi
+            xf = xf * xf * (3 - 2 * xf)
+            yf = yf * yf * (3 - 2 * yf)
+            let a: Double, b: Double, c: Double, d: Double
+            if xi >= Double(x0) && xi < Double(x0 + w - 1) && yi >= Double(y0) && yi < Double(y0 + h - 1) {
+                let k = (Int(yi) - y0) * w + (Int(xi) - x0)
+                a = p[k]; b = p[k + 1]; c = p[k + w]; d = p[k + w + 1]
+            } else {
+                a = MeadowMath.hash3(xi, yi, s)
+                b = MeadowMath.hash3(xi + 1, yi, s)
+                c = MeadowMath.hash3(xi, yi + 1, s)
+                d = MeadowMath.hash3(xi + 1, yi + 1, s)
+            }
+            let ab: Double = (b - a) * xf
+            let ac: Double = (c - a) * yf
+            let abcd: Double = (a - b - c + d) * xf * yf
+            return a + ab + ac + abcd
+        }
+    }
+
+    let dirX: Double, dirY: Double, unit: Double, time: Double
+    let one: Lattice, two: Lattice
+
+    /// For the grid of `breeze` (`columns` x `rows` samples from its origin at its spacing), this step.
+    init(_ breeze: Breeze, columns: Int, rows: Int, painter: MeadowPainter) {
+        typealias W = MeadowTuning.Wind
+        dirX = breeze.directionX
+        dirY = breeze.directionY
+        unit = breeze.unit
+        time = breeze.time
+        // a and b are linear in the point, so the grid's corners bound them.
+        var loA = Double.infinity, hiA = -Double.infinity, loB = Double.infinity, hiB = -Double.infinity
+        let o = breeze.origin
+        let lim = MeadowTuning.Unit.coordinateLimit
+        let lastC = max(0, columns - 1), lastR = max(0, rows - 1)
+        for k in 0..<4 {
+            let c = k & 1 == 0 ? 0 : lastC, r = k < 2 ? 0 : lastR
+            let x: Double = o.x + Double(c) * breeze.spacing, y: Double = o.y + Double(r) * breeze.spacing
+            let px: Double = clamp(x, -lim, lim), py: Double = clamp(y, -lim, lim)
+            let along: Double = (px * dirX + py * dirY) / (W.bandAlong * unit)
+            let a: Double = along - time * W.bandRoll
+            let b: Double = (-px * dirY + py * dirX) / (W.bandAcross * unit)
+            loA = min(loA, a); hiA = max(hiA, a); loB = min(loB, b); hiB = max(hiB, b)
+        }
+        one = Lattice(&painter.lattice1, s: W.octave1Noise, loA: loA, hiA: hiA, loB: loB, hiB: hiB)
+        let loA2: Double = loA * W.octave2Along + W.octave2Shift, hiA2: Double = hiA * W.octave2Along + W.octave2Shift
+        let loB2: Double = min(loB * W.octave2Across, hiB * W.octave2Across), hiB2: Double = max(loB * W.octave2Across, hiB * W.octave2Across)
+        two = Lattice(&painter.lattice2, s: W.octave2Noise, loA: loA2, hiA: hiA2, loB: loB2, hiB: hiB2)
+    }
+
+    /// `Breeze.gust(x, y)`.
+    @inline(__always) func at(_ x: Double, _ y: Double) -> Double {
+        guard x.isFinite && y.isFinite else { return 0 }
+        typealias W = MeadowTuning.Wind
+        let lim = MeadowTuning.Unit.coordinateLimit
+        let px: Double = clamp(x, -lim, lim)
+        let py: Double = clamp(y, -lim, lim)
+        let along: Double = (px * dirX + py * dirY) / (W.bandAlong * unit)
+        let a: Double = along - time * W.bandRoll
+        let b: Double = (-px * dirY + py * dirX) / (W.bandAcross * unit)
+        let o1: Double = W.octave1 * one.noise(a, b)
+        let o2: Double = W.octave2 * two.noise(a * W.octave2Along + W.octave2Shift, b * W.octave2Across)
+        let g: Double = MeadowMath.smooth(W.gustFrom, W.gustTo, o1 + o2)
+        return g.isFinite ? g : 0
     }
 }

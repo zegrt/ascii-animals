@@ -81,6 +81,7 @@ extension MeadowFrame {
             let moved = !(abs(hx - cache.hx) <= 0.25 * cw && abs(hy - cache.hy) <= 0.25 * ch)
             if moved || cache.grow != grow || cache.leafGrow != leafGrow || cache.fk != fk || cache.vd != vd || cache.radius != f.radius {
                 cache.ops.removeAll(keepingCapacity: true)
+                cache.farKey = SIMD4(.nan, .nan, .nan, .nan)
                 recording = cache
                 drawFlowerCells(f, hx, hy, grow, leafGrow, vd, fk)
                 recording = nil
@@ -91,12 +92,29 @@ extension MeadowFrame {
             INK_K = fk
             farPush(tuning.depth * (1 - 0.45 * f.lift))
             let accK: Double = 0.03 * sparkleK * sparkleRate, fleckK: Double = 0.05 * sparkleK * sparkleRate
+            // The recorded colours pushed back once for this push, not on every replay (the same `far`).
+            let farKey = SIMD4<Double>(FAR, FAR_DIM, FAR_SAT, LIGHT ? 1 : 0)
+            let pushed = FAR != 0
+            if pushed && cache.farKey != farKey {
+                cache.farKey = farKey
+                cache.ops.withUnsafeMutableBufferPointer { ops in
+                    for k in 0..<ops.count {
+                        var r = Double(ops[k].r), g = Double(ops[k].g), b = Double(ops[k].b)
+                        far(&r, &g, &b)
+                        ops[k].fr = r; ops[k].fg = g; ops[k].fb = b
+                    }
+                }
+            }
             cache.ops.withUnsafeMutableBufferPointer { ops in
                 for k in 0..<ops.count {
                     let i = Int(ops[k].cell)
                     switch ops[k].kind {
-                    case .block: put(i, Double(ops[k].r), Double(ops[k].g), Double(ops[k].b), Double(ops[k].a))
-                    case .glyph: putGlyph(i, ops[k].gi, Double(ops[k].r), Double(ops[k].g), Double(ops[k].b), Double(ops[k].a))
+                    case .block:
+                        if pushed { putFarred(i, ops[k].fr, ops[k].fg, ops[k].fb, Double(ops[k].a)) }
+                        else { putFarred(i, Double(ops[k].r), Double(ops[k].g), Double(ops[k].b), Double(ops[k].a)) }
+                    case .glyph:
+                        if pushed { putGlyphFarred(i, ops[k].gi, ops[k].fr, ops[k].fg, ops[k].fb, Double(ops[k].a)) }
+                        else { putGlyphFarred(i, ops[k].gi, Double(ops[k].r), Double(ops[k].g), Double(ops[k].b), Double(ops[k].a)) }
                     case .shimmerGlyph:
                         // `shimmer` (html:597–602), its roll kept until the cell's next tick.
                         let key = ops[k].key
@@ -111,7 +129,8 @@ extension MeadowFrame {
                             s = !LIGHT && roll < accK ? 1 : roll < fleckK ? 2 : 0
                         }
                         if s != 0 { shimmerGlyph(i, ops[k].gi, s, key, false) }
-                        else { putGlyph(i, ops[k].gi, Double(ops[k].r), Double(ops[k].g), Double(ops[k].b), Double(ops[k].a)) }
+                        else if pushed { putGlyphFarred(i, ops[k].gi, ops[k].fr, ops[k].fg, ops[k].fb, Double(ops[k].a)) }
+                        else { putGlyphFarred(i, ops[k].gi, Double(ops[k].r), Double(ops[k].g), Double(ops[k].b), Double(ops[k].a)) }
                     case .clearGlyph: touch(i); GI[i] = MG.none
                     case .shade: shadeNow(i, Double(ops[k].a))
                     }

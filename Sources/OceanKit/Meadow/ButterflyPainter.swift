@@ -90,6 +90,28 @@ struct WingSpans {
         if inside(1, j, x) { return 1 }
         return -1
     }
+
+    /// `inside(g, j, x)` for samples met left to right along row j: `q` counts the crossings at or left of the last x,
+    /// so each crossing is passed once per row instead of every sample scanning from the left. The same answer: the
+    /// crossings are sorted, so the first one right of x is the one after those at or left of it.
+    @inline(__always) func inside(_ g: Int, _ j: Int, _ x: Double, _ q: inout Int) -> Bool {
+        let k = g * 3 + j
+        let n = crossN[k], base = k * WingSpans.maxCross
+        while q < n && cross[base + q] <= x { q += 1 }
+        return (n - q) & 1 == 1
+    }
+
+    /// `part(j, x)` for samples met left to right along row j, x never decreasing (`inside` with a cursor per group).
+    @inline(__always) func part(_ j: Int, _ x: Double, _ at: inout SpanCursor) -> Int {
+        if inside(0, j, x, &at.fore) { return 0 }
+        if inside(1, j, x, &at.hind) { return 1 }
+        return -1
+    }
+}
+
+/// Where a run of samples along one row has got to in each group's crossings (`WingSpans.part(_:_:_:)`).
+struct SpanCursor {
+    var fore = 0, hind = 0
 }
 
 /// One butterfly's pose for drawing (`POSE`, html:2015–2044).
@@ -382,6 +404,8 @@ extension MeadowFrame {
             guard let (lo, hi) = spans.extent() else { continue }
             let ca = max(c0, Int(floor((lo - ox) / cw)) - 1), cb = min(c1, Int(floor((hi - ox) / cw)) + 1)
             if ca > cb { continue }
+            // One cursor per sample of the cell (`subX`, `subJ`): each runs left to right along its row.
+            var at0 = SpanCursor(), at1 = SpanCursor(), at2 = SpanCursor(), at3 = SpanCursor(), at4 = SpanCursor()
             for c in ca...cb {
                 let x0: Double = ox + Double(c) * cw
                 let px: Double = x0 + 0.5 * cw, py: Double = y0 + 0.5 * ch
@@ -389,10 +413,17 @@ extension MeadowFrame {
                 var hits = 0
                 var first = -1
                 var firstK = 0
-                for k in 0..<5 {
-                    let p = spans.part(MeadowFrame.subJ[k], x0 + MeadowFrame.subX[k] * cw)
-                    if p >= 0 { hits += 1; if first < 0 { first = p; firstK = k } }
-                }
+                // The five samples in `subX`/`subJ` order (0.5 on row 0; 0.25 and 0.75 on rows 1 and 2).
+                let p0 = spans.part(0, x0 + 0.5 * cw, &at0)
+                if p0 >= 0 { hits += 1; first = p0; firstK = 0 }
+                let p1 = spans.part(1, x0 + 0.25 * cw, &at1)
+                if p1 >= 0 { hits += 1; if first < 0 { first = p1; firstK = 1 } }
+                let p2 = spans.part(1, x0 + 0.75 * cw, &at2)
+                if p2 >= 0 { hits += 1; if first < 0 { first = p2; firstK = 2 } }
+                let p3 = spans.part(2, x0 + 0.25 * cw, &at3)
+                if p3 >= 0 { hits += 1; if first < 0 { first = p3; firstK = 3 } }
+                let p4 = spans.part(2, x0 + 0.75 * cw, &at4)
+                if p4 >= 0 { hits += 1; if first < 0 { first = p4; firstK = 4 } }
                 if hits == 0 { continue }
                 let centre = firstK == 0 && first >= 0
                 let sxp: Double = x0 + MeadowFrame.subX[firstK] * cw
@@ -696,13 +727,26 @@ extension MeadowFrame {
             if lo > hi { continue }
             let ca = max(c0, Int(floor((lo - pad - ox) / cw)) - 1), cb = min(c1, Int(floor((hi + pad - ox) / cw)) + 1)
             if ca > cb { continue }
+            // One cursor per sample (three across, on each of the three rows), each running left to right.
+            var l0 = SpanCursor(), l1 = SpanCursor(), l2 = SpanCursor()
+            var m0 = SpanCursor(), m1 = SpanCursor(), m2 = SpanCursor()
+            var r0c = SpanCursor(), r1c = SpanCursor(), r2c = SpanCursor()
+            let left: Double = -1, right: Double = 1, mid: Double = 0
             for c in ca...cb {
                 let px: Double = ox + (Double(c) + 0.5) * cw
                 var cov = 0
-                for a in -1...1 {
-                    let x: Double = px + Double(a) * third * cw * spread
-                    for j in 0..<3 where spans.part(j, x) >= 0 { cov += 1 }
-                }
+                let xl: Double = px + left * third * cw * spread
+                if spans.part(0, xl, &l0) >= 0 { cov += 1 }
+                if spans.part(1, xl, &l1) >= 0 { cov += 1 }
+                if spans.part(2, xl, &l2) >= 0 { cov += 1 }
+                let xm: Double = px + mid * third * cw * spread
+                if spans.part(0, xm, &m0) >= 0 { cov += 1 }
+                if spans.part(1, xm, &m1) >= 0 { cov += 1 }
+                if spans.part(2, xm, &m2) >= 0 { cov += 1 }
+                let xr: Double = px + right * third * cw * spread
+                if spans.part(0, xr, &r0c) >= 0 { cov += 1 }
+                if spans.part(1, xr, &r1c) >= 0 { cov += 1 }
+                if spans.part(2, xr, &r2c) >= 0 { cov += 1 }
                 let dx = px - P.cx, dy = py - P.cy
                 let u: Double = dx * P.fx + dy * P.fy, v: Double = dx * P.rx + dy * P.ry
                 if abs(v) < 0.5 * cw && u < 0.4 * P.hh && u > -0.78 * P.hh { cov = max(cov, 6) }
