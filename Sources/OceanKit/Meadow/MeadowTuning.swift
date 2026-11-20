@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// Every number the Meadow takes from the sketch, in one place, named as in the sketch (slider keys and constant
@@ -105,9 +106,49 @@ public struct MeadowTuning: Equatable, Sendable {
     /// 2026-11-21; the sketch's is 1440 × 900, html:1382), so that screen shows exactly the chosen count.
     public static let areaCountReference = 1800.0 * 1169.0
 
-    /// The most butterflies in one scene with `areaCount` on, however many screens it spans (the director, 2026-11-21:
-    /// "Scale, but cap at 12 total"), so the Meadow stays within Web's CPU.
+    /// The most butterflies on the desk with `areaCount` on, however many screens (the director, 2026-11-21: "Scale,
+    /// but cap at 12 total"), so the Meadow stays within Web's CPU. One scene across the screens holds at most this;
+    /// separate scenes, one per screen, share it (`areaCountShares`).
     public static let areaCountLimit = 12
+
+    /// Each screen's butterflies when every screen of a desk is its own scene ("One habitat across displays" off), in
+    /// the screens' order: each screen's own count by area (`areaCount`) while the desk's total is within
+    /// `areaCountLimit`; above it, the limit shared in proportion to those counts (so to the screens' areas), largest
+    /// remainders first, each screen at least 1. The total is then exactly the limit, the same as one scene across
+    /// the same screens; only a desk of more screens than the limit holds more (one each).
+    public static func areaCountShares(_ count: Int, screens: [CGSize]) -> [Int] {
+        let wants: [Int] = screens.map { (s: CGSize) -> Int in areaCount(count, width: Double(s.width), height: Double(s.height)) }
+        let total: Int = wants.reduce(0, +)
+        guard total > areaCountLimit else { return wants }
+        let limit: Int = max(areaCountLimit, screens.count)
+        let exact: [Double] = wants.map { (w: Int) -> Double in Double(limit) * Double(w) / Double(total) }
+        var shares: [Int] = exact.map { (e: Double) -> Int in max(1, Int(e)) }
+        var sum: Int = shares.reduce(0, +)
+        // Over (only when a few small screens were raised to 1): take from the screen furthest above its share.
+        while sum > limit {
+            var pick = -1
+            var most = -Double.infinity
+            for i in shares.indices where shares[i] > 1 {
+                let over: Double = Double(shares[i]) - exact[i]
+                if over > most { most = over; pick = i }
+            }
+            guard pick >= 0 else { break }
+            shares[pick] -= 1
+            sum -= 1
+        }
+        // Under: give to the screen furthest below its share; ties go to the earlier screen.
+        while sum < limit {
+            var pick = 0
+            var most = -Double.infinity
+            for i in shares.indices {
+                let under: Double = exact[i] - Double(shares[i])
+                if under > most { most = under; pick = i }
+            }
+            shares[pick] += 1
+            sum += 1
+        }
+        return shares
+    }
 
     /// `wantedCount` with `areaCount` on, for one screen of `width × height` points: the count in proportion to the
     /// screen's area, rounded, at most 24 (html:1382); the scene then holds at most `areaCountLimit` in all. The

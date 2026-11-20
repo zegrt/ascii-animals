@@ -326,37 +326,59 @@ private func meadowClicksCallOneAtATime() throws {
 }
 
 /// The CPU budget: on the owner's desk the Meadow (steps and painting both screens) costs no more than Web at 30 and
-/// 15 fps. Measured on this thread's CPU time, the better of three runs of each, painting only (no GPU), so it holds
-/// on machines without one.
+/// 15 fps. Measured on this thread's CPU time, painting only (no GPU), so it holds on machines without one. To stay
+/// steady on a busy machine or one with fast and slow cores, the two are measured as pairs, back to back (the order
+/// swapped every pair), at the user-interactive QoS that keeps the thread on the fast cores where it can; the check
+/// compares like with like: the median of the pairs' Meadow ÷ Web ratios must be at most 1.
 private func meadowWithinWebsCPU() throws {
     let cell = GridSpec.cell(forWidth: 2560)
+    let pairs = 9
+    let qos = qos_class_self()
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)
+    defer { pthread_set_qos_class_self_np(qos, 0) }
     func cpu() -> UInt64 { clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) }
-    func cost(_ kind: HabitatKind, fps: Int) -> Double {
+    func cost(_ kind: HabitatKind, fps: Int, seed: Int) -> Double {
         var s = Settings.defaults
         s.habitat = kind
-        var best = Double.infinity
-        for run in 0..<3 {
-            let sim = Habitats.make(s, seed: UInt64(1 + run)) as! CellPainter
-            sim.layout(terrain: desk, cell: cell, settings: s)
-            let vs = views(desk, cell)
-            for i in 0..<600 {
-                sim.step(tick)
-                if i % 2 == 1 { for (r, g, c) in vs { c.clear(); sim.paint(viewport: r, grid: g, theme: dark, into: c) } }
-            }
-            let frames = 4 * fps
-            let t0 = cpu()
-            for _ in 0..<frames {
-                for _ in 0..<(60 / fps) { sim.step(tick) }
-                for (r, g, c) in vs { c.clear(); sim.paint(viewport: r, grid: g, theme: dark, into: c) }
-            }
-            best = min(best, Double(cpu() - t0) / 1e6 / 4)
+        let sim = Habitats.make(s, seed: UInt64(seed)) as! CellPainter
+        sim.layout(terrain: desk, cell: cell, settings: s)
+        let vs = views(desk, cell)
+        for i in 0..<600 {
+            sim.step(tick)
+            if i % 2 == 1 { for (r, g, c) in vs { c.clear(); sim.paint(viewport: r, grid: g, theme: dark, into: c) } }
         }
-        return best
+        let frames = 4 * fps
+        let t0 = cpu()
+        for _ in 0..<frames {
+            for _ in 0..<(60 / fps) { sim.step(tick) }
+            for (r, g, c) in vs { c.clear(); sim.paint(viewport: r, grid: g, theme: dark, into: c) }
+        }
+        return Double(cpu() - t0) / 1e6 / 4
     }
+    func median(_ v: [Double]) -> Double { let s = v.sorted(); return s[s.count / 2] }
     for fps in [30, 15] {
-        let web = cost(.web, fps: fps), meadow = cost(.meadow, fps: fps)
-        print(String(format: "  %d fps: meadow %.2f ms/s, web %.2f ms/s", fps, meadow, web))
-        try expect(meadow <= web, String(format: "at %d fps the Meadow costs %.2f ms/s, Web %.2f", fps, meadow, web))
+        var ratios: [Double] = []
+        var meadows: [Double] = []
+        var webs: [Double] = []
+        for p in 0..<pairs {
+            let seed: Int = 1 + p % 3
+            var web = 0.0, meadow = 0.0
+            if p % 2 == 0 {
+                web = cost(.web, fps: fps, seed: seed)
+                meadow = cost(.meadow, fps: fps, seed: seed)
+            } else {
+                meadow = cost(.meadow, fps: fps, seed: seed)
+                web = cost(.web, fps: fps, seed: seed)
+            }
+            ratios.append(meadow / max(web, 1e-9))
+            meadows.append(meadow)
+            webs.append(web)
+        }
+        let ratio: Double = median(ratios)
+        let low: Double = ratios.min() ?? 0, high: Double = ratios.max() ?? 0
+        print(String(format: "  %d fps: meadow %.2f ms/s, web %.2f ms/s (medians); Meadow ÷ Web median %.2f over %d pairs (%.2f–%.2f)",
+                     fps, median(meadows), median(webs), ratio, pairs, low, high))
+        try expect(ratio <= 1, String(format: "at %d fps the Meadow costs %.2f× Web (median of %d pairs)", fps, ratio, pairs))
     }
 }
 

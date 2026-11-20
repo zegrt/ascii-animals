@@ -34,6 +34,10 @@ public final class MeadowWorld {
             flowers.tuning = tuning
         }
     }
+    /// The most butterflies this scene holds with `areaCount` on: `MeadowTuning.areaCountLimit`, or this screen's
+    /// share of it when each screen of the desk is its own scene (`MeadowTuning.areaCountShares`). A new limit takes
+    /// effect at the next `syncFlies`.
+    public var countLimit: Int = MeadowTuning.areaCountLimit
     /// The app's speed setting: the pointer's real time per step is `OceanClock.step / speed` (the sketch's Slow motion).
     public var speed = 1.0
 
@@ -82,9 +86,11 @@ public final class MeadowWorld {
 
     /// The meadow for `seed` on `terrain`: planted, its butterflies made and the opening moment set (the sketch's
     /// `start`, html:3033–3038).
-    public init(terrain: Terrain, cell: CGSize, tuning: MeadowTuning = .director, seed: Int32) {
+    public init(terrain: Terrain, cell: CGSize, tuning: MeadowTuning = .director, seed: Int32,
+                countLimit: Int = MeadowTuning.areaCountLimit) {
         let t = tuning.sanitized()
         self.tuning = t
+        self.countLimit = max(1, countLimit)
         self.terrain = terrain
         self.cell = cell
         let usable = MeadowWorld.usable(terrain) ? terrain : Terrain(rects: [])
@@ -525,12 +531,12 @@ public final class MeadowWorld {
 
     /// The count on the meadow (`wantedCount`, html:1382; the director's settings have area scaling off). With
     /// `areaCount` on, each screen counts by its own area (`MeadowTuning.areaCount`) and the scene holds their sum,
-    /// at most `MeadowTuning.areaCountLimit` across all its screens.
+    /// at most `countLimit` (12 across all its screens, or this screen's share of the desk's 12).
     var wantedCount: Int {
         guard tuning.areaCount, !screens.isEmpty else { return tuning.count }
         var n = 0
         for s in screens { n += MeadowTuning.areaCount(tuning.count, width: s.w, height: s.h) }
-        return min(MeadowTuning.areaCountLimit, n)
+        return min(countLimit, n)
     }
 
     /// `syncFlies(initial)` (html:1386–1446): keeps the number to the setting and the species mix even. At load they

@@ -19,6 +19,7 @@ final class HabitatScene {
 
     private static func makeSim(_ plan: ScenePlan, _ s: OceanKit.Settings) -> HabitatSim {
         let sim = Habitats.make(s, seed: UInt64.random(in: 1...UInt64.max))
+        sim.share(desk: plan.desk, index: plan.deskIndex)
         sim.layout(terrain: plan.terrain, cell: plan.cell, settings: s)
         return sim
     }
@@ -33,6 +34,7 @@ final class HabitatScene {
     func update(_ newPlan: ScenePlan, settings: OceanKit.Settings) {
         guard newPlan != plan else { return }
         plan = newPlan
+        sim.share(desk: plan.desk, index: plan.deskIndex)
         sim.layout(terrain: plan.terrain, cell: plan.cell, settings: settings)
     }
 

@@ -214,6 +214,64 @@ func settingsChecks() {
         let active = sim.world.flies.filter { !$0.leaving }
         try expect(active.count == 12 && active.allSatisfy { $0.kind != .morpho }, "after a new line-up: \(active.map(\.kind))")
     }
+    check("meadowTwelveOnTheDeskEitherWay") {
+        // "Cap at 12 total": the desk never holds more than 12, whether one scene spans the screens or each screen
+        // is its own scene ("One habitat across displays" off), on the owner's desk and on three displays.
+        let owner: [ScreenInfo] = [ScreenInfo(id: 1, frame: CGRect(x: 0, y: 0, width: 2560, height: 1440), scale: 2),
+                                   ScreenInfo(id: 2, frame: CGRect(x: 375, y: 1440, width: 1800, height: 1169), scale: 2)]
+        let three: [ScreenInfo] = [ScreenInfo(id: 1, frame: CGRect(x: 0, y: 0, width: 1800, height: 1169), scale: 2),
+                                   ScreenInfo(id: 2, frame: CGRect(x: 1800, y: 0, width: 2560, height: 1440), scale: 2),
+                                   ScreenInfo(id: 3, frame: CGRect(x: 4360, y: 0, width: 1920, height: 1080), scale: 1)]
+        // The app's way: a sim per plan, told its place on the desk, then laid out (HabitatScene.makeSim).
+        func scenes(_ screens: [ScreenInfo], shared: Bool, _ s: Settings) -> [MeadowSim] {
+            SceneLayout.plan(screens, shared: shared).map { (plan: ScenePlan) -> MeadowSim in
+                let sim = MeadowSim(settings: s, seed: UInt64(7 + plan.deskIndex))
+                sim.share(desk: plan.desk, index: plan.deskIndex)
+                sim.layout(terrain: plan.terrain, cell: plan.cell, settings: s)
+                return sim
+            }
+        }
+        func onDesk(_ sims: [MeadowSim]) -> [Int] { sims.map { (m: MeadowSim) -> Int in m.world.flies.filter { !$0.leaving }.count } }
+        for (name, screens) in [("owner's desk", owner), ("three displays", three)] {
+            for n in 1...12 {
+                var s = Settings.defaults
+                s.habitat = .meadow; s.meadowCount = n
+                let one: Int = onDesk(scenes(screens, shared: true, s)).reduce(0, +)
+                let each: [Int] = onDesk(scenes(screens, shared: false, s))
+                let total: Int = each.reduce(0, +)
+                // Both ways hold the same number: each screen's count by area, at most 12 in all, each screen at least 1.
+                try expect(one <= 12 && total <= 12 && total == one && each.allSatisfy { $0 >= 1 },
+                           "\(name), count \(n): one scene \(one), separate \(each)")
+            }
+        }
+        // The owner's desk at the default 7: 12 + 7 by area, shared as 8 + 4 (one scene across it holds 12).
+        var d = Settings.defaults
+        d.habitat = .meadow; d.meadowCount = 7
+        let ownerSeven: [Int] = onDesk(scenes(owner, shared: false, d))
+        try expect(ownerSeven == [8, 4], "owner's desk at 7: \(ownerSeven)")
+        // Below the cap each screen keeps its own count: 3 gives 5 + 3.
+        d.meadowCount = 3
+        let ownerThree: [Int] = onDesk(scenes(owner, shared: false, d))
+        try expect(ownerThree == [5, 3], "owner's desk at 3: \(ownerThree)")
+        // One display alone keeps the whole 12.
+        let alone: [Int] = MeadowTuning.areaCountShares(7, screens: [CGSize(width: 2560, height: 1440)])
+        try expect(alone == [12], "one display: \(alone)")
+        // A new count in place keeps the share: 3 → 12 → 5 → 12 on separate scenes, never more than 12 on the desk.
+        let sims = scenes(owner, shared: false, d)
+        for n in [12, 5, 12] {
+            d.meadowCount = n
+            for m in sims {
+                m.update(settings: d)
+                for _ in 0..<30 { m.step(1.0 / 60.0) }
+            }
+            let now: Int = onDesk(sims).reduce(0, +)
+            try expect(now <= 12, "after a change to \(n): \(onDesk(sims))")
+        }
+        // Many small screens: each at least 1, the rest by area; more screens than 12 is the only way past it.
+        let wall: [CGSize] = Array(repeating: CGSize(width: 1920, height: 1080), count: 6) + [CGSize(width: 6016, height: 3384)]
+        let wallShares: [Int] = MeadowTuning.areaCountShares(12, screens: wall)
+        try expect(wallShares.reduce(0, +) == 12 && wallShares.allSatisfy { $0 >= 1 }, "seven screens: \(wallShares)")
+    }
     check("settingsRoundTrip") {
         var s = Settings.defaults
         s.calm = true; s.appearance = .light; s.sharks = [.nurse, .zebra]

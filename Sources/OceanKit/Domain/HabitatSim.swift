@@ -8,6 +8,10 @@ public protocol HabitatSim: AnyObject {
     var time: Double { get }
     var stepCount: Int { get }
     func layout(terrain: Terrain, cell: CGSize, settings: Settings)
+    /// Where this scene sits on the desk when each screen is its own scene: every screen's size, in order, and which
+    /// one is this scene's (`ScenePlan.desk`). Empty when one scene spans the desk. Called before `layout`, so a
+    /// habitat can share a desk-wide cap (the Meadow's 12); the others ignore it.
+    func share(desk: [CGSize], index: Int)
     func step(_ dt: Double)
     func pointerMoved(_ x: Double, _ y: Double)
     func pointerLeft()
@@ -16,6 +20,10 @@ public protocol HabitatSim: AnyObject {
     func update(settings: Settings)
     /// Advance to a representative state for a still.
     func settle()
+}
+
+public extension HabitatSim {
+    func share(desk: [CGSize], index: Int) {}
 }
 
 public enum Habitats {

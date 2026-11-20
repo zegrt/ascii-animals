@@ -13,6 +13,8 @@ public final class MeadowSim: CellPainter {
     private var cell = CGSize(width: 13, height: 19)
     public private(set) var stepCount = 0
     private var laidOut = false
+    private var desk: [CGSize] = []
+    private var deskIndex = 0
 
     public init(settings: Settings, seed: UInt64, tuning: MeadowTuning = .director) {
         self.seed = Int32(truncatingIfNeeded: seed)
@@ -43,12 +45,34 @@ public final class MeadowSim: CellPainter {
         self.cell = cell
         world.speed = settings.speed
         if !laidOut {
-            world = MeadowWorld(terrain: terrain, cell: cell, tuning: tuning, seed: seed)
+            world = MeadowWorld(terrain: terrain, cell: cell, tuning: tuning, seed: seed, countLimit: countLimit)
             world.speed = settings.speed
             laidOut = true
         } else {
             world.layout(terrain: terrain, cell: cell)
         }
+    }
+
+    /// This scene's screen on a desk where each screen is its own scene: the scene then holds its share of the 12
+    /// (`MeadowTuning.areaCountShares`), so the desk never shows more than one scene across it would. A new share
+    /// takes effect the sketch's way (spares leave, newcomers fly in).
+    public func share(desk: [CGSize], index: Int) {
+        self.desk = desk
+        deskIndex = index
+        applyCountLimit()
+    }
+
+    /// The most this scene holds: 12, or its screen's share of the desk's 12.
+    var countLimit: Int {
+        guard desk.count > 1, desk.indices.contains(deskIndex) else { return MeadowTuning.areaCountLimit }
+        return MeadowTuning.areaCountShares(tuning.count, screens: desk)[deskIndex]
+    }
+
+    private func applyCountLimit() {
+        let limit = countLimit
+        guard world.countLimit != limit else { return }
+        world.countLimit = limit
+        if laidOut { world.syncFlies() }
     }
 
     public func step(_ dt: Double) {
@@ -68,6 +92,7 @@ public final class MeadowSim: CellPainter {
         guard t != tuning else { return }
         tuning = t
         world.tuning = t
+        world.countLimit = countLimit
         if laidOut { world.syncFlies() }
     }
 
