@@ -147,7 +147,7 @@ const params = new URLSearchParams(location.search);
 // `?debug=1&fixture=<name>` runs a replay fixture (see "Replay fixture" below): seed 42 unless `?seed=` is given.
 // Only the named scenarios run; any other name (even one an object inherits, such as `constructor`) is refused.
 const FIXTURE_NAMES = ['default', 'air-flowers'];
-const FIXTURE_ASKED = params.get('debug') === '1' && params.has('fixture') ? params.get('fixture') : '';
+const FIXTURE_ASKED = params.get('debug') === '1' && params.has('fixture') ? params.get('fixture') : null;   // null: not asked; '' is refused
 const FIXTURE = FIXTURE_NAMES.includes(FIXTURE_ASKED) ? FIXTURE_ASKED : '';
 let seed = params.has('seed') ? (+params.get('seed') | 0) : FIXTURE ? 42 : ((Math.random() * 1e6) | 0);
 function mulberry32(a) {
@@ -3043,7 +3043,7 @@ function start() {
     get flies() { return flies; }, get flowers() { return flowers; }, get set() { return set; }, get t() { return simT; }, get ptr() { return ptr; },
     get dust() { return dust; }, get paused() { return paused; }, get W() { return W; }, get H() { return H; }, get S() { return S; }, wind, windAt, get DWX() { return DWX; }, get PFX() { return PFX; }, get PFY() { return PFY; } };
   if (FIXTURE) { runFixture(FIXTURE); return; }
-  if (FIXTURE_ASKED) {
+  if (FIXTURE_ASKED !== null) {
     // Refused: say so on the page and in the console, then run the normal sketch.
     const msg = 'Unknown fixture "' + FIXTURE_ASKED + '" refused; known: ' + FIXTURE_NAMES.join(', ');
     window.__fixtureRefused = FIXTURE_ASKED;
