@@ -59,6 +59,11 @@ Director's profile: none
   private progress ledger. The unreviewed Meadow commits (5496bbf breeze and flowers, 0cce823 butterfly flight) moved
   off main onto task branch `meadow-t1-2`; main is back at 3043eed (the plan) (manager).
 
+- 2026-11-20: The board files (WORKBOARD.md, briefs/, reviews/, reports/) may live in the public repo for now; to be
+  revisited later ("yesh fr now its fine we will deal with taht later", the director).
+- 2026-11-20: t1-2 gets its CI run through a draft pull request (CI runs only on main and on pull requests), so a
+  red build never lands on main (manager).
+
 ## Tasks
 
 | Id | Task | Size | Files | Branch | Builder | Reviewer | Rounds | State | Brief |
