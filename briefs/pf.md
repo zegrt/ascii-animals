@@ -35,3 +35,12 @@ add equivalence checks).
 
 ## Out of scope
 Any visible change, the cap, the check's rule, app UI.
+
+## Fix round 1 (from the review, 2026-11-21; small)
+Read `git show origin/review-pf:reviews/pf.md` (finding 1 and its evidence). The flower-cache records grew from 36 to
+64 bytes, so a relayout that adds large viewports reallocates every retained slot (4,331 allocations once) and the
+extreme probe's peak memory rose from 156 to 233 MiB. Keep the cached colours in storage that scales with the
+recorded ops (not in every record), so relayouts allocate no more than 8e215f0 did and peak memory is back near it.
+Keep the CPU gain, the same frames (byte for byte against 8e215f0) and allocation-free warm frames. Report peak
+memory on the owner's desk and in the review's probe, before and after. Add a "Fix round 1" section to
+`reports/pf.md`.
