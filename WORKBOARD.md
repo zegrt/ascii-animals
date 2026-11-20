@@ -142,9 +142,9 @@ Director's profile: none
 
 ## Decisions
 
-- 2026-11-20: m1's pointer air trails the pointer by 0.14 s, the smallest lag that keeps bursty 15 Hz input within
-  5 % (the sketch responds at once). Kept for now; the director judges it in m7's pointer film, and requiring
-  faster input (30 Hz: 0.1 s; 60 Hz: 0.083 s) is the fallback (manager).
+- 2026-11-20: (withdrawn the same day) m1's pointer air trailing by 0.14 s. Replaced by the sketch's own per-step
+  stir with no lag (Review routing, m1, re-check); the 5 % burst rule was the manager's, not the director's
+  (manager).
 
 - 2026-11-20: The port plan is approved: the director said "dbbl check shit then go" and answered its three
   questions. Ground colour per cell: "Yes, change it" (m3). The monarch life cycle and courtship chases: "Leave out
@@ -240,13 +240,13 @@ Director's profile: none
 | t8 | Energy, measured with the director (plan T8) | Content | to brief | meadow-t8 | | | 0 | open (waits on t7) | |
 | t9 | Choosing the Meadow: menu, Settings, welcome (plan T9) | Content | to brief | meadow-t9 | | | 0 | open (waits on t8); the what's-new is not full screen (Corrections, 2026-11-20) | |
 | t10 | Words, watch and release 3.1 (plan T10; outward-facing, the director approves the release) | Content | to brief | meadow-t10 | | | 0 | open (waits on t9) | |
-| m1 | Air and flowers from above (breeze, pointer air, downwash, flowers, planting, clicks on flowers, the tuning file) | Content | Sources/OceanKit/Meadow/{MeadowTuning,MeadowMath,Breeze,Flowers}.swift (new), Sources/OceanChecks/MeadowChecks.swift (new), Sources/OceanChecks/main.swift, Sources/OceanTool/{MeadowAir,main}.swift (optional), a copy of the sketch fixture in the checks' resources, Package.swift (grown: bundles the fixtures as the checks' resources; for the review to judge) | meadow-m1 (from main) | builder-m1 (Claude Opus, T3 child thread) | 0 | open (waits for the sketch's fix round 1 and its re-check) | built (meadow-m1 @ 5965216, done with concerns); Codex review af7dbb1 in (7 findings, routed below); CI green on 5965216 (draft PR #3); fix round 1 done with concerns (meadow-m1 @ 3e54973); Codex re-check building; CI green on 3e54973 (PR #3)
+| m1 | Air and flowers from above (breeze, pointer air, downwash, flowers, planting, clicks on flowers, the tuning file) | Content | Sources/OceanKit/Meadow/{MeadowTuning,MeadowMath,Breeze,Flowers}.swift (new), Sources/OceanChecks/MeadowChecks.swift (new), Sources/OceanChecks/main.swift, Sources/OceanTool/{MeadowAir,main}.swift (optional), a copy of the sketch fixture in the checks' resources, Package.swift (grown: bundles the fixtures as the checks' resources; for the review to judge) | meadow-m1 (from main) | builder-m1 (Claude Opus, T3 child thread) | 0 | 2 | built (meadow-m1 @ 5965216, done with concerns); Codex review af7dbb1 in (7 findings, routed below); CI green on 5965216 (draft PR #3); fix round 1 done with concerns (meadow-m1 @ 3e54973); re-check 9cc9790: 4 fixed, 3 not (routed below; the pointer timing rewritten); CI green on 3e54973 (PR #3); fix round 2 building
 | m2 | Flight from above | Content | Sources/OceanKit/Meadow/{ButterflySpecies,Butterfly}.swift (new), Meadow/MeadowTuning.swift (additions), Sources/OceanChecks/{MeadowFlightChecks,main}.swift, Sources/OceanTool/{MeadowPaths,main}.swift | meadow-m2 (from meadow-m1) | | Codex | 0 | open (waits on m1) | briefs/m2.md |
 | m3 | A ground colour per cell in the shared canvas | Content | Sources/OceanKit/Render/{CellCanvas,OceanRenderer,Shaders}.swift, Sources/OceanChecks/CanvasChecks.swift, Sources/OceanChecks/main.swift (only if a new check group needs registering) | meadow-m3 (from main) | builder-m3 (Claude Opus, T3 child thread) | Codex | 1 | reviewed (meadow-m3 @ 796d61e: review 3f52b22, fix round 1 5d12bea, re-check e811cc2 passed, CI green on 796d61e); waits for the end of the stack | briefs/m3.md |
 | m4 | Painter: the meadow | Content | to brief (port plan m4) | meadow-m4 (from meadow-m2, with m3 merged up the stack) | | Codex | 0 | open (waits on m2, m3) | |
 | m5 | Painter: the butterflies | Content | to brief (port plan m5) | meadow-m5 | | Codex | 0 | open (waits on m4) | |
 | m6 | World and behaviours, several screens | Content | to brief (port plan m6) | meadow-m6 | | Codex | 0 | open (waits on m5) | |
-| m7 | Pointer and clicks | Content | to brief (port plan m7) | meadow-m7 | | Codex | 0 | open (waits on m6) | |; carries m1 finding 1's host side (each pointer event's own time and position)
+| m7 | Pointer and clicks | Content | to brief (port plan m7) | meadow-m7 | | Codex | 0 | open (waits on m6) | |; feeds the Meadow the latest pointer position per step, as Web does (m1's pointer rewrite)
 | m8 | The Meadow habitat, its presets and settings, OceanTool | Content | to brief (port plan m8) | meadow-m8 | | Codex | 0 | open (waits on m7) | |
 
 ## Review routing
@@ -269,6 +269,26 @@ Director's profile: none
   - Rewrite the brief: finding 1's host side (PointerMonitor and OceanDirector supplying each event's own time and
     position) goes into m7's brief.
   - Dropped: none. Asked of the director: none.
+
+  - Re-check 9cc9790 (2026-11-20, of 3e54973): fixed 2, 3, 4, 6; CI green on 3e54973. Not fixed: 1 (paired
+    15 Hz bursts still 6.9 % off at 0.14 s; a 15 fps, 1.5x speed host case 12 %; a frame stall 10 %), 5 (a
+    screen offset by 2 pt lets a bloom cross the shared edge; seen in real planting at seed 7773), 7 (two
+    comments overclaim). New: saturated catch-up differs 14.8 % (medium); a missing fixture tick traps the
+    runner (low).
+  - Routed by the manager, stepping back on finding 1 (review.restart: the pointer timing has now failed two
+    rounds, and each fix grew a queue, a lag, timestamps and a host clock contract). The cause is upstream: the
+    manager's brief turned the review's suggestion into a hard rule nobody asked for ("the same air within 5 %
+    for bursty 15 Hz input"). The director's sketch does it simply, as Web does: each step stirs along the way
+    the pointer went since the last step (the sketch's `stirStep`, fix round 1). Rewrite: port exactly that, no
+    lag, no queue, no timestamps; the stir is a soft, fast-decaying wind, and a few percent between input rates
+    is not visible. The 0.14 s lag decision is withdrawn. Checks: the port matches the sketch's `stirStep` for
+    the same per-step positions; regular 30/60/120 Hz input within 5 % (as the sketch achieves); no stroke lost
+    on leave and re-entry; finite and bounded. m7 then needs only the latest pointer position per step.
+  - Fix (fix round 2, in briefs/m1.md): 5 (test the bloom's actual segment from its patch centre against every
+    shared edge, offset screens and seam ends included; seed 7773's case as a check), 7 (comments say only what
+    the code does, including the spark buffer's real limit), the fixture runner trap (validate integer fields
+    before converting). The saturated catch-up finding goes away with the rewrite of 1 (no catch-up).
+  - Asked of the director: none (internal; the visible result is closer to the sketch: the stir is immediate).
 
 - m3, Codex review 3f52b22 (review-m3, 2026-11-20, of meadow-m3 @ 2640dc6), routed by the manager. Ocean and Web
   verified byte for byte (checks, digests, 8 stills, 60 Ocean frames); the dissolve ruling upheld (unrevealed cells
