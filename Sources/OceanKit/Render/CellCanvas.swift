@@ -28,6 +28,10 @@ public final class CellCanvas {
     /// so a habitat that never writes it (Ocean, Web) costs nothing.
     public private(set) var ground: [UInt32] = []
     public static let noGround: UInt32 = 0
+    /// Whether anything wrote the ground (`putGround`, `withGround`) since the
+    /// last `clear()`. The renderer uploads the ground only then, so a painter
+    /// without one (Web after a Meadow on the same screen) uploads nothing.
+    public private(set) var hasGround = false
     public var background = SIMD3<Float>(0, 0, 0)
     /// The one-device-pixel line at each cell's top and left edge; a == 0: no grid.
     public var gridColor = SIMD4<Float>(0, 0, 0, 0)
@@ -46,7 +50,11 @@ public final class CellCanvas {
     /// Empties every cell, its ground included (keeps `background` and
     /// `gridColor`), in place.
     public func clear() {
-        if !ground.isEmpty { ground.withUnsafeMutableBufferPointer { $0.update(repeating: CellCanvas.noGround) } }
+        // Only `putGround` and `withGround` write the ground, and both set `hasGround`.
+        if hasGround {
+            ground.withUnsafeMutableBufferPointer { $0.update(repeating: CellCanvas.noGround) }
+            hasGround = false
+        }
         block.withUnsafeMutableBufferPointer { $0.update(repeating: 0) }
         ink.withUnsafeMutableBufferPointer { $0.update(repeating: 0) }
         glyph.withUnsafeMutableBufferPointer { $0.update(repeating: CellCanvas.noGlyph) }
@@ -71,6 +79,7 @@ public final class CellCanvas {
         guard col >= 0, col < cols, row >= 0, row < rows else { return }
         growGround()
         ground[row * cols + col] = CellCanvas.pack(color)
+        hasGround = true
     }
 
     /// Makes `ground` `cols * rows` long (all `noGround`) if it is still empty,
@@ -79,9 +88,11 @@ public final class CellCanvas {
         if ground.isEmpty { ground = [UInt32](repeating: CellCanvas.noGround, count: cols * rows) }
     }
 
-    /// Grows `ground` if needed and hands it over for writing in place.
+    /// Grows `ground` if needed and hands it over for writing in place. Counts
+    /// as a ground write (`hasGround`), whatever `body` writes.
     public func withGround<R>(_ body: (inout UnsafeMutableBufferPointer<UInt32>) throws -> R) rethrows -> R {
         growGround()
+        hasGround = true
         return try ground.withUnsafeMutableBufferPointer(body)
     }
 

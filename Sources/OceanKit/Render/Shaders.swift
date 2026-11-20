@@ -641,8 +641,9 @@ fragment float4 compose_main(VOut in [[stage_in]],
 
 // ---------------------------------------------------------------- canvas
 // A CellCanvas habitat. Colours arrive final (no light-theme inversion).
-// Inputs (OceanRenderer.swift, CanvasUniforms): textures one texel per cell;
-// 6 is the ground, read only when misc.y is 1 (a == 0: plain background).
+// Inputs (OceanRenderer.swift, CanvasUniforms): textures 0-2 and 4-6 one texel
+// per cell; 3 is the glyph atlas; 6 is the ground, read only when misc.y is 1
+// (a == 0: plain background).
 
 struct CanvasUniforms {
     float4 grid;       // cols, rows, cell w, cell h (points)

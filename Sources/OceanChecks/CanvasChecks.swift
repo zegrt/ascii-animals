@@ -235,83 +235,8 @@ func canvasRenderChecks() {
             throw CheckFailure(detail: "reveal 0: pixel (\(x),\(y)) is \(px(hidden, x, y)), not background")
         } }
     }
-    check("canvasGroundDraws") {
-        // A ground under a block (0,0), under a glyph (1,0), alone and half mixed (2,1); the rest plain background.
-        final class Ground: CellPainter {
-            static let under = SIMD3<Float>(20, 90, 40) / 255
-            static let half = SIMD3<Float>(120, 200, 60) / 255
-            var withGround = true
-            var kind: HabitatKind { .web }
-            var time: Double { 0 }
-            var stepCount: Int { 0 }
-            func layout(terrain: Terrain, cell: CGSize, settings: Settings) {}
-            func step(_ dt: Double) {}
-            func pointerMoved(_ x: Double, _ y: Double) {}
-            func pointerLeft() {}
-            func pointerDown(_ x: Double, _ y: Double) {}
-            func update(settings: Settings) {}
-            func settle() {}
-            func paint(viewport: CGRect, grid: GridSpec, theme: ThemeParams, into canvas: CellCanvas) {
-                canvas.background = TestPainter.background
-                canvas.gridColor = TestPainter.grid
-                canvas.put(0, 0, glyph: " ", ink: .zero, block: TestPainter.block)
-                canvas.put(1, 0, glyph: "x", ink: SIMD4<Float>(TestPainter.ink, 1))
-                guard withGround else { return }
-                canvas.putGround(0, 0, ground: SIMD4<Float>(Ground.under, 1))
-                canvas.putGround(1, 0, ground: SIMD4<Float>(Ground.under, 1))
-                canvas.putGround(2, 1, ground: SIMD4<Float>(Ground.half, 0.5))
-            }
-        }
-        let r = try OceanRenderer(device: device)
-        let vp = try r.makeViewport(pointSize: size, scale: scale, cell: cell)
-        let painter = Ground()
-        let p = try frame(r, vp, painter)
-        let cw = Int(cell.width * scale), ch = Int(cell.height * scale)
-        let bg: SIMD3<Float> = TestPainter.background
-        let gridRGB = SIMD3<Float>(TestPainter.grid.x, TestPainter.grid.y, TestPainter.grid.z)
-        let gridA: Float = TestPainter.grid.w
-        func over(_ base: SIMD3<Float>, _ top: SIMD3<Float>, _ a: Float) -> SIMD3<Float> { base + (top - base) * a }
-        // The half ground as packed: a = 128/255.
-        let halfA: Float = 128 / 255
-        let halfGround: SIMD3<Float> = over(bg, Ground.half, halfA)
-        func centre(_ c: Int, _ row: Int) -> SIMD3<Float> { px(p, c * cw + cw / 2, row * ch + ch / 2) }
-
-        // Under the block: the block itself, the ground in its inset strip, the grid line over the ground.
-        try expect(near(centre(0, 0), TestPainter.block), "block centre \(centre(0, 0))")
-        try expect(near(px(p, 1, ch / 2), Ground.under), "inset strip \(px(p, 1, ch / 2)) vs \(Ground.under * 255)")
-        try expect(near(px(p, cw / 2, 1), Ground.under), "inset top strip \(px(p, cw / 2, 1))")
-        let gridOverUnder: SIMD3<Float> = over(Ground.under, gridRGB, gridA)
-        try expect(near(px(p, 0, ch / 2), gridOverUnder), "grid over ground \(px(p, 0, ch / 2)) vs \(gridOverUnder * 255)")
-        // Under the glyph: ink pixels, and the ground (never the background) around them.
-        var inked = 0, grounded = 0
-        for y in 1..<ch { for x in (cw + 1)..<(2 * cw) {
-            let v = px(p, x, y)
-            if near(v, TestPainter.ink, 2) { inked += 1 }
-            if near(v, Ground.under) { grounded += 1 }
-            if near(v, bg) { throw CheckFailure(detail: "glyph cell shows the background at (\(x),\(y))") }
-        } }
-        try expect(inked > 4 && grounded > cw * ch / 2, "glyph cell: \(inked) ink, \(grounded) ground pixels")
-        // Alone, half mixed: the whole empty cell, the grid line drawn over it.
-        try expect(near(centre(2, 1), halfGround, 1.6), "half ground \(centre(2, 1)) vs \(halfGround * 255)")
-        try expect(near(px(p, 2 * cw + 1, ch + 1), halfGround, 1.6), "half ground corner \(px(p, 2 * cw + 1, ch + 1))")
-        let gridOverHalf: SIMD3<Float> = over(halfGround, gridRGB, gridA)
-        try expect(near(px(p, 2 * cw, ch + ch / 2), gridOverHalf, 1.6), "grid over half ground \(px(p, 2 * cw, ch + ch / 2))")
-        // Everywhere else: the plain background.
-        for (c, row) in [(2, 0), (3, 0), (0, 1), (1, 1), (3, 1), (0, 2), (1, 2), (2, 2), (3, 2)] {
-            try expect(near(centre(c, row), bg), "cell (\(c),\(row)) without ground \(centre(c, row))")
-        }
-        // The dissolve hides the ground with the rest of the cell: bare background.
-        let hidden = try frame(r, vp, painter, reveal: 0)
-        for y in 0..<h { for x in 0..<w where !near(px(hidden, x, y), bg) {
-            throw CheckFailure(detail: "reveal 0: pixel (\(x),\(y)) is \(px(hidden, x, y)), not background")
-        } }
-        // Cleared each frame: once the painter stops writing a ground, none shows.
-        painter.withGround = false
-        let gone = try frame(r, vp, painter)
-        let goneHalf = px(gone, 2 * cw + cw / 2, ch + ch / 2)
-        try expect(near(px(gone, 1, ch / 2), bg) && near(px(gone, cw + 2, ch - 2), bg) && near(goneHalf, bg),
-                   "ground left over: \(px(gone, 1, ch / 2)) \(goneHalf)")
-    }
+    check("canvasGroundDraws") { try canvasGroundDraws(device: device, theme: theme) }
+    check("canvasGroundRing") { try canvasGroundRing(device: device, theme: theme) }
     check("canvasOverlayGlyph") {
         // A "-" overlay over a "|" base (as dew over silk): both show, the overlay on top where they cross; an
         // overlay alone draws too.
@@ -407,4 +332,240 @@ func canvasRenderChecks() {
         try expect(stride(from: 0, to: p.count, by: 4).allSatisfy { p[$0] == 0 && p[$0 + 1] == 0 && p[$0 + 2] == 0 },
                    "not black: first pixel \(px(p, 0, 0))")
     }
+}
+
+// ---------------------------------------------------------------- ground
+// Named functions rather than long check closures: CI's Swift 6.3.3 times out type-checking long closures.
+
+/// The canvas checks' 4 x 3 viewport: cells 13 x 19 pt, 52 x 57 pt at 2x.
+private let groundCell = CGSize(width: 13, height: 19)
+private let groundSize = CGSize(width: 52, height: 57)
+private let groundScale: CGFloat = 2
+
+/// TestPainter's picture (block at (0,0), "x" at (1,0)) with a ground: `under` beneath both, and `half` mixed by
+/// 128/255 alone in the empty cell (2,1); optionally `corner` in the grid's last cell. Every other cell has none.
+private final class GroundPainter: CellPainter {
+    static let under = SIMD3<Float>(20, 90, 40) / 255
+    static let half = SIMD3<Float>(120, 200, 60) / 255
+    /// The ground under (0,0) and (1,0); nil: this paint writes no ground at all.
+    var under: SIMD3<Float>? = GroundPainter.under
+    /// Write the ground in bulk through `withGround` instead of `putGround`.
+    var bulk = false
+    /// A ground in the bottom-right cell too.
+    var corner: SIMD3<Float>? = nil
+
+    var kind: HabitatKind { .web }
+    var time: Double { 0 }
+    var stepCount: Int { 0 }
+    func layout(terrain: Terrain, cell: CGSize, settings: Settings) {}
+    func step(_ dt: Double) {}
+    func pointerMoved(_ x: Double, _ y: Double) {}
+    func pointerLeft() {}
+    func pointerDown(_ x: Double, _ y: Double) {}
+    func update(settings: Settings) {}
+    func settle() {}
+
+    func paint(viewport: CGRect, grid: GridSpec, theme: ThemeParams, into canvas: CellCanvas) {
+        canvas.background = TestPainter.background
+        canvas.gridColor = TestPainter.grid
+        canvas.put(0, 0, glyph: " ", ink: .zero, block: TestPainter.block)
+        canvas.put(1, 0, glyph: "x", ink: SIMD4<Float>(TestPainter.ink, 1))
+        guard let under else { return }
+        let full: SIMD4<Float> = SIMD4<Float>(under, 1)
+        let halfMixed: SIMD4<Float> = SIMD4<Float>(GroundPainter.half, 0.5)
+        if bulk {
+            let cols: Int = canvas.cols
+            canvas.withGround { g in
+                g[0] = CellCanvas.pack(full)
+                g[1] = CellCanvas.pack(full)
+                g[cols + 2] = CellCanvas.pack(halfMixed)
+            }
+        } else {
+            canvas.putGround(0, 0, ground: full)
+            canvas.putGround(1, 0, ground: full)
+            canvas.putGround(2, 1, ground: halfMixed)
+        }
+        if let corner { canvas.putGround(canvas.cols - 1, canvas.rows - 1, ground: SIMD4<Float>(corner, 1)) }
+    }
+}
+
+/// One frame read back: BGRA bytes at the viewport's pixel size.
+private struct Readback {
+    let bytes: [UInt8]
+    let w: Int, h: Int
+    /// rgb in 0...255.
+    func px(_ x: Int, _ y: Int) -> SIMD3<Float> {
+        let i: Int = (y * w + x) * 4
+        return SIMD3<Float>(Float(bytes[i + 2]), Float(bytes[i + 1]), Float(bytes[i]))
+    }
+    /// Whether pixel (x, y) is `colour` (0...1) within `tol` of 255 per channel.
+    func shows(_ x: Int, _ y: Int, _ colour: SIMD3<Float>, _ tol: Float = 1.01) -> Bool {
+        let d: SIMD3<Float> = px(x, y) - colour * 255
+        return abs(d.x) <= tol && abs(d.y) <= tol && abs(d.z) <= tol
+    }
+}
+
+/// Draws one frame of `sim` through `vp` into a new target of the viewport's pixel size and reads it back.
+private func renderFrame(_ r: OceanRenderer, _ vp: ViewportRenderer, _ sim: HabitatSim, theme: ThemeParams,
+                         reveal: Float = 1) throws -> Readback {
+    let w: Int = Int((vp.pointSize.width * vp.scale).rounded())
+    let h: Int = Int((vp.pointSize.height * vp.scale).rounded())
+    let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: OceanRenderer.outputFormat, width: w, height: h, mipmapped: false)
+    d.usage = [.renderTarget, .shaderRead]
+    d.storageMode = .managed
+    guard let target = r.device.makeTexture(descriptor: d), let cb = r.queue.makeCommandBuffer() else {
+        throw CheckFailure(detail: "no target or command buffer")
+    }
+    vp.encode(habitat: sim, theme: theme, reveal: reveal, target: target, commandBuffer: cb)
+    guard let blit = cb.makeBlitCommandEncoder() else { throw CheckFailure(detail: "no blit encoder") }
+    blit.synchronize(resource: target)
+    blit.endEncoding()
+    cb.commit()
+    cb.waitUntilCompleted()
+    var bytes = [UInt8](repeating: 0, count: w * h * 4)
+    target.getBytes(&bytes, bytesPerRow: w * 4, from: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0)
+    return Readback(bytes: bytes, w: w, h: h)
+}
+
+private func over(_ base: SIMD3<Float>, _ top: SIMD3<Float>, _ a: Float) -> SIMD3<Float> { base + (top - base) * a }
+
+/// The ground shows wherever the background would (the block's inset strip, around a glyph, an empty cell, under the
+/// grid line), mixed by its alpha; nowhere else; not through the dissolve; and a paint without one uploads none.
+private func canvasGroundDraws(device: MTLDevice, theme: ThemeParams) throws {
+    let r = try OceanRenderer(device: device)
+    let vp = try r.makeViewport(pointSize: groundSize, scale: groundScale, cell: groundCell)
+    try expect(vp.grid.cols == 4 && vp.grid.rows == 3, "grid \(vp.grid)")
+    let painter = GroundPainter()
+    let p: Readback = try renderFrame(r, vp, painter, theme: theme)
+    try expect(vp.groundUploads == 1, "ground uploads after one frame: \(vp.groundUploads)")
+    let cw: Int = Int(groundCell.width * groundScale), ch: Int = Int(groundCell.height * groundScale)
+    let bg: SIMD3<Float> = TestPainter.background
+    let under: SIMD3<Float> = GroundPainter.under
+    let gridRGB = SIMD3<Float>(TestPainter.grid.x, TestPainter.grid.y, TestPainter.grid.z)
+    let gridA: Float = TestPainter.grid.w
+    // The half ground as packed: a = 128/255.
+    let halfA: Float = 128 / 255
+    let halfGround: SIMD3<Float> = over(bg, GroundPainter.half, halfA)
+    func centre(_ c: Int, _ row: Int) -> (Int, Int) { (c * cw + cw / 2, row * ch + ch / 2) }
+
+    // Under the block: the block itself, the ground in its inset strip, the grid line over the ground.
+    let (bx, by) = centre(0, 0)
+    try expect(p.shows(bx, by, TestPainter.block), "block centre \(p.px(bx, by))")
+    try expect(p.shows(1, ch / 2, under), "inset strip \(p.px(1, ch / 2)) vs \(under * 255)")
+    try expect(p.shows(cw / 2, 1, under), "inset top strip \(p.px(cw / 2, 1))")
+    let gridOverUnder: SIMD3<Float> = over(under, gridRGB, gridA)
+    try expect(p.shows(0, ch / 2, gridOverUnder), "grid over ground \(p.px(0, ch / 2)) vs \(gridOverUnder * 255)")
+    // Under the glyph: ink pixels, and the ground (never the background) around them.
+    var inked = 0, grounded = 0
+    for y in 1..<ch { for x in (cw + 1)..<(2 * cw) {
+        if p.shows(x, y, TestPainter.ink, 2) { inked += 1 }
+        if p.shows(x, y, under) { grounded += 1 }
+        if p.shows(x, y, bg) { throw CheckFailure(detail: "glyph cell shows the background at (\(x),\(y))") }
+    } }
+    try expect(inked > 4 && grounded > cw * ch / 2, "glyph cell: \(inked) ink, \(grounded) ground pixels")
+    // Alone, half mixed: the whole empty cell, the grid line drawn over it.
+    let (hx, hy) = centre(2, 1)
+    try expect(p.shows(hx, hy, halfGround, 1.6), "half ground \(p.px(hx, hy)) vs \(halfGround * 255)")
+    try expect(p.shows(2 * cw + 1, ch + 1, halfGround, 1.6), "half ground corner \(p.px(2 * cw + 1, ch + 1))")
+    let gridOverHalf: SIMD3<Float> = over(halfGround, gridRGB, gridA)
+    try expect(p.shows(2 * cw, ch + ch / 2, gridOverHalf, 1.6), "grid over half ground \(p.px(2 * cw, ch + ch / 2))")
+    // Everywhere else: the plain background.
+    let plain: [(Int, Int)] = [(2, 0), (3, 0), (0, 1), (1, 1), (3, 1), (0, 2), (1, 2), (2, 2), (3, 2)]
+    for (c, row) in plain {
+        let (x, y) = centre(c, row)
+        try expect(p.shows(x, y, bg), "cell (\(c),\(row)) without ground \(p.px(x, y))")
+    }
+    // The dissolve hides the ground with the rest of the cell: bare background.
+    let hidden: Readback = try renderFrame(r, vp, painter, theme: theme, reveal: 0)
+    for y in 0..<hidden.h { for x in 0..<hidden.w where !hidden.shows(x, y, bg) {
+        throw CheckFailure(detail: "reveal 0: pixel (\(x),\(y)) is \(hidden.px(x, y)), not background")
+    } }
+    // Cleared each frame: once the painter stops writing a ground, none shows and none is uploaded.
+    let uploads: Int = vp.groundUploads
+    painter.under = nil
+    let gone: Readback = try renderFrame(r, vp, painter, theme: theme)
+    try expect(vp.groundUploads == uploads, "a frame without ground uploaded one: \(vp.groundUploads) vs \(uploads)")
+    try expect(gone.shows(1, ch / 2, bg) && gone.shows(cw + 2, ch - 2, bg) && gone.shows(hx, hy, bg),
+               "ground left over: \(gone.px(1, ch / 2)) \(gone.px(hx, hy))")
+}
+
+/// The ground through every ring slot more than once (with and without a ground, by `putGround` and in bulk), a
+/// painter without one on the same viewport afterwards (Web after the Meadow), and resizes: the grid grows with a
+/// clipped last cell, then the scale alone changes. Each frame shows its own ground, and only frames that wrote one
+/// upload one.
+private func canvasGroundRing(device: MTLDevice, theme: ThemeParams) throws {
+    let r = try OceanRenderer(device: device)
+    let vp = try r.makeViewport(pointSize: groundSize, scale: groundScale, cell: groundCell)
+    let painter = GroundPainter()
+    let ch: Int = Int(groundCell.height * groundScale)
+    let bg: SIMD3<Float> = TestPainter.background
+    let halfGround: SIMD3<Float> = over(bg, GroundPainter.half, Float(128) / 255)
+    let halfX: Int = Int(2.5 * groundCell.width * groundScale), halfY: Int = Int(1.5 * groundCell.height * groundScale)
+
+    // Seven frames over three slots; frame 3 writes no ground, so frame 4 reuses a slot that holds an older ground.
+    for i in 0..<7 {
+        let before: Int = vp.groundUploads
+        let shade: Float = Float(30 + 30 * i) / 255
+        let colour: SIMD3<Float>? = i == 3 ? nil : SIMD3<Float>(shade, 1 - shade, 0.5)
+        painter.under = colour
+        painter.bulk = i == 5
+        let p: Readback = try renderFrame(r, vp, painter, theme: theme)
+        let want: SIMD3<Float> = colour ?? bg
+        try expect(p.shows(1, ch / 2, want), "frame \(i): inset strip \(p.px(1, ch / 2)) vs \(want * 255)")
+        try expect(p.shows(halfX, halfY, colour == nil ? bg : halfGround, 1.6), "frame \(i): half ground \(p.px(halfX, halfY))")
+        let uploads: Int = colour == nil ? before : before + 1
+        try expect(vp.groundUploads == uploads, "frame \(i): \(vp.groundUploads) ground uploads, want \(uploads)")
+    }
+
+    // A painter without a ground on the same viewport (as Web after the Meadow): through every slot, byte for byte
+    // what a fresh viewport draws, and no ground uploaded.
+    let fresh = try r.makeViewport(pointSize: groundSize, scale: groundScale, cell: groundCell)
+    let plain: Readback = try renderFrame(r, fresh, TestPainter(), theme: theme)
+    let uploads: Int = vp.groundUploads
+    let web = TestPainter()
+    for i in 0..<4 {
+        let p: Readback = try renderFrame(r, vp, web, theme: theme)
+        try expect(p.bytes == plain.bytes, "frame \(i) without ground differs from a fresh viewport")
+    }
+    try expect(vp.groundUploads == uploads, "frames without ground uploaded \(vp.groundUploads - uploads)")
+    try expect(fresh.groundUploads == 0, "a viewport that never had a ground uploaded \(fresh.groundUploads)")
+
+    // Resize to 8 x 3 cells at 1.5x, the last column and row clipped (101 x 52 pt): new textures, the ground in place.
+    let corner = SIMD3<Float>(230, 60, 200) / 255
+    painter.under = GroundPainter.under
+    painter.bulk = false
+    painter.corner = corner
+    try vp.resize(pointSize: CGSize(width: 101, height: 52), scale: 1.5, cell: groundCell)
+    try expect(vp.grid.cols == 8 && vp.grid.rows == 3, "resized grid \(vp.grid)")
+    func checkResized(_ label: String) throws {
+        let before: Int = vp.groundUploads
+        let p: Readback = try renderFrame(r, vp, painter, theme: theme)
+        try expect(vp.groundUploads == before + 1, "\(label): \(vp.groundUploads - before) ground uploads")
+        let s: Float = Float(vp.scale)
+        let cw: Float = Float(groundCell.width) * s, chF: Float = Float(groundCell.height) * s
+        func at(_ cx: Float, _ cy: Float) -> (Int, Int) { (Int(cx * cw), Int(cy * chF)) }
+        // The clipped bottom-right cell: inside it, past its grid lines.
+        let cornerX: Int = Int(7 * cw) + 4, cornerY: Int = Int(2 * chF) + 4
+        try expect(cornerX < p.w && cornerY < p.h, "\(label): corner pixel outside \(p.w) x \(p.h)")
+        try expect(p.shows(cornerX, cornerY, corner), "\(label): clipped corner \(p.px(cornerX, cornerY)) vs \(corner * 255)")
+        let (hx, hy) = at(2.5, 1.5)
+        try expect(p.shows(hx, hy, halfGround, 1.6), "\(label): half ground \(p.px(hx, hy))")
+        for (cx, cy) in [(Float(6.5), Float(0.5)), (Float(3.5), Float(1.5)), (Float(6.5), Float(2.5))] {
+            let (x, y) = at(cx, cy)
+            try expect(p.shows(x, y, bg), "\(label): cell at (\(cx),\(cy)) without ground \(p.px(x, y))")
+        }
+    }
+    try checkResized("8 x 3 at 1.5x")
+    // The scale alone (same grid): the textures are made again, the ground still in place.
+    try vp.resize(pointSize: CGSize(width: 101, height: 52), scale: 2, cell: groundCell)
+    try expect(vp.grid.cols == 8 && vp.grid.rows == 3, "rescaled grid \(vp.grid)")
+    try checkResized("8 x 3 at 2x")
+    // And a frame without a ground after the resizes: none shows, none uploaded.
+    let last: Int = vp.groundUploads
+    painter.under = nil
+    painter.corner = nil
+    let p: Readback = try renderFrame(r, vp, painter, theme: theme)
+    let cornerX: Int = Int(7 * groundCell.width * 2) + 4, cornerY: Int = Int(2 * groundCell.height * 2) + 4
+    try expect(p.shows(cornerX, cornerY, bg) && p.shows(1, ch / 2, bg), "ground left after the resizes: \(p.px(cornerX, cornerY))")
+    try expect(vp.groundUploads == last, "a frame without ground uploaded one after the resizes")
 }
