@@ -14,6 +14,10 @@
 //     flowers for S s (default 20) in the natural breeze, then one frame painted through the renderer (--scale
 //     default 1: a W x H pixel PNG). --poses: instead of the flown butterflies, each species (a row) held in
 //     seven poses, open to closed (MeadowStill.poseSheet), over the same meadow.
+//   OceanTool meadow-frames <dir> <W>x<H> [--seconds S] [--fps F] [--slow K] [--light] [--seed N] [--scale N]
+//     A Meadow film's frames (MeadowFrames.swift): the meadow-still scene stepped at the fixed 60 Hz from the first
+//     step, one PNG per frame, f00000.png on (default 10 s at 30 fps, scale 1). --slow K: each frame shows 1/K of
+//     the time (a 60 Hz state held over several frames, nothing in between made up).
 //   OceanTool bench [--habitat ocean|web]
 //   OceanTool bench --desk [--habitat ocean|web] [--separate] [--laptop WxH] [--density D] [--seconds S]
 //     CPU per second on the owner's desk (Bench.swift): both viewports drawn as the app draws them, at 30 and 15 fps.
@@ -52,6 +56,25 @@ func habitatOptions(_ s: inout Settings) {
         s.habitat = kind
     }
     if let list = option("--spiders") { s.webSpiders = list.split(separator: ",").compactMap { SpiderKind(rawValue: String($0)) } }
+}
+
+/// A Meadow size `<W>x<H>` (meadow-still, meadow-frames): exactly two plain numbers around one `x` (digits, at most
+/// one point), so `96xx96` or `96x96xgarbage` is refused, not read as 96 × 96; each 64 to 8192 pt and at most
+/// 16384 pixels at `scale`. Fails on anything else.
+func meadowSize(_ text: String, scale: Double) -> [Double] {
+    let parts: [Substring] = text.split(separator: "x", omittingEmptySubsequences: false)
+    func plain(_ t: Substring) -> Bool {
+        let digits: Bool = t.allSatisfy { (c: Character) -> Bool in c == "." || ("0"..."9").contains(c) }
+        let points: Int = t.filter { (c: Character) -> Bool in c == "." }.count
+        let ends: Bool = t.first != "." && t.last != "."
+        return !t.isEmpty && digits && points <= 1 && ends
+    }
+    let message: String = "bad size \(text): W and H 64 to 8192 pt, at most 16384 pixels at the scale"
+    guard parts.count == 2, parts.allSatisfy(plain) else { fail(message) }
+    let dims: [Double] = parts.compactMap { (t: Substring) -> Double? in Double(t) }
+    func fits(_ v: Double) -> Bool { v.isFinite && v >= 64 && v <= 8192 && v * scale <= 16384 }
+    guard dims.count == 2, dims.allSatisfy(fits) else { fail(message) }
+    return dims
 }
 
 switch command {
@@ -130,25 +153,32 @@ case "meadow-still":
         fail("bad --scale \(scaleText): 1 to 4")
     }
     guard args.count == 2 else { fail(usage) }
-    // Exactly two plain numbers around one `x` (digits, at most one point): `96xx96` or `96x96xgarbage` is refused,
-    // not read as 96 × 96.
-    let parts: [Substring] = args[1].split(separator: "x", omittingEmptySubsequences: false)
-    func plain(_ t: Substring) -> Bool {
-        let digits: Bool = t.allSatisfy { (c: Character) -> Bool in c == "." || ("0"..."9").contains(c) }
-        let points: Int = t.filter { (c: Character) -> Bool in c == "." }.count
-        let ends: Bool = t.first != "." && t.last != "."
-        return !t.isEmpty && digits && points <= 1 && ends
-    }
-    guard parts.count == 2, parts.allSatisfy(plain) else {
-        fail("bad size \(args[1]): W and H 64 to 8192 pt, at most 16384 pixels at the scale")
-    }
-    let dims: [Double] = parts.compactMap { (t: Substring) -> Double? in Double(t) }
-    guard dims.count == 2, dims.allSatisfy({ $0.isFinite && $0 >= 64 && $0 <= 8192 }),
-          dims[0] * scaleValue <= 16384, dims[1] * scaleValue <= 16384 else {
-        fail("bad size \(args[1]): W and H 64 to 8192 pt, at most 16384 pixels at the scale")
-    }
+    let dims: [Double] = meadowSize(args[1], scale: scaleValue)
     try MeadowStill.run(out: URL(fileURLWithPath: args[0]), size: CGSize(width: dims[0], height: dims[1]),
                         scale: CGFloat(scaleValue), light: light, calm: calm, seconds: seconds, seed: seed, poses: poses)
+
+case "meadow-frames":
+    let light = flag("--light")
+    let usage = "usage: OceanTool meadow-frames <dir> <W>x<H> [--seconds S] [--fps 10|12|15|20|30|60] [--slow K] [--light] [--seed N] [--scale N]"
+    // The still's checks, and the film's own: a whole fps that divides the 60 Hz step, a whole slow-down.
+    let secondsText = option("--seconds") ?? "10", seedText = option("--seed") ?? "1", scaleText = option("--scale") ?? "1"
+    let fpsText = option("--fps") ?? "30", slowText = option("--slow") ?? "1"
+    guard let seconds = Double(secondsText), seconds.isFinite, seconds > 0, seconds <= 3600 else {
+        fail("bad --seconds \(secondsText): more than 0, up to 3600")
+    }
+    guard let seed = UInt64(seedText) else { fail("bad --seed \(seedText): a whole number from 0") }
+    guard let scaleValue = Double(scaleText), scaleValue.isFinite, scaleValue >= 1, scaleValue <= 4 else {
+        fail("bad --scale \(scaleText): 1 to 4")
+    }
+    guard let fps = Int(fpsText), fps > 0, 60 % fps == 0 else { fail("bad --fps \(fpsText): 10, 12, 15, 20, 30 or 60") }
+    guard let slow = Int(slowText), slow >= 1, slow <= 16 else { fail("bad --slow \(slowText): a whole number 1 to 16") }
+    guard seconds * Double(fps) <= 100_000 else { fail("bad --seconds \(secondsText): at most 100000 frames") }
+    guard args.count == 2 else { fail(usage) }
+    let dims: [Double] = meadowSize(args[1], scale: scaleValue)
+    let dir = URL(fileURLWithPath: args[0], isDirectory: true)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    try MeadowFrames.run(dir: dir, size: CGSize(width: dims[0], height: dims[1]), scale: CGFloat(scaleValue),
+                         light: light, seconds: seconds, fps: fps, slow: slow, seed: seed)
 
 case "iconset":
     guard args.count == 1 else { fail("usage: OceanTool iconset <dir.iconset>") }
