@@ -45,6 +45,9 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-20, during sketch round 4: "leaves param at .9". Applies: task.change (round 4 is building on the same
+  file and its brief is frozen, so this waits until round 4 lands; then the manager sets the Leaves default from
+  1.24 to 0.9 as a Small change and refreshes localhost).
 - 2026-11-20, after playing with sketch round 3: "umm what happens when i keep clicking at the same point?" and new
   settings, the same as before except glide 0.44 → 0.1 (the new round-3 controls left at their defaults).
   Applies: new (the sketch's round 4: glide 0.1 is the default; what the manager found in the code: every click
