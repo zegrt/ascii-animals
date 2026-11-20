@@ -144,7 +144,9 @@ const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t
 const angDiff = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
 const params = new URLSearchParams(location.search);
 
-let seed = params.has('seed') ? (+params.get('seed') | 0) : ((Math.random() * 1e6) | 0);
+// `?debug=1&fixture=<name>` runs a replay fixture (see "Replay fixture" below): seed 42 unless `?seed=` is given.
+const FIXTURE = params.get('debug') === '1' && params.has('fixture') ? params.get('fixture') : '';
+let seed = params.has('seed') ? (+params.get('seed') | 0) : FIXTURE ? 42 : ((Math.random() * 1e6) | 0);
 function mulberry32(a) {
   return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -357,6 +359,9 @@ try { set = normalize(JSON.parse(localStorage.getItem(STORE) || 'null')); } catc
 if (params.get('defaults') === '1') set = normalize(null);
 if (params.has('theme')) set.theme = params.get('theme') === 'light' ? 'light' : 'dark';
 { const u = {}; for (const [k, v] of params) if (k.startsWith('s.') && k.slice(2) in DEFAULTS) u[k.slice(2)] = urlValue(k.slice(2), v); set = normalize(u, set); }
+// A replay fixture runs on its own settings, not the saved ones or the URL's (it never saves them).
+const FIXTURE_SETTINGS = { 'default': {}, 'air-flowers': { species: { monarch: false, morpho: false, swallowtail: false, white: false } } };
+if (FIXTURE && FIXTURE in FIXTURE_SETTINGS) set = normalize(FIXTURE_SETTINGS[FIXTURE]);
 function save() { try { localStorage.setItem(STORE, JSON.stringify(set)); } catch (e) { /* ignore */ } }
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -1407,24 +1412,34 @@ function syncFlies(initial) {
     const base = Math.floor(want / on.length), extra = want - base * on.length;
     on.slice().sort((a, c) => countOf(c) - countOf(a)).forEach((k, i) => { share[k] = base + (i < extra ? 1 : 0); });
   }
-  // More again: leavers of a species short of its share turn back before anyone new comes in.
-  for (const b of flies) if (active.length < want && b.leaving && on.includes(b.kind) && countOf(b.kind) < share[b.kind]) { b.leaving = false; pickWaypoint(b); active.push(b); }
   // A species over its share (another was turned back on) sends its spare ones out through an edge; the fill below
-  // brings the short species in from an edge. Nobody pops.
+  // brings the short species in. Nobody pops. This runs before the turn-back so that, at a full count, the short
+  // species can still take back its own leavers (fix round 2: turning a species on and off while paused grew the
+  // array, because new ones were made while that species' old leavers were kept).
   if (!initial) for (const k of on) while (countOf(k) > share[k]) {
     const b = leaver([k], true); if (!b) break;
     sendAway(b); active = flies.filter(o => !o.leaving);
   }
+  // More again: leavers of a species short of its share turn back before anyone new comes in.
+  for (const b of flies) if (active.length < want && b.leaving && on.includes(b.kind) && countOf(b.kind) < share[b.kind]) { b.leaving = false; pickWaypoint(b); active.push(b); }
   let wait = 0;
   while (active.length < want) {
-    // The species with the fewest on screen, so 4 butterflies are one of each.
+    // The species with the fewest on screen, so 4 butterflies are one of each. After load, a species short of its
+    // share comes first, so the fill lands on the mix above.
     let best = null, bc = 1e9; const order = shuffle(on.slice());
-    for (const k of order) { const c = countOf(k); if (c < bc) { bc = c; best = k; } }
+    for (const k of order) { const c = countOf(k) + (!initial && countOf(k) >= share[k] ? 1e6 : 0); if (c < bc) { bc = c; best = k; } }
+    // Never a new one of a species while one of its leavers is still here: that one turns back instead. So every
+    // species holds at most the count, and any sequence of changes keeps the array bounded.
+    const back = initial ? null : flies.find(o => o.leaving && o.kind === best);
+    if (back) { back.leaving = false; pickWaypoint(back); active.push(back); continue; }
     const b = makeFly(best, initial ? 'inside' : 'edge');
     // Newcomers trickle in, one every 0.4–0.9 s, rather than all at once.
     if (!initial) { b.wait = wait; wait += R(0.4, 0.9); }
     flies.push(b); active.push(b);
   }
+  // A leaver already out of sight (one still waiting off screen to come in) goes now, as the next step would drop
+  // it: nobody sees it go, and while paused the array holds only the count and the leavers still on screen.
+  if (!initial && flies.some(b => b.leaving && outOfSight(b))) flies = flies.filter(b => { const gone = b.leaving && outOfSight(b); if (gone) releaseFlower(b); return !gone; });
 }
 
 function releaseFlower(b) { if (b.flower) { const f = flowerById(b.flower); if (f && f.busy === b.id) f.busy = 0; } b.flower = 0; b.called = false; }
@@ -2821,6 +2836,139 @@ window.addEventListener('keydown', e => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+//  Replay fixture (for the Swift port)
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
+//
+// `?debug=1&fixture=<name>` (optionally `&seed=N`, default 42) runs one fixed scenario on the sketch's own 1/60 s
+// step, with nothing drawn until the end, then holds the last frame (paused) and offers the result as a JSON
+// download (a link at the top left), sets `window.__fixture`, and prints it to the console as one line starting
+// `MEADOW_FIXTURE ` (for a headless run). Saved and URL settings are ignored; nothing is saved. The run itself is
+// the sketch unchanged: the same planting, opening, stepping and pointer handlers a user would drive.
+//
+// Scenarios:
+//   default      the director's defaults (normalize(null)).
+//   air-flowers  the defaults with every species off: no butterflies, only the breeze, the pointer's air and the
+//                flowers (How many stops at 1; with no species on, the count is 0).
+//
+// The file (version 1). Units: positions and lengths in CSS pixels, which the sketch calls pt (the canvas is
+// W × H of them; S = cell width / 13 scales the meadow's sizes); time in seconds; angles in radians (0 = +x, y
+// down); speeds in pt/s. Numbers are rounded to 6 decimals.
+//   fixture       1 (the format version)
+//   scenario      the scenario's name
+//   sketch        'meadow s1'
+//   seed          the seed. Two mulberry32 streams come from it: the meadow's own (seed) for planting, flight and
+//                 the opening, and the input's (seed ^ 0x5bd1e995) for everything a pointer event causes
+//   settings      every setting, normalized (the same keys and values Copy settings gives)
+//   viewport      { width, height, dpr, cell: { w, h }, cols, rows, S }: the window the run used
+//   step          { dt: 1/60, ticks: 1800 }: one tick is one step(dt) at 1 × (Slow motion 1)
+//   trace         the pointer events, in order: { tick, t, type, x, y, id, button }. type is move, down, up or
+//                 leave (pointermove, pointerdown, pointerup, pointerleave on the meadow; id 1, primary, a mouse;
+//                 button 0 for down and up, -1 otherwise). An event at tick n is delivered after the sample at
+//                 tick n and before the step that takes the clock to tick n + 1 (t = n / 60). The trace: the
+//                 pointer comes in and moves across (ticks 20–119, about 420 pt/s at 1728 × 1117), holds still
+//                 3.5 s (120–330; one comes to it after 3 s, Still for), moves to open ground and clicks it (down
+//                 400, up 406), moves to a bloom planted at load and clicks it (down 490, up 496), then a fast
+//                 stir pass (570–599: 0.4 of the width in 0.5 s, about 1380 pt/s at 1728 wide), rests, and
+//                 leaves (900).
+//   points        { ground: [x, y], bloom: [x, y, flowerId], hold: [x, y], stir: [[x, y], [x, y]] }: the trace's
+//                 places, chosen at tick 0 from the planted meadow (open ground: the room furthest from any
+//                 flower; the bloom: the grown one nearest the middle)
+//   samples       at ticks 0 (after load, before any step), 1, 60, 600 and 1800, each:
+//     tick, t     the tick and the simulation clock
+//     wind        [{ x, y, all: [x, y], landed: [x, y], stir: [x, y] }] at a 4 × 3 grid (x at 1/8, 3/8, 5/8, 7/8
+//                 of the width, y at 1/6, 1/2, 5/6 of the height), then the stir pass's start, middle and end,
+//                 then the pointer if it is on the meadow. all: everything the grass, flowers, pollen and flight
+//                 drift feel (breeze, gusts, the pointer's stir, wings' downwash); landed: what a landed butterfly
+//                 feels (no downwash); stir: the pointer's air alone. pt/s.
+//     flowers     every flower in draw order: { id, kind, x, y, r, head: [x, y], age }. r: the bloom radius; head:
+//                 the head's offset from the centre as it sways; age: 0 when clicked, growing to 1 over 2.2 s
+//                 (planted ones start at 1)
+//     butterflies every butterfly: { id, species, state, x, y, z, heading, stroke }. state: fly, approach,
+//                 nectar, bask or cursor (the sketch's names); z: height, 0 (on the ground) to 1; heading: the
+//                 direction it faces; stroke: the wing stroke angle the drawing uses
+const FIXTURE_TICKS = [0, 1, 60, 600, 1800];
+function runFixture(name) {
+  const r6 = v => Math.round(v * 1e6) / 1e6;
+  // The trace's places, from the meadow as planted.
+  let ground = [0.5 * W, 0.5 * H], room = -1e9;
+  for (let i = 0; i <= 20; i++) for (let j = 0; j <= 12; j++) {
+    const x = (0.15 + 0.7 * i / 20) * W, y = (0.15 + 0.7 * j / 12) * H;
+    let d = 1e9; for (const f of flowers) d = Math.min(d, Math.hypot(f.x - x, f.y - y) - f.R);
+    if (d > room) { room = d; ground = [x, y]; }
+  }
+  let bloom = null, bd = 1e9;
+  for (const f of flowers) { const d = Math.hypot(f.x - W / 2, f.y - H / 2); if (!f.fading && !f.clicked && d < bd) { bd = d; bloom = f; } }
+  const hold = [0.5 * W, 0.6 * H], stirA = [0.3 * W, 0.75 * H], stirB = [0.7 * W, 0.75 * H];
+  const bloomAt = bloom ? [bloom.x, bloom.y] : [0.5 * W, 0.5 * H];
+  const trace = [];
+  const add = (tick, type, x, y) => trace.push({ tick, t: r6(tick / 60), type, x: r6(x), y: r6(y), id: 1, button: type === 'down' || type === 'up' ? 0 : -1 });
+  const path = (t0, t1, a, b) => { for (let k = t0; k < t1; k++) { const u = (k - t0 + 1) / (t1 - t0); add(k, 'move', a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u); } };
+  const enter = [0.15 * W, 0.3 * H];
+  add(20, 'move', enter[0], enter[1]);
+  path(21, 120, enter, hold);                 // in and across, one move a tick
+  path(330, 390, hold, ground);               // after the 3.5 s hold, to open ground
+  add(400, 'down', ground[0], ground[1]); add(406, 'up', ground[0], ground[1]);
+  path(420, 480, ground, bloomAt);
+  add(490, 'down', bloomAt[0], bloomAt[1]); add(496, 'up', bloomAt[0], bloomAt[1]);
+  path(520, 560, bloomAt, stirA);
+  path(570, 600, stirA, stirB);              // the stir pass
+  add(900, 'leave', stirB[0], stirB[1]);
+  const send = e => {
+    const type = { move: 'pointermove', down: 'pointerdown', up: 'pointerup', leave: 'pointerleave' }[e.type];
+    canvas.dispatchEvent(new PointerEvent(type, { clientX: e.x, clientY: e.y, pointerId: 1, isPrimary: true, pointerType: 'mouse',
+      button: e.button, buttons: e.type === 'down' ? 1 : 0, bubbles: type !== 'pointerleave' }));
+  };
+  const windPoints = () => {
+    const pts = [];
+    for (const fy of [1 / 6, 1 / 2, 5 / 6]) for (const fx of [1 / 8, 3 / 8, 5 / 8, 7 / 8]) pts.push([fx * W, fy * H]);
+    pts.push(stirA, [(stirA[0] + stirB[0]) / 2, stirA[1]], stirB);
+    if (ptr.has) pts.push([ptr.x, ptr.y]);
+    return pts;
+  };
+  const sample = tick => {
+    const saved = { ...wind };   // reading the air leaves the sketch's own wind state as it was
+    const out = { tick, t: r6(simT),
+      wind: windPoints().map(([x, y]) => { windAt(x, y, simT); return { x: r6(x), y: r6(y), all: [r6(wind.x), r6(wind.y)], landed: [r6(wind.ax), r6(wind.ay)], stir: [r6(wind.px), r6(wind.py)] }; }),
+      flowers: flowers.map(f => ({ id: f.id, kind: f.kind, x: r6(f.x), y: r6(f.y), r: r6(f.R), head: [r6(f.ox), r6(f.oy)], age: r6(f.age) })),
+      butterflies: flies.map(b => ({ id: b.id, species: b.kind, state: b.state, x: r6(b.x), y: r6(b.y), z: r6(b.z), heading: r6(b.heading), stroke: r6(b.stroke) })) };
+    Object.assign(wind, saved);
+    return out;
+  };
+  const samples = [];
+  let ev = 0;
+  const last = FIXTURE_TICKS[FIXTURE_TICKS.length - 1];
+  for (let tick = 0; ; tick++) {
+    if (FIXTURE_TICKS.includes(tick)) samples.push(sample(tick));
+    if (tick === last) break;
+    while (ev < trace.length && trace[ev].tick === tick) send(trace[ev++]);
+    step(1 / 60);
+  }
+  const out = { fixture: 1, scenario: name, sketch: 'meadow s1', seed, settings: { ...set, species: { ...set.species } },
+    viewport: { width: W, height: H, dpr: DPR, cell: { w: cw, h: ch }, cols, rows, S: r6(S) },
+    step: { dt: r6(1 / 60), ticks: last }, trace,
+    points: { ground: ground.map(r6), bloom: bloom ? [r6(bloom.x), r6(bloom.y), bloom.id] : null, hold: hold.map(r6), stir: [stirA.map(r6), stirB.map(r6)] },
+    samples };
+  // One record a line: easy to read and to diff.
+  const prim = x => x === null || typeof x !== 'object', flatVal = x => prim(x) || (Array.isArray(x) && x.every(prim));
+  const fmt = (v, ind) => {
+    if (prim(v)) return JSON.stringify(v);
+    if (Object.values(v).every(flatVal)) return JSON.stringify(v).replace(/,"/g, ', "').replace(/":/g, '": ');
+    const inner = ind + '  ';
+    if (Array.isArray(v)) return '[\n' + v.map(x => inner + fmt(x, inner)).join(',\n') + '\n' + ind + ']';
+    return '{\n' + Object.entries(v).map(([k, x]) => inner + JSON.stringify(k) + ': ' + fmt(x, inner)).join(',\n') + '\n' + ind + '}';
+  };
+  const text = fmt(out, '') + '\n';
+  window.__fixture = out; window.__fixtureText = text;
+  console.log('MEADOW_FIXTURE ' + JSON.stringify(out));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  a.download = name + '.json'; a.textContent = 'Download fixture ' + name + '.json';
+  a.style.cssText = 'position:fixed;left:12px;top:12px;z-index:9;padding:6px 10px;background:#fff;color:#000;font:12px system-ui;border-radius:6px';
+  document.body.appendChild(a);
+  paused = true; pauseBtn.textContent = 'Play'; render(); document.body.dataset.ready = '1';
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 //  Start
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
@@ -2856,6 +3004,10 @@ function start() {
   if (params.get('debug') === '1') window.__meadow = { step, render, clickAt: ui(clickAt), syncFlies: ui(syncFlies), onChange, replant: ui(replant), depthScale,
     get flies() { return flies; }, get flowers() { return flowers; }, get set() { return set; }, get t() { return simT; }, get ptr() { return ptr; },
     get dust() { return dust; }, get paused() { return paused; }, get W() { return W; }, get H() { return H; }, get S() { return S; }, wind, windAt, get DWX() { return DWX; }, get PFX() { return PFX; }, get PFY() { return PFY; } };
+  if (FIXTURE) {
+    if (FIXTURE in FIXTURE_SETTINGS) { runFixture(FIXTURE); return; }
+    console.warn('Unknown fixture "' + FIXTURE + '"; known: ' + Object.keys(FIXTURE_SETTINGS).join(', '));
+  }
   // ?sheet=flowers or ?sheet=flies lays out every kind for a close look (a development aid).
   const sheet = params.get('sheet');
   if (sheet === 'flowers') {
