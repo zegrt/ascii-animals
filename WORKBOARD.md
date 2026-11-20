@@ -104,7 +104,7 @@ Director's profile: none
 |---|---|---|---|---|---|---|---|---|---|
 | t1-2 | Breeze, flowers and butterfly flight (plan T1 + T2), with the director's path fix | Content | Sources/OceanKit/Meadow/{Breeze,Flowers,ButterflySpecies,Butterfly}.swift, Sources/OceanChecks/MeadowChecks.swift, Sources/OceanTool/{Paths,main}.swift | meadow-t1-2 | builder-t1-2 (Claude Opus, T3 child thread; fix round 1) | reviewer-t1-2 (Claude Opus, T3 child thread) | 1 | reviewed, waits for the end of the stack (director: no merge yet): reviewed (review-t1-2 @ 68288c7), CI passed on 1e11a1b (PR #1), merge rehearsed 2026-11-20 (200 passed, app builds) | briefs/t1-2.md |
 | t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered); fix round 1 adds the director's bigger butterflies and better flowers | Content (grown: now also t1-2's sizes and flower shapes; the director set the look, so no separate plan) | Meadow/MeadowPainter.swift (new), OceanTool/{MeadowStill,main}.swift, OceanChecks/MeadowChecks.swift, Render/GlyphAtlas.swift (append only); fix round 1 adds Meadow/ButterflySpecies.swift (sizes) and Meadow/Flowers.swift (heads, leaves, clumps) | meadow-t5 (from meadow-t1-2); restart on meadow-t5r | builder-t5 (Claude Opus, T3 child thread) | reviewer-t5 (Codex) | 2 before the restart; 2 after it; restart 2: 0 | reviewed (review-t5r2 @ 57f880a); two findings wait on the director's film watch (t5v) | briefs/t5.md |
-| t5v | A 30 s film of the butterflies flying, for the director to judge the motion | Content (small) | OceanTool/MeadowFrames.swift (new), OceanTool/main.swift | meadow-t5v (from meadow-t5r) | builder-t5v (Claude Opus, T3 child thread) | Codex | 0 | built (meadow-t5v @ b8d4725, done); films with the director | briefs/t5v.md |
+| t5v | A 30 s film of the butterflies flying, for the director to judge the motion | Content (small) | OceanTool/MeadowFrames.swift (new), OceanTool/main.swift | meadow-t5v (from meadow-t5r) | builder-t5v (Claude Opus, T3 child thread) | Codex | 0 | reviewed (review-t5v @ 94d9d2b): 4 small tool fixes routed; films with the director | briefs/t5v.md |
 | t3 | Meadow world and behaviours (plan T3) | Content | Meadow/{MeadowWorld,Behaviour}.swift (new), OceanChecks/MeadowChecks.swift, Meadow/MeadowPainter.swift (convenience paint, breeze trail), Meadow/Breeze.swift (pointer field), OceanTool/MeadowStill.swift | meadow-t3 (from meadow-t5) | | Codex | 0 | open (waits on t5v watched by the director) | briefs/t3.md |
 | t4 | Cursor landing, courtship, crossings, monarch life cycle (plan T4) | Content | to brief | meadow-t4 | | | 0 | open (waits on t3) | |
 | t6 | Meadow habitat, settings and tools (plan T6) | Content | to brief | meadow-t6 | | | 0 | open (waits on t4) | |
@@ -195,6 +195,11 @@ Director's profile: none
   folded wing jumps sides 78 times in 6 minutes of flight; butterflies pile up at the low flowers from about 8 s
   (the test scene; nothing keeps them apart yet); whites spend 18 % of the time within 60 pt of the bottom; the
   morpho's far wing shows as faint dots while opening; the white is faint on paper.
+
+- t5v, Codex review 94d9d2b (2026-11-20), routed fix (small, in t5v's Files; batched with whatever the director's
+  watch brings): 1 (a held frame can delete a directory named like the frame) and 2 (a shorter rerun leaves old
+  frames): refuse an output folder that already holds frames; 3 (`--seconds 0` refused unlike the still) and 4
+  (fps usage text lists six values, any divisor of 60 works): align.
 
 ## Noticed
 
