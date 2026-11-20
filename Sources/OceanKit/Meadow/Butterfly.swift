@@ -196,6 +196,20 @@ public final class Butterfly {
         return min(want, 0.25 * short)
     }
 
+    /// How far a point inside the terrain is from its nearest wall (0 outside it).
+    static func clearance(_ q: SIMD2<Double>, _ terrain: Terrain) -> Double {
+        guard terrain.contains(q) else { return 0 }
+        var best: Double = .infinity
+        for e in terrain.edges {
+            let d: SIMD2<Double> = e.b - e.a
+            let along: Double = simd_dot(q - e.a, d) / max(simd_length_squared(d), 1e-12)
+            let t: Double = min(1, max(0, along))
+            let foot: SIMD2<Double> = e.a + d * t
+            best = min(best, simd_length(q - foot))
+        }
+        return best
+    }
+
     /// A random point half a wingspan inside a screen, in the bottom 40 % of it `lowWaypoints` of the time.
     private func randomPoint(_ terrain: Terrain, _ random: WebRandom, span: Double) -> SIMD2<Double> {
         guard !terrain.rects.isEmpty else { return SIMD2<Double>(x, y) }
@@ -312,8 +326,11 @@ public final class Butterfly {
         if bound != 0 { want = tilted(want, bound * sp.boundAngle) }
         // Walls: a soft steer within a wingspan of an edge, and a push. Free flight meeting a wall turns as a
         // correlated random walk: a new preferred direction drawn about the wall's normal, and a waypoint along it.
+        // Flying at a target (a flower, the cursor), the walls start no farther in than the target itself, so the
+        // ground never pushes a flower seeker off a flower one row tall.
         let here: CGRect = terrain.rects.isEmpty ? terrain.bounds : terrain.rects[terrain.rectIndex(near: p)]
-        let margin: Double = Butterfly.capped(span * (target == nil ? 1 : 0.5), here)
+        var margin: Double = Butterfly.capped(span * (target == nil ? 1 : 0.5), here)
+        if let t = target { margin = min(margin, Butterfly.clearance(t, terrain)) }
         let push: SIMD2<Double> = terrain.wallPush(p, margin: margin)
         let pushing = push.x != 0 || push.y != 0
         if pushing {

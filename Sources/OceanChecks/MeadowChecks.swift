@@ -669,13 +669,15 @@ func butterflyChecks() {
 
     func flowerSeekersReachLowHeads() throws {
         // A butterfly flying at a flower (.approach) reaches its head right down to the shortest, one-row
-        // flowers: the ground doesn't push it off. Within half a cell of the head, from anywhere above.
+        // flowers: the ground doesn't push it off. Within half a cell of the head, from up to ~600 pt away above
+        // it (15 s at foraging speed covers ~1200 pt).
         let field = Terrain.single(width: 1800, height: 1169)
         var head: SIMD2<Double>? = nil
         for seed in UInt64(1)...UInt64(20) where head == nil {
             let land = Meadowland(random: WebRandom(seed: seed))
             land.layout(terrain: field, cell: meadowCell)
-            if let i = land.flowers.indices.first(where: { land.flowers[$0].kind != .grass && land.flowers[$0].rows == 1 }) {
+            let low: [Int] = land.flowers.indices.filter { land.flowers[$0].kind != .grass && land.flowers[$0].rows == 1 }
+            if let i = low.min(by: { abs(land.flowers[$0].base.x - 900) < abs(land.flowers[$1].base.x - 900) }) {
                 head = land.head(i)
             }
         }
@@ -684,7 +686,7 @@ func butterflyChecks() {
         for kind in ButterflyKind.allCases {
             for seed in UInt64(1)...UInt64(5) {
                 let random = WebRandom(seed: 200 + seed)
-                let x0: Double = random.range(100, 1700), y0: Double = random.range(100, 700)
+                let x0: Double = h.x + random.range(-400, 400), y0: Double = random.range(700, 1000)
                 let b = Butterfly(kind: kind, x: x0, y: y0, random: random)
                 b.state = .approach
                 let log = flyLog(b, seconds: 15, terrain: field, random: random) { _ in h }
