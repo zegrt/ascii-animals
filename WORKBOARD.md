@@ -45,6 +45,11 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-20: "continue also whats new doesnt need a full screen thing i think". Applies: new (t9: the 3.1
+  what's-new for existing users is not the full-screen welcome window the Web card uses today; the manager
+  proposes a small card under the menu bar icon, shown once, with "Try the Meadow" and "Not now", and a "New" tag
+  on Meadow in the Habitat menu; the first-run welcome tour for new users stays as it is; t9's brief brings the
+  design back to the director).
 - 2026-11-20, asked whether the sketch is ready to port: "dbbl check shit then go". Applies: new (the sketch gets
   one independent Codex review before the port; meanwhile a read-only research task maps the sketch against the
   Swift code for the port plan; the manager then writes the port plan for the director's approval, Design size).
@@ -227,7 +232,7 @@ Director's profile: none
 | t6 | Meadow habitat, settings and tools (plan T6) | Content | to brief | meadow-t6 | | | 0 | open (waits on t4); superseded by the port plan (m1–m8) | |
 | t7 | Director reviews the prototype films (plan T7, a gate) | Content | none | none | | | 0 | open (waits on t6) | |
 | t8 | Energy, measured with the director (plan T8) | Content | to brief | meadow-t8 | | | 0 | open (waits on t7) | |
-| t9 | Choosing the Meadow: menu, Settings, welcome (plan T9) | Content | to brief | meadow-t9 | | | 0 | open (waits on t8) | |
+| t9 | Choosing the Meadow: menu, Settings, welcome (plan T9) | Content | to brief | meadow-t9 | | | 0 | open (waits on t8); the what's-new is not full screen (Corrections, 2026-11-20) | |
 | t10 | Words, watch and release 3.1 (plan T10; outward-facing, the director approves the release) | Content | to brief | meadow-t10 | | | 0 | open (waits on t9) | |
 | m1 | Air and flowers from above (breeze, pointer air, downwash, flowers, planting, clicks on flowers, the tuning file) | Content | to brief (port plan m1) | meadow-m1 (from main) | | Codex | 0 | open (waits for the sketch's fix round 1 and its re-check) | |
 | m2 | Flight from above | Content | to brief (port plan m2) | meadow-m2 (from meadow-m1) | | Codex | 0 | open (waits on m1) | |
