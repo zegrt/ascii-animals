@@ -130,7 +130,19 @@ case "meadow-still":
         fail("bad --scale \(scaleText): 1 to 4")
     }
     guard args.count == 2 else { fail(usage) }
-    let dims = args[1].split(separator: "x").compactMap { Double($0) }
+    // Exactly two plain numbers around one `x` (digits, at most one point): `96xx96` or `96x96xgarbage` is refused,
+    // not read as 96 × 96.
+    let parts: [Substring] = args[1].split(separator: "x", omittingEmptySubsequences: false)
+    func plain(_ t: Substring) -> Bool {
+        let digits: Bool = t.allSatisfy { (c: Character) -> Bool in c == "." || ("0"..."9").contains(c) }
+        let points: Int = t.filter { (c: Character) -> Bool in c == "." }.count
+        let ends: Bool = t.first != "." && t.last != "."
+        return !t.isEmpty && digits && points <= 1 && ends
+    }
+    guard parts.count == 2, parts.allSatisfy(plain) else {
+        fail("bad size \(args[1]): W and H 64 to 8192 pt, at most 16384 pixels at the scale")
+    }
+    let dims: [Double] = parts.compactMap { (t: Substring) -> Double? in Double(t) }
     guard dims.count == 2, dims.allSatisfy({ $0.isFinite && $0 >= 64 && $0 <= 8192 }),
           dims[0] * scaleValue <= 16384, dims[1] * scaleValue <= 16384 else {
         fail("bad size \(args[1]): W and H 64 to 8192 pt, at most 16384 pixels at the scale")

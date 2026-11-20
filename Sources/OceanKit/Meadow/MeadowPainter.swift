@@ -764,7 +764,7 @@ private struct Sprite {
 /// What the ground band remembers of a plant: what it was drawn with, and the cells it drew over.
 private struct PlantMemo {
     var tip = SIMD2<Double>(0, 0)
-    var bloom: Double = -1, grown: Double = -1, baseX: Double = 0
+    var bloom: Double = -1, grown: Double = -1, baseX: Double = 0, baseY: Double = 0
     var rows = -1, kind = -1, boost = 0
     var sparkle = false
     var c0 = 0, c1 = -1, r0 = 0, r1 = -1
@@ -1072,15 +1072,21 @@ public final class MeadowPainter {
         m.bloom = f.bloom
         m.grown = f.grown
         m.baseX = f.base.x
+        m.baseY = f.base.y
         m.rows = f.rows
         m.kind = kindSlot(f.kind)
         m.sparkle = f.sparkle > 0
     }
 
     @inline(__always) private func changed(_ a: PlantMemo, _ b: PlantMemo, _ cw: Double, _ ch: Double) -> Bool {
-        a.visible != b.visible || abs(a.tip.x - b.tip.x) > 0.05 * cw || abs(a.tip.y - b.tip.y) > 0.05 * ch
-            || a.bloom != b.bloom || a.grown != b.grown || a.baseX != b.baseX || a.rows != b.rows || a.kind != b.kind
-            || a.boost != b.boost || a.sparkle || b.sparkle || a.c0 != b.c0 || a.c1 != b.c1
+        // Split into typed parts for CI's older compiler. The base and the rows drawn over are part of the key, so a
+        // sub-pixel relayout that moves a stem's base row redraws (review t5, finding 7).
+        let moved: Bool = abs(a.tip.x - b.tip.x) > 0.05 * cw || abs(a.tip.y - b.tip.y) > 0.05 * ch
+        let grew: Bool = a.bloom != b.bloom || a.grown != b.grown || a.rows != b.rows || a.kind != b.kind
+        let based: Bool = a.baseX != b.baseX || a.baseY != b.baseY
+        let looks: Bool = a.visible != b.visible || a.boost != b.boost || a.sparkle || b.sparkle
+        let box: Bool = a.c0 != b.c0 || a.c1 != b.c1 || a.r0 != b.r0 || a.r1 != b.r1
+        return moved || grew || based || looks || box
     }
 
     @inline(__always) private func mark(_ m: PlantMemo, _ cols: Int) {
@@ -1206,17 +1212,19 @@ public final class MeadowPainter {
     private func butterflyPass(_ flies: [Butterfly], _ land: Meadowland, _ breeze: Breeze, _ time: Double,
                                _ ox: Double, _ oy: Double, _ cw: Double, _ ch: Double, _ out: Layer) {
         let n = flies.count
-        // Every box is a square of reach R around the body; one stride fits the biggest.
+        // Every box is a square of reach R around the body; one stride fits the biggest. Sized up front for the
+        // cap of butterflies on a screen, each the biggest a species grows to at this cell, so adding butterflies
+        // allocates nothing (the restart's change 4); only more than the cap, or a bigger scale, grows them.
+        @inline(__always) func box(_ r: Double) -> Int { (2 * Int(ceil(r / cw)) + 1) * (2 * Int(ceil(r / ch)) + 1) }
         var want = stride
-        for b in flies {
-            let r = reach(b, cw)
-            want = max(want, (2 * Int(ceil(r / cw)) + 1) * (2 * Int(ceil(r / ch)) + 1))
-        }
+        for sp in MeadowPainter.species { want = max(want, box(reach(sp, cw / 13 * (1 + sp.sizeSpread), cw))) }
+        for b in flies { want = max(want, box(reach(b.species, b.scale * b.size, cw))) }
         var grew = false
         if want != stride { stride = want; grew = true }
-        grew = slots.ensure(max(1, n)) || grew
-        grew = memPrev.ensure(max(1, n * stride)) || grew
-        grew = memNext.ensure(max(1, n * stride)) || grew
+        let room: Int = max(MeadowPainter.flockCap, n)
+        grew = slots.ensure(room) || grew
+        grew = memPrev.ensure(room * stride) || grew
+        grew = memNext.ensure(room * stride) || grew
         _ = sprite.ensure(stride)
         if grew {
             for k in 0..<slots.capacity { slots.p[k] = Slot() }
@@ -1237,11 +1245,17 @@ public final class MeadowPainter {
         swap(&memPrev, &memNext)
     }
 
-    /// How far from its body a butterfly can draw, pt: the wings (the swallowtail's tails reach 1.4 half-heights
-    /// down) and the antennae.
-    private func reach(_ b: Butterfly, _ cw: Double) -> Double {
-        let k: Double = b.scale * b.size
-        let hs: Double = b.species.drawnSpan * 13 * k / 2, hh: Double = b.species.drawnHeight * 19 * k / 2
+    /// Butterflies a screen holds at most (plan T3's cap), for sizing the per-butterfly buffers up front.
+    static let flockCap = 16
+    /// Every species, read once (`allCases` would build an array every frame).
+    private static let species: [ButterflySpecies] = ButterflyKind.allCases.map { (k: ButterflyKind) -> ButterflySpecies in
+        ButterflySpecies.of(k)
+    }
+
+    /// How far from its body a butterfly of `sp` at scale × size `k` can draw, pt: the wings (the swallowtail's
+    /// tails reach 1.4 half-heights down) and the antennae.
+    private func reach(_ sp: ButterflySpecies, _ k: Double, _ cw: Double) -> Double {
+        let hs: Double = sp.drawnSpan * 13 * k / 2, hh: Double = sp.drawnHeight * 19 * k / 2
         let r: Double = max(hs * 1.1, hh * 1.5 + 0.6 * cw) + cw
         return r.isFinite ? min(r, 4000) : 0
     }
@@ -1253,7 +1267,7 @@ public final class MeadowPainter {
             slot.owner = nil
             return
         }
-        let r: Double = reach(b, cw)
+        let r: Double = reach(b.species, b.scale * b.size, cw)
         let hc = Int(ceil(r / cw)), hr = Int(ceil(r / ch))
         let bw = 2 * hc + 1, bh = 2 * hr + 1
         let cc = cellIndex(lx / cw, out.cols), rc = cellIndex(ly / ch, out.rows)

@@ -285,6 +285,7 @@ func meadowChecks() {
 
     butterflyChecks()
     meadowPainterChecks()
+    meadowRestartChecks()
     // CI runners have no GPU: OCEAN_SKIP_GPU=1 skips the Metal checks (main.swift skips its own the same way).
     if ProcessInfo.processInfo.environment["OCEAN_SKIP_GPU"] == nil { meadowRenderChecks() }
 }
@@ -1201,6 +1202,22 @@ func meadowPainterChecks() {
             _ = paintMeadow(painter2, land: land2, flies: [], breeze: breeze2, time: t2, size: big, theme: meadowTheme(), into: canvas2)
             try expect(painter2.bufferCapacities == warm2, "step \(step): buffers grew: \(warm2) -> \(painter2.bufferCapacities)")
         }
+        // The restart's change 4: butterflies added after warm-up, one at a time up to the cap of 16 a screen (the
+        // biggest of each species among them), grow nothing either.
+        let painter3 = MeadowPainter()
+        var flock: [Butterfly] = Array(flies.prefix(4))
+        _ = paintMeadow(painter3, land: land2, flies: flock, breeze: breeze2, time: t2, size: big, theme: meadowTheme(), into: canvas2)
+        let warm3: [Int] = painter3.bufferCapacities
+        for k in 0..<12 {
+            let kind: ButterflyKind = ButterflyKind.allCases[k % 4]
+            let b = Butterfly(kind: kind, x: 150 + 190 * Double(k), y: 400 + 40 * Double(k % 5), random: random2)
+            b.size = 1 + b.species.sizeSpread
+            flock.append(b)
+            t2 += 1.0 / 60.0
+            _ = paintMeadow(painter3, land: land2, flies: flock, breeze: breeze2, time: t2, size: big, theme: meadowTheme(), into: canvas2)
+            try expect(painter3.bufferCapacities == warm3,
+                       "butterfly \(flock.count) added: buffers grew: \(warm3) -> \(painter3.bufferCapacities)")
+        }
     }
     check("paintAllocatesNothing", paintAllocatesNothing)
 
@@ -1386,4 +1403,190 @@ func meadowRenderChecks() {
         try expect(inked > 4, "head cell: \(inked) pixels in the ink \(String(canvas.ink[hi], radix: 16))")
     }
     check("meadowComposeDraws", meadowComposeDraws)
+}
+
+// ── t5 restart: closed wings, the drawn size in flight, the ground cache's key, adding butterflies ──
+
+/// What one posed butterfly draws: block cells, glyph-only cells off the body's column, the columns its blocks reach
+/// on either side of the body, and the mean colour of its blocks.
+private struct Drawing {
+    var blocks = 0, bare = 0, left = 0, right = 0
+    var mean = SIMD3<Double>(0, 0, 0)
+}
+
+private func drawing(_ kind: ButterflyKind, stroke: Double, bank: Double = 0, light: Bool = false) -> Drawing {
+    let size = CGSize(width: 640, height: 400)
+    let land = Meadowland(random: WebRandom(seed: 2))
+    let b = posed(kind, x: 318.5, y: 199.5)
+    b.stroke = stroke
+    b.bank = bank
+    let c = paintMeadow(MeadowPainter(), land: land, flies: [b], breeze: calmBreeze(CGRect(origin: .zero, size: size)),
+                        size: size, theme: meadowTheme(light: light))
+    let body = Int(floor(b.x / Double(meadowCell.width)))
+    var d = Drawing()
+    var sum = SIMD3<Double>(0, 0, 0)
+    for i in 0..<(c.cols * c.rows) where drawn(c, i) {
+        let col = i % c.cols
+        if c.block[i] >> 24 != 0 {
+            d.blocks += 1
+            let v: SIMD4<Double> = unpack(c.block[i])
+            sum += SIMD3<Double>(v.x, v.y, v.z)
+            if col < body { d.left = max(d.left, body - col) }
+            if col > body { d.right = max(d.right, col - body) }
+        } else if col != body {
+            d.bare += 1
+        }
+    }
+    if d.blocks > 0 { d.mean = sum / Double(d.blocks) }
+    return d
+}
+
+func meadowRestartChecks() {
+    let deg: Double = Double.pi / 180
+
+    func closedWingsShowTheUnderside() throws {
+        // The restart's change 1: seen closed (stroke 90°, at rest) and near the clap (78°), a butterfly shows the
+        // underside of its folded wings as a solid shape, never a stick or loose outlines: blocks, not bare glyphs;
+        // at least a third of the open pose's blocks, reaching at least 40 % of the open reach; in the underside's
+        // colours (a different mean block colour from the open pose; the morpho's brown, not its blue). And through
+        // every stroke from level to closed it never shrinks below a third of the open pose's blocks.
+        for light in [false, true] {
+            for kind in ButterflyKind.allCases {
+                let open = drawing(kind, stroke: 0, light: light)
+                let openReach: Int = max(open.left, open.right)
+                let shut: [(String, Double)] = [("clap", 78 * deg), ("closed", 90 * deg)]
+                for (name, stroke) in shut {
+                    let d = drawing(kind, stroke: stroke, light: light)
+                    let tag = "\(kind) \(name) \(light ? "paper" : "dark")"
+                    try expect(3 * d.blocks >= open.blocks, "\(tag): \(d.blocks) blocks, open \(open.blocks)")
+                    try expect(2 * d.bare <= d.blocks, "\(tag): \(d.bare) bare glyphs beside \(d.blocks) blocks")
+                    try expect(10 * max(d.left, d.right) >= 4 * openReach,
+                               "\(tag): reaches \(d.left) / \(d.right) columns, open \(openReach)")
+                    try expect(simd_length(d.mean - open.mean) > 20,
+                               "\(tag): mean block \(d.mean) is the open pose's \(open.mean)")
+                    if kind == .morpho {
+                        try expect(d.mean.x > d.mean.z, "\(tag): the morpho's underside is not brown: \(d.mean)")
+                    }
+                }
+                for step in 0...45 {
+                    let d = drawing(kind, stroke: Double(step) * 2 * deg, light: light)
+                    try expect(3 * d.blocks >= open.blocks,
+                               "\(kind) \(light ? "paper" : "dark") at stroke \(2 * step)°: \(d.blocks) blocks, open \(open.blocks)")
+                }
+            }
+        }
+    }
+    check("closedWingsShowTheUnderside", closedWingsShowTheUnderside)
+
+    func drawingStaysOnScreen() throws {
+        // The restart's change 2: the flight keeps clear of the walls by the drawing's reach, so no butterfly's
+        // drawing leaves its screen. Free flight on a big monitor and a laptop, weather on: the body stays the drawn
+        // half-span inside the side edges and the drawing's reach up and down inside the top and bottom. Flying at flowers (the
+        // ground lets a seeker down to a low head, which t3 lands on): inside the side and top edges.
+        for field in [Terrain.single(width: 2560, height: 1440), Terrain.single(width: 1800, height: 1169)] {
+            let r = field.rects[0]
+            let land = Meadowland(random: WebRandom(seed: 4))
+            land.layout(terrain: field, cell: meadowCell)
+            let heads: [Int] = land.flowers.indices.filter { land.flowers[$0].kind != .grass }
+            for (i, kind) in ButterflyKind.allCases.enumerated() {
+                for seed in UInt64(1)...UInt64(3) {
+                    for seeking in [false, true] {
+                        let random = WebRandom(seed: seed * 7 + UInt64(i))
+                        let x0: Double = random.range(Double(r.minX) + 200, Double(r.maxX) - 200)
+                        let y0: Double = random.range(Double(r.minY) + 200, Double(r.maxY) - 300)
+                        let b = Butterfly(kind: kind, x: x0, y: y0, random: random)
+                        b.scale = Double(meadowCell.width) / 13
+                        let air = Breeze(bounds: field.bounds, cell: meadowCell)
+                        var target: SIMD2<Double>? = nil
+                        var left: Double = 0
+                        for step in 0..<(90 * 60) {
+                            air.step(flightDt, random: random)
+                            if seeking {
+                                left -= flightDt
+                                if left <= 0 {
+                                    let k: Int = heads[random.int(0, heads.count - 1)]
+                                    target = land.head(k)
+                                    left = random.range(3, 8)
+                                }
+                                b.state = .approach
+                            }
+                            b.fly(flightDt, target: target, breeze: air, terrain: field, random: random)
+                            let hs: Double = b.drawnHalfSpan, up: Double = b.drawnUp, down: Double = b.drawnDown
+                            let tag = "\(kind) seed \(seed)\(seeking ? " seeking" : "") on \(Int(r.width))×\(Int(r.height)), step \(step)"
+                            let left: Double = b.x - hs - Double(r.minX), right: Double = Double(r.maxX) - b.x - hs
+                            let above: Double = b.y - up - Double(r.minY), below: Double = Double(r.maxY) - b.y - down
+                            try expect(left >= -0.5 && right >= -0.5, "\(tag): body at x \(b.x), drawn half-span \(hs)")
+                            try expect(above >= -0.5, "\(tag): body at y \(b.y), drawn \(up) above it")
+                            if !seeking {
+                                try expect(below >= -0.5, "\(tag): body at y \(b.y), drawn \(down) below it")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    check("drawingStaysOnScreen", drawingStaysOnScreen)
+
+    func oneButterflyFitsThePreview() throws {
+        // The Settings preview, 340 × 150 pt at its 8-pt cell: one butterfly of each species at its biggest, open,
+        // at the bottom of the downstroke, banked or closed, draws no more columns and rows than the preview has
+        // (measured on a taller canvas, so nothing is clipped while measuring).
+        let preview = GridSpec.make(viewportSize: CGSize(width: 340, height: 150), cell: GridSpec.cell(forWidth: 340))
+        let size = CGSize(width: 340, height: 450)
+        let cell = GridSpec.cell(forWidth: 340)
+        let grid = GridSpec.make(viewportSize: size, cell: cell)
+        let land = Meadowland(random: WebRandom(seed: 2))
+        for kind in ButterflyKind.allCases {
+            let poses: [(Double, Double)] = [(0, 0), (-35 * deg, 0), (25 * deg, 40 * deg), (78 * deg, 0), (90 * deg, 0)]
+            for (stroke, bank) in poses {
+                let b = posed(kind, x: 170, y: 225)
+                b.scale = Double(cell.width) / 13
+                b.size = 1 + b.species.sizeSpread
+                b.stroke = stroke
+                b.bank = bank
+                let c = CellCanvas(cols: grid.cols, rows: grid.rows)
+                c.clear()
+                MeadowPainter().paint(land: land, butterflies: [b], breeze: calmBreeze(CGRect(origin: .zero, size: size)),
+                                      time: 0, viewport: CGRect(origin: .zero, size: size), grid: grid,
+                                      theme: meadowTheme(), into: c)
+                var c0 = Int.max, c1 = Int.min, r0 = Int.max, r1 = Int.min, cells = 0
+                for i in 0..<(c.cols * c.rows) where drawn(c, i) || c.overGlyph[i] != CellCanvas.noGlyph {
+                    cells += 1
+                    c0 = min(c0, i % c.cols); c1 = max(c1, i % c.cols)
+                    r0 = min(r0, i / c.cols); r1 = max(r1, i / c.cols)
+                }
+                try expect(cells > 20, "\(kind): drew \(cells) cells")
+                try expect(c0 > 0 && r0 > 0 && c1 < c.cols - 1 && r1 < c.rows - 1, "\(kind): clipped while measuring")
+                try expect(c1 - c0 + 1 <= preview.cols && r1 - r0 + 1 <= preview.rows,
+                           "\(kind) stroke \(stroke) bank \(bank): \(c1 - c0 + 1) × \(r1 - r0 + 1) cells, the preview \(preview.cols) × \(preview.rows)")
+            }
+        }
+    }
+    check("oneButterflyFitsThePreview", oneButterflyFitsThePreview)
+
+    func subPixelRelayoutRedraws() throws {
+        // Review t5, finding 7 (re-check): the same garden laid out half a point lower changes stems' base rows; the
+        // painter that drew it before redraws what a fresh painter draws.
+        let size = CGSize(width: 2560, height: 1440)
+        let grid = GridSpec.make(viewportSize: size, cell: meadowCell)
+        let breeze = calmBreeze(CGRect(origin: .zero, size: size))
+        for seed in [UInt64(2), 5, 7] {
+            let painter = MeadowPainter()
+            let canvas = CellCanvas(cols: grid.cols, rows: grid.rows)
+            for (k, y) in [0.0, 0.5, 0.0, 0.25].enumerated() {
+                let land = Meadowland(random: WebRandom(seed: seed))
+                land.layout(terrain: Terrain(rects: [CGRect(x: 0, y: y, width: 2560, height: 1368)]), cell: meadowCell)
+                _ = paintMeadow(painter, land: land, flies: [], breeze: breeze, size: size, theme: meadowTheme(), into: canvas)
+                let fresh = paintMeadow(MeadowPainter(), land: land, flies: [], breeze: breeze, size: size, theme: meadowTheme())
+                var differ = 0
+                for i in 0..<(grid.cols * grid.rows)
+                where canvas.glyph[i] != fresh.glyph[i] || canvas.ink[i] != fresh.ink[i] || canvas.block[i] != fresh.block[i] {
+                    differ += 1
+                }
+                try expect(differ == 0, "seed \(seed), layout \(k) at y \(y): \(differ) cells kept from the last garden")
+            }
+        }
+    }
+    check("subPixelRelayoutRedraws", subPixelRelayoutRedraws)
 }
