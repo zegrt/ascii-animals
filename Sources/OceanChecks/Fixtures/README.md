@@ -4,8 +4,8 @@ Recorded from the Meadow sketch (`Tools/meadow-sketch/meadow.html` on `meadow-sk
 checks in `MeadowChecks.swift` replay them in Swift.
 
 - `air-flowers.json`: the sketch's own replay fixture (fix round 2, `?debug=1&fixture=air-flowers`), copied from
-  `meadow-sketch:Tools/meadow-sketch/fixtures/air-flowers.json`. Its format is documented at the top of the sketch's
-  export code.
+  `meadow-sketch:Tools/meadow-sketch/fixtures/air-flowers.json` at 4bcf693. Its format is documented at the top of
+  the sketch's export code. The replay steps exactly 1/60 s a tick and never reads the file's rounded `step.dt`.
 - `meadow-probe-1600x913.json`, `meadow-probe-1280x713.json`: the m1 builder's probe of the sketch at f20b833, made
   before the fixture landed. A copy of the sketch with `meadow-probe.js.txt` appended before `</body>` was opened in
   headless Chrome (a fresh profile, so the sketch's defaults) with `?seed=4242&debug=1&freeze=1&panel=0` at window

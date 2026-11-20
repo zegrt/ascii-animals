@@ -234,459 +234,586 @@ private func worstDifference(_ a: [Double], _ ref: [Double]) -> Double {
 }
 
 func meadowChecks() {
-    check("meadowMathMatchesSketch") {
-        // Golden values made by the sketch's own functions (html:140–177) under node.
-        var a = Mulberry32(12345)
-        var b = Mulberry32(12345 ^ Int32(bitPattern: 0x5BD1_E995))
-        var c = Mulberry32(-7)
-        let sim: [Double] = [0.9797282677609473, 0.3067522644996643, 0.484205421525985, 0.817934412509203, 0.5094283693470061]
-        let ui: [Double] = [0.5790900862775743, 0.9958807048387825, 0.5389305409044027, 0.4330787805374712, 0.7108245396520942]
-        let neg: [Double] = [0.43306733411736786, 0.32539576734416187, 0.5442695003002882, 0.48018999374471605, 0.048719558166339993]
-        for i in 0..<5 {
-            try expect(a.next() == sim[i] && b.next() == ui[i] && c.next() == neg[i], "mulberry32 draw \(i)")
-        }
-        let pair = MeadowRandom.pair(seed: 12345)
-        try expect(pair.sim.unit() == sim[0] && pair.input.unit() == ui[0], "the two streams")
-        let hashes: [(Double, Double, Double, Double)] = [
-            (0, 0, 0, 0), (1, 2, 3, 0.3797727196943015), (-5, 17, 91, 0.7035144788678735),
-            (123456, -98765, 9, 0.5443396402988583), (2.9, -2.9, 5, 0.3795370028819889),
-        ]
-        for (x, y, z, want) in hashes {
-            try expect(MeadowMath.hash3(x, y, z) == want, "hash3(\(x), \(y), \(z)) = \(MeadowMath.hash3(x, y, z)), want \(want)")
-        }
-        try expectClose(MeadowMath.vnoise(0.3, 0.7, 5), 0.37999970526361465, tol: 1e-15, "vnoise 1")
-        try expectClose(MeadowMath.vnoise(-12.25, 3.5, 9), 0.4215527166998072, tol: 1e-15, "vnoise 2")
-        try expectClose(MeadowMath.vnoise(1000.1, 0.5, 91), 0.3880003628139448, tol: 1e-15, "vnoise 3")
-        try expectClose(MeadowMath.n1(0.013 * 100, 91), 0.29374473418109126, tol: 1e-15, "n1 1")
-        try expectClose(MeadowMath.n1(0.05 * 37.5, 17), 0.283753879831238, tol: 1e-15, "n1 2")
-        let g = MeadowRandom(42)
-        try expectClose(g.gauss(), -0.956162229384149, tol: 1e-12, "gauss 1")
-        try expectClose(g.gauss(), -0.2730261048826104, tol: 1e-12, "gauss 2")
-        var deck = Array(0..<10)
-        MeadowRandom(42).shuffle(&deck)
-        try expect(deck == [0, 7, 3, 5, 2, 1, 8, 9, 4, 6], "shuffle \(deck)")
-    }
+    check("meadowMathMatchesSketch", meadowMathMatchesSketch)
+    check("meadowReplaysTheSketchProbe", meadowReplaysTheSketchProbe)
+    check("meadowSameSeedSameMeadow", meadowSameSeedSameMeadow)
+    check("meadowStirHalfLifeAndLocal", meadowStirHalfLifeAndLocal)
+    check("meadowStirSameAtEveryInputRate", meadowStirSameAtEveryInputRate)
+    check("meadowDownwashOnlyUnderLowButterflies", meadowDownwashOnlyUnderLowButterflies)
+    check("meadowWindPeaksAtTheSketchSpeed", meadowWindPeaksAtTheSketchSpeed)
+    check("meadowNoFlowerInAGap", meadowNoFlowerInAGap)
+    check("meadowNoOverlapAndPatchesFollowArea", meadowNoOverlapAndPatchesFollowArea)
+    check("meadowHeadSpringRings", meadowHeadSpringRings)
+    check("meadowClicksTouchNeverStack", meadowClicksTouchNeverStack)
+    check("meadowClickLimitAndFade", meadowClickLimitAndFade)
+    check("meadowRelayoutFadesClickedOffScreen", meadowRelayoutFadesClickedOffScreen)
+    check("meadowFiniteOnBadInput", meadowFiniteOnBadInput)
+    check("meadowStepAllocatesNothing", meadowStepAllocatesNothing)
+    check("meadowReplaysTheSketchFixture", meadowReplaysTheSketchFixture)
+}
 
-    check("meadowReplaysTheSketchProbe") {
-        try replayProbe("meadow-probe-1600x913")
-        try replayProbe("meadow-probe-1280x713")
+private func meadowMathMatchesSketch() throws {
+    // Golden values made by the sketch's own functions (html:140–177) under node.
+    var a = Mulberry32(12345)
+    var b = Mulberry32(12345 ^ Int32(bitPattern: 0x5BD1_E995))
+    var c = Mulberry32(-7)
+    let sim: [Double] = [0.9797282677609473, 0.3067522644996643, 0.484205421525985, 0.817934412509203, 0.5094283693470061]
+    let ui: [Double] = [0.5790900862775743, 0.9958807048387825, 0.5389305409044027, 0.4330787805374712, 0.7108245396520942]
+    let neg: [Double] = [0.43306733411736786, 0.32539576734416187, 0.5442695003002882, 0.48018999374471605, 0.048719558166339993]
+    for i in 0..<5 {
+        try expect(a.next() == sim[i] && b.next() == ui[i] && c.next() == neg[i], "mulberry32 draw \(i)")
     }
-
-    check("meadowSameSeedSameMeadow") {
-        let terrain = Terrain(rects: [CGRect(x: 0, y: 0, width: 1512, height: 982), CGRect(x: 1512, y: 0, width: 1920, height: 1080)])
-        func run(_ seed: Int32) -> ([Flower], [MeadowAir]) {
-            let rig = MeadowRig(terrain, cell: 13, seed: seed)
-            for k in 0..<400 {
-                let t: Double = Double(k) / 60
-                rig.breeze.pointerMoved(x: 900 + 400 * cos(t), y: 500 + 300 * sin(1.3 * t))
-                if k == 100 || k == 160 || k == 220 { rig.flowers.click(x: 300 + Double(k) * 7, y: 260, rng: rig.input) }
-                rig.step()
-            }
-            var air: [MeadowAir] = []
-            for p in stride(from: 50.0, to: 3400, by: 170) { air.append(rig.breeze.sample(p, p * 0.28)) }
-            return (rig.flowers.all, air)
-        }
-        let (f1, a1) = run(77)
-        let (f2, a2) = run(77)
-        try expect(!f1.isEmpty && f1 == f2, "same seed, different flowers")
-        try expect(a1 == a2, "same seed, different air")
-        let (f3, _) = run(78)
-        try expect(f3.map(\.x) != f1.map(\.x), "another seed, the same meadow")
+    let pair = MeadowRandom.pair(seed: 12345)
+    try expect(pair.sim.unit() == sim[0] && pair.input.unit() == ui[0], "the two streams")
+    let hashes: [(Double, Double, Double, Double)] = [
+        (0, 0, 0, 0), (1, 2, 3, 0.3797727196943015), (-5, 17, 91, 0.7035144788678735),
+        (123456, -98765, 9, 0.5443396402988583), (2.9, -2.9, 5, 0.3795370028819889),
+    ]
+    for (x, y, z, want) in hashes {
+        try expect(MeadowMath.hash3(x, y, z) == want, "hash3(\(x), \(y), \(z)) = \(MeadowMath.hash3(x, y, z)), want \(want)")
     }
+    try expectClose(MeadowMath.vnoise(0.3, 0.7, 5), 0.37999970526361465, tol: 1e-15, "vnoise 1")
+    try expectClose(MeadowMath.vnoise(-12.25, 3.5, 9), 0.4215527166998072, tol: 1e-15, "vnoise 2")
+    try expectClose(MeadowMath.vnoise(1000.1, 0.5, 91), 0.3880003628139448, tol: 1e-15, "vnoise 3")
+    try expectClose(MeadowMath.n1(0.013 * 100, 91), 0.29374473418109126, tol: 1e-15, "n1 1")
+    try expectClose(MeadowMath.n1(0.05 * 37.5, 17), 0.283753879831238, tol: 1e-15, "n1 2")
+    let g = MeadowRandom(42)
+    try expectClose(g.gauss(), -0.956162229384149, tol: 1e-12, "gauss 1")
+    try expectClose(g.gauss(), -0.2730261048826104, tol: 1e-12, "gauss 2")
+    var deck = Array(0..<10)
+    MeadowRandom(42).shuffle(&deck)
+    try expect(deck == [0, 7, 3, 5, 2, 1, 8, 9, 4, 6], "shuffle \(deck)")
+}
 
-    check("meadowStirHalfLifeAndLocal") {
-        let rig = MeadowRig(Terrain.single(width: 1600, height: 1000), cell: 13, seed: 1,
-                            tuning: { var t = MeadowTuning(); t.breeze = 0; return t }(), plant: false)
-        rig.breeze.stir(800, 500, 100, 0)
-        let start = rig.breeze.sample(800, 500).pointerX
-        // ln 2 / 1.6 ≈ 0.433 s: 26 steps is 0.4333 s.
-        rig.step(26)
-        let half = rig.breeze.sample(800, 500).pointerX / start
-        try expect(abs(half - 0.5) < 0.01, "after 26 steps \(half) of the stir is left")
-        let halfLife: Double = log(2) / MeadowTuning.Stir.decay
-        try expect(abs(halfLife - 0.433) < 0.001, "half-life \(halfLife)")
-        // Local: 3 grid cells of reach plus one cell of interpolation; nothing beyond.
-        let reach: Double = 4 * rig.breeze.spacing
-        for (dx, dy) in [(reach + 1, 0.0), (0, reach + 1), (-reach - 1, 0), (reach, reach)] {
-            let a = rig.breeze.sample(800 + dx, 500 + dy)
-            try expect(a.pointerX == 0 && a.pointerY == 0, "stir reached (\(dx), \(dy)): \(a.pointerX)")
-        }
-        try expect(rig.breeze.sample(800 + 2 * rig.breeze.spacing, 500).pointerX > 0, "stir didn't spread at all")
-    }
+private func meadowReplaysTheSketchProbe() throws {
+    try replayProbe("meadow-probe-1600x913")
+    try replayProbe("meadow-probe-1280x713")
+}
 
-    check("meadowStirSameAtEveryInputRate") {
-        // Delivered as soon as it can be: before the first step after it was taken.
-        let first = { (t: Double) -> Int in Int((t * 60 - 1e-9).rounded(.up)) + 1 }
-        // The reference: 60 Hz, one sample a step.
-        let ref = stirTrace(rate: 60) { _, t in first(t) }
-        func regular(_ rate: Double) -> [Double] { stirTrace(rate: rate) { _, t in first(t) } }
-        var worst: [String: Double] = [:]
-        for rate in [15.0, 30, 120] { worst["\(Int(rate)) Hz"] = worstDifference(regular(rate), ref) }
-        // Bursts: 60 Hz samples held and delivered four at a time; 120 Hz samples six at a time.
-        worst["60 Hz in fours"] = worstDifference(stirTrace(rate: 60) { e, _ in (e / 4 + 1) * 4 + 1 }, ref)
-        worst["120 Hz in sixes"] = worstDifference(stirTrace(rate: 120) { e, _ in (e / 6 + 1) * 3 + 1 }, ref)
-        // Irregular: each 60 Hz or 30 Hz sample late by 0–3 steps, in order.
-        func jittered(_ rate: Double) -> [Double] {
-            var last = 0
-            return stirTrace(rate: rate) { e, t in
-                let late = Int(MeadowMath.hash3(Double(e), 5, 7) * 4)
-                last = max(last, first(t) + late)
-                return last
-            }
-        }
-        worst["60 Hz jittered"] = worstDifference(jittered(60), ref)
-        worst["30 Hz jittered"] = worstDifference(jittered(30), ref)
-        let text = worst.sorted { $0.key < $1.key }.map { "\($0.key) \(String(format: "%.1f", $0.value * 100)) %" }
-        print("  stir vs 60 Hz: " + text.joined(separator: ", "))
-        // For the record (not held): the sketch's own rule, and moves taken as old as their arrival.
-        let sketch60 = stirTrace(rate: 60, sketchRule: true) { _, t in first(t) }
-        let sketch30 = worstDifference(stirTrace(rate: 30, sketchRule: true) { _, t in first(t) }, sketch60)
-        let sketch15 = worstDifference(stirTrace(rate: 15, sketchRule: true) { _, t in first(t) }, sketch60)
-        let unstamped = worstDifference(stirTrace(rate: 60, stamped: false) { e, _ in (e / 4 + 1) * 4 + 1 }, ref)
-        print("  (the sketch's rule: 30 Hz \(String(format: "%.1f", sketch30 * 100)) %, 15 Hz \(String(format: "%.1f", sketch15 * 100)) %;"
-              + " unstamped fours \(String(format: "%.1f", unstamped * 100)) %)")
-        for (k, v) in worst { try expect(v <= 0.05, "\(k): the air differs by \(v * 100) % (limit 5 %)") }
-        // Every rate keeps the whole way: two steps' worth arriving at once stirs as much as two steps.
-        let sum = { (t: [Double]) -> Double in t.reduce(0) { $0 + abs($1) } }
-        try expect(abs(sum(regular(30)) / sum(ref) - 1) < 0.05, "30 Hz lost air: \(sum(regular(30)) / sum(ref))")
-    }
-
-    check("meadowDownwashOnlyUnderLowButterflies") {
-        let rig = MeadowRig(Terrain.single(width: 1200, height: 800), cell: 13, seed: 3, plant: false)
-        func washAt() -> Double {
-            var m = 0.0
-            for r in 0..<rig.breeze.rows { for c in 0..<rig.breeze.columns { m = max(m, abs(rig.breeze.washSample(c, r).x)) } }
-            return m
-        }
-        let span: Double = 22 * 13 * 0.6
-        for z in [0.35, 0.5, 0.9, 1.0] { rig.breeze.downstroke(x: 600, y: 400, z: z, sinStroke: 1, span: span, dt: meadowStep) }
-        try expect(washAt() == 0, "downwash from z ≥ 0.35: \(washAt())")
-        rig.breeze.downstroke(x: 600, y: 400, z: 0.1, sinStroke: -0.5, span: span, dt: meadowStep)
-        try expect(washAt() == 0, "downwash on the upstroke")
-        rig.breeze.downstroke(x: 600, y: 400, z: 0.34, sinStroke: 1, span: span, dt: meadowStep)
-        let weak = washAt()
-        rig.breeze.downstroke(x: 600, y: 400, z: 0.0, sinStroke: 1, span: span, dt: meadowStep)
-        let strong: Double = washAt() - weak
-        try expect(weak > 0 && strong > weak * 10, "low butterflies wash more: \(weak) at 0.34, \(strong) at 0")
-        // Outward from the butterfly: to its right the air moves right.
-        let right = rig.breeze.sample(600 + 60, 400)
-        let left = rig.breeze.sample(600 - 60, 400)
-        try expect(right.x - right.landedX > 0 && left.x - left.landedX < 0, "downwash not outward")
-        try expect(right.landedX == rig.breeze.sample(600 + 60, 400).landedX && right.pointerX == 0,
-                   "downwash counted in the landed air or the pointer's")
-    }
-
-    check("meadowWindPeaksAtTheSketchSpeed") {
-        // Breeze 1.7 (the director's): the speed's theoretical top is 26 · 1.7 · 1.1 · 1.9 ≈ 92.4 pt/s.
-        let rig = MeadowRig(Terrain.single(width: 2560, height: 1440), cell: 13, seed: 5, plant: false)
-        var peak = 0.0, sum = 0.0, n = 0.0
-        for k in 0..<(60 * 3600) {
-            rig.breeze.step(meadowStep)
-            if k % 30 != 0 { continue }
-            for j in 0..<24 {
-                let x: Double = 100 + Double(j % 6) * 450
-                let y: Double = 100 + Double(j / 6) * 400
-                let a = rig.breeze.sample(x, y)
-                peak = max(peak, a.speed)
-                sum += a.speed
-                n += 1
-            }
-        }
-        print("  wind over an hour: peak \(String(format: "%.1f", peak)) pt/s, mean \(String(format: "%.1f", sum / n)) pt/s")
-        try expect(peak >= 88 && peak <= 100, "peak \(peak) pt/s, the sketch's about 90–100")
-    }
-
-    check("meadowNoFlowerInAGap") {
-        // Offset screens (a strip beside the shorter one), a gap between two, and a laptop under a monitor.
-        let layouts: [[CGRect]] = [
-            [CGRect(x: 0, y: 0, width: 1512, height: 982), CGRect(x: 1512, y: 0, width: 1920, height: 1080)],
-            [CGRect(x: 0, y: 0, width: 1440, height: 900), CGRect(x: 1500, y: 100, width: 1280, height: 800)],
-            [CGRect(x: 0, y: 0, width: 2560, height: 1440), CGRect(x: 375, y: 1440, width: 1800, height: 1169)],
-        ]
-        for (li, rects) in layouts.enumerated() {
-            let terrain = Terrain(rects: rects)
-            let b = terrain.bounds
-            for seed in Int32(1)...Int32(24) {
-                let rig = MeadowRig(terrain, cell: 13, seed: seed, tuning: { var t = MeadowTuning(); t.density = 3; return t }())
-                for f in rig.flowers.all {
-                    let inBounds = Double(b.minX) <= f.x && f.x <= Double(b.maxX) && Double(b.minY) <= f.y && f.y <= Double(b.maxY)
-                    try expect(terrain.contains(SIMD2(f.x, f.y)) || !inBounds,
-                               "layout \(li) seed \(seed): flower \(f.id) at (\(f.x), \(f.y)) in a gap")
-                    // At most 10 pt past a real edge on either axis (the sketch's per-axis slack).
-                    var off = Double.infinity
-                    for r in rects {
-                        let ox: Double = max(Double(r.minX) - f.x, f.x - Double(r.maxX), 0)
-                        let oy: Double = max(Double(r.minY) - f.y, f.y - Double(r.maxY), 0)
-                        off = min(off, max(ox, oy))
-                    }
-                    try expect(off <= MeadowTuning.Flowers.edgeSlack + 1e-9, "layout \(li) seed \(seed): flower \(off) pt off")
-                }
-            }
-        }
-    }
-
-    check("meadowNoOverlapAndPatchesFollowArea") {
-        for (w, h, density) in [(1440.0, 900.0, 0.85), (2560, 1440, 0.85), (2560, 1440, 2.5), (800, 500, 0.2), (3000, 300, 1)] {
-            let rig = MeadowRig(Terrain.single(width: w, height: h), cell: 13, seed: 11,
-                                tuning: { var t = MeadowTuning(); t.density = density; return t }())
-            let want = max(1, Int(MeadowMath.round(w * h / 190_000 * density)))
-            try expect(rig.flowers.patches == want, "\(w)x\(h) at \(density): \(rig.flowers.patches) patches, want \(want)")
-            let all = rig.flowers.all
-            for i in all.indices {
-                for j in all.indices where j > i {
-                    let d: Double = ((all[i].x - all[j].x) * (all[i].x - all[j].x) + (all[i].y - all[j].y) * (all[i].y - all[j].y)).squareRoot()
-                    let need: Double = (all[i].radius + all[j].radius) * 1.05
-                    try expect(d >= need, "\(w)x\(h): flowers \(all[i].id) and \(all[j].id) overlap (\(d) < \(need))")
-                }
-            }
-            for i in all.indices.dropFirst() { try expect(all[i - 1].radius <= all[i].radius, "not small first") }
-        }
-        // Per screen: two screens get each its own share, and twice the density about twice the flowers.
-        let two = Terrain(rects: [CGRect(x: 0, y: 0, width: 1440, height: 900), CGRect(x: 1440, y: 0, width: 1920, height: 1080)])
-        let r2 = MeadowRig(two, cell: 13, seed: 4)
-        let want2 = Int(MeadowMath.round(1440 * 900 / 190_000 * 0.85)) + Int(MeadowMath.round(1920 * 1080 / 190_000 * 0.85))
-        try expect(r2.flowers.patches == want2, "two screens: \(r2.flowers.patches) patches, want \(want2)")
-        var lo = 0, hi = 0
-        for seed in Int32(1)...Int32(10) {
-            lo += MeadowRig(Terrain.single(width: 2560, height: 1440), cell: 13, seed: seed).flowers.all.count
-            hi += MeadowRig(Terrain.single(width: 2560, height: 1440), cell: 13, seed: seed,
-                            tuning: { var t = MeadowTuning(); t.density = 1.7; return t }()).flowers.all.count
-        }
-        let ratio: Double = Double(hi) / Double(lo)
-        try expect(ratio > 1.6 && ratio < 2.2, "twice the density gives \(ratio) × the flowers")
-    }
-
-    check("meadowHeadSpringRings") {
-        // No wind: a nod rings the head at f0 with ζ 0.12.
-        var calm = MeadowTuning()
-        calm.breeze = 0
-        let rig = MeadowRig(Terrain.single(width: 1600, height: 1000), cell: 13, seed: 21, tuning: calm)
-        var worstF = 0.0, worstZ = 0.0
-        for f in rig.flowers.all.prefix(6) {
-            rig.flowers.nod(id: f.id, dx: 1, dy: 0, size: 1, k: 1)
-            var xs: [Double] = []
-            for _ in 0..<600 {
-                rig.step()
-                xs.append(rig.flowers.flower(id: f.id)?.ox ?? 0)
-            }
-            // Upward zero crossings give the period; successive positive peaks the decay.
-            var ups: [Double] = []
-            var peaks: [Double] = []
-            for i in 1..<(xs.count - 1) {
-                if xs[i - 1] < 0 && xs[i] >= 0 { ups.append(Double(i - 1) + -xs[i - 1] / (xs[i] - xs[i - 1])) }
-                if xs[i] > xs[i - 1] && xs[i] >= xs[i + 1] && xs[i] > 0 { peaks.append(xs[i]) }
-            }
-            try expect(ups.count >= 4 && peaks.count >= 4, "flower \(f.id) doesn't ring")
-            let period: Double = (ups[3] - ups[0]) / 3 * meadowStep
-            let freq: Double = 1 / period
-            let decrement: Double = log(peaks[0] / peaks[3]) / 3
-            let zeta: Double = decrement / (4 * Double.pi * Double.pi + decrement * decrement).squareRoot()
-            worstF = max(worstF, abs(freq / f.f0 - 1))
-            worstZ = max(worstZ, abs(zeta - 0.12))
-            try expect(abs(freq / f.f0 - 1) < 0.05, "\(f.kind.name) rings at \(freq) Hz, f0 \(f.f0)")
-            try expect(abs(zeta - 0.12) < 0.02, "\(f.kind.name) ζ \(zeta)")
-        }
-        print("  head spring: frequency within \(String(format: "%.1f", worstF * 100)) % of f0, ζ within \(String(format: "%.3f", worstZ)) of 0.12")
-        // The strongest breeze and a stirring pointer never swing a head past 0.45 R.
-        var wild = MeadowTuning()
-        wild.breeze = 3
-        let gale = MeadowRig(Terrain.single(width: 1600, height: 1000), cell: 13, seed: 22, tuning: wild)
-        for k in 0..<3600 {
+private func meadowSameSeedSameMeadow() throws {
+    let terrain = Terrain(rects: [CGRect(x: 0, y: 0, width: 1512, height: 982), CGRect(x: 1512, y: 0, width: 1920, height: 1080)])
+    func run(_ seed: Int32) -> ([Flower], [MeadowAir]) {
+        let rig = MeadowRig(terrain, cell: 13, seed: seed)
+        for k in 0..<400 {
             let t: Double = Double(k) / 60
-            gale.breeze.pointerMoved(x: 800 + 700 * sin(7 * t), y: 500 + 450 * cos(5 * t))
-            gale.step()
-            for f in gale.flowers.all {
-                let m: Double = (f.ox * f.ox + f.oy * f.oy).squareRoot()
-                try expect(m <= 0.45 * f.radius + 1e-9, "step \(k): \(f.kind.name) swung \(m / f.radius) R")
-            }
+            rig.breeze.pointerMoved(x: 900 + 400 * cos(t), y: 500 + 300 * sin(1.3 * t))
+            if k == 100 || k == 160 || k == 220 { rig.flowers.click(x: 300 + Double(k) * 7, y: 260, rng: rig.input) }
+            rig.step()
+        }
+        var air: [MeadowAir] = []
+        for p in stride(from: 50.0, to: 3400, by: 170) { air.append(rig.breeze.sample(p, p * 0.28)) }
+        return (rig.flowers.all, air)
+    }
+    let (f1, a1) = run(77)
+    let (f2, a2) = run(77)
+    try expect(!f1.isEmpty && f1 == f2, "same seed, different flowers")
+    try expect(a1 == a2, "same seed, different air")
+    let (f3, _) = run(78)
+    try expect(f3.map(\.x) != f1.map(\.x), "another seed, the same meadow")
+}
+
+private func meadowStirHalfLifeAndLocal() throws {
+    let rig = MeadowRig(Terrain.single(width: 1600, height: 1000), cell: 13, seed: 1,
+                        tuning: { var t = MeadowTuning(); t.breeze = 0; return t }(), plant: false)
+    rig.breeze.stir(800, 500, 100, 0)
+    let start = rig.breeze.sample(800, 500).pointerX
+    // ln 2 / 1.6 ≈ 0.433 s: 26 steps is 0.4333 s.
+    rig.step(26)
+    let half = rig.breeze.sample(800, 500).pointerX / start
+    try expect(abs(half - 0.5) < 0.01, "after 26 steps \(half) of the stir is left")
+    let halfLife: Double = log(2) / MeadowTuning.Stir.decay
+    try expect(abs(halfLife - 0.433) < 0.001, "half-life \(halfLife)")
+    // Local: 3 grid cells of reach plus one cell of interpolation; nothing beyond.
+    let reach: Double = 4 * rig.breeze.spacing
+    let beyond: [(Double, Double)] = [(reach + 1, 0), (0, reach + 1), (-reach - 1, 0), (reach, reach)]
+    for (dx, dy) in beyond {
+        let a = rig.breeze.sample(800 + dx, 500 + dy)
+        try expect(a.pointerX == 0 && a.pointerY == 0, "stir reached (\(dx), \(dy)): \(a.pointerX)")
+    }
+    try expect(rig.breeze.sample(800 + 2 * rig.breeze.spacing, 500).pointerX > 0, "stir didn't spread at all")
+}
+
+private func meadowStirSameAtEveryInputRate() throws {
+    // Delivered as soon as it can be: before the first step after it was taken.
+    let first = { (t: Double) -> Int in Int((t * 60 - 1e-9).rounded(.up)) + 1 }
+    // The reference: 60 Hz, one sample a step.
+    let ref = stirTrace(rate: 60) { _, t in first(t) }
+    func regular(_ rate: Double) -> [Double] { stirTrace(rate: rate) { _, t in first(t) } }
+    var worst: [String: Double] = [:]
+    for rate in [15.0, 30, 120] { worst["\(Int(rate)) Hz"] = worstDifference(regular(rate), ref) }
+    // Bursts: 60 Hz samples held and delivered four at a time; 120 Hz samples six at a time.
+    worst["60 Hz in fours"] = worstDifference(stirTrace(rate: 60) { e, _ in (e / 4 + 1) * 4 + 1 }, ref)
+    worst["120 Hz in sixes"] = worstDifference(stirTrace(rate: 120) { e, _ in (e / 6 + 1) * 3 + 1 }, ref)
+    // Irregular: each 60 Hz or 30 Hz sample late by 0–3 steps, in order.
+    func jittered(_ rate: Double) -> [Double] {
+        var last = 0
+        return stirTrace(rate: rate) { e, t in
+            let late = Int(MeadowMath.hash3(Double(e), 5, 7) * 4)
+            last = max(last, first(t) + late)
+            return last
         }
     }
+    worst["60 Hz jittered"] = worstDifference(jittered(60), ref)
+    worst["30 Hz jittered"] = worstDifference(jittered(30), ref)
+    let text = worst.sorted { $0.key < $1.key }.map { "\($0.key) \(String(format: "%.1f", $0.value * 100)) %" }
+    print("  stir vs 60 Hz: " + text.joined(separator: ", "))
+    // For the record (not held): the sketch's own rule, and moves taken as old as their arrival.
+    let sketch60 = stirTrace(rate: 60, sketchRule: true) { _, t in first(t) }
+    let sketch30 = worstDifference(stirTrace(rate: 30, sketchRule: true) { _, t in first(t) }, sketch60)
+    let sketch15 = worstDifference(stirTrace(rate: 15, sketchRule: true) { _, t in first(t) }, sketch60)
+    let unstamped = worstDifference(stirTrace(rate: 60, stamped: false) { e, _ in (e / 4 + 1) * 4 + 1 }, ref)
+    print("  (the sketch's rule: 30 Hz \(String(format: "%.1f", sketch30 * 100)) %, 15 Hz \(String(format: "%.1f", sketch15 * 100)) %;"
+          + " unstamped fours \(String(format: "%.1f", unstamped * 100)) %)")
+    for (k, v) in worst { try expect(v <= 0.05, "\(k): the air differs by \(v * 100) % (limit 5 %)") }
+    // Every rate keeps the whole way: two steps' worth arriving at once stirs as much as two steps.
+    let sum = { (t: [Double]) -> Double in t.reduce(0) { $0 + abs($1) } }
+    try expect(abs(sum(regular(30)) / sum(ref) - 1) < 0.05, "30 Hz lost air: \(sum(regular(30)) / sum(ref))")
+}
 
-    check("meadowClicksTouchNeverStack") {
-        let rig = MeadowRig(Terrain.single(width: 1600, height: 1000), cell: 13, seed: 31)
-        rig.step(30)
-        // An open spot: far from every flower.
-        var spot = SIMD2<Double>(0, 0)
-        var best = -1.0
-        for y in stride(from: 60.0, to: 940, by: 20) {
-            for x in stride(from: 60.0, to: 1540, by: 20) {
-                var d = 1e9
-                for f in rig.flowers.all { d = min(d, ((f.x - x) * (f.x - x) + (f.y - y) * (f.y - y)).squareRoot() - f.radius) }
-                if d > best { best = d; spot = SIMD2(x, y) }
-            }
-        }
-        let before = rig.flowers.all.count
-        var blooms = 0, touches = 0
-        var kinds: [String] = []
-        for _ in 0..<30 {
-            switch rig.flowers.click(x: spot.x, y: spot.y, rng: rig.input) {
-            case .bloomed: blooms += 1; kinds.append("bloom")
-            case .touched: touches += 1; kinds.append("touch")
-            case .ignored: kinds.append("ignored")
-            }
-            rig.step(6)
-        }
-        try expect(blooms == 1 && touches == 29, "30 clicks on one spot: \(blooms) blooms, \(touches) touches")
-        try expect(rig.flowers.all.count == before + 1, "flowers \(before) -> \(rig.flowers.all.count)")
-        // A touch nods the head and stays inside 0.45 R however fast the clicks.
-        for f in rig.flowers.all {
-            try expect((f.ox * f.ox + f.oy * f.oy).squareRoot() <= 0.45 * f.radius + 1e-9, "a touched head swung too far")
-        }
-        // A click off the meadow does nothing.
-        try expect(rig.flowers.click(x: -50, y: 300, rng: rig.input) == .ignored, "a click off the meadow counted")
+private func meadowDownwashOnlyUnderLowButterflies() throws {
+    let rig = MeadowRig(Terrain.single(width: 1200, height: 800), cell: 13, seed: 3, plant: false)
+    func washAt() -> Double {
+        var m = 0.0
+        for r in 0..<rig.breeze.rows { for c in 0..<rig.breeze.columns { m = max(m, abs(rig.breeze.washSample(c, r).x)) } }
+        return m
     }
+    let span: Double = 22 * 13 * 0.6
+    let high: [Double] = [0.35, 0.5, 0.9, 1.0]
+    for z in high { rig.breeze.downstroke(x: 600, y: 400, z: z, sinStroke: 1, span: span, dt: meadowStep) }
+    try expect(washAt() == 0, "downwash from z ≥ 0.35: \(washAt())")
+    rig.breeze.downstroke(x: 600, y: 400, z: 0.1, sinStroke: -0.5, span: span, dt: meadowStep)
+    try expect(washAt() == 0, "downwash on the upstroke")
+    rig.breeze.downstroke(x: 600, y: 400, z: 0.34, sinStroke: 1, span: span, dt: meadowStep)
+    let weak = washAt()
+    rig.breeze.downstroke(x: 600, y: 400, z: 0.0, sinStroke: 1, span: span, dt: meadowStep)
+    let strong: Double = washAt() - weak
+    try expect(weak > 0 && strong > weak * 10, "low butterflies wash more: \(weak) at 0.34, \(strong) at 0")
+    // Outward from the butterfly: to its right the air moves right.
+    let right = rig.breeze.sample(600 + 60, 400)
+    let left = rig.breeze.sample(600 - 60, 400)
+    try expect(right.x - right.landedX > 0 && left.x - left.landedX < 0, "downwash not outward")
+    try expect(right.landedX == rig.breeze.sample(600 + 60, 400).landedX && right.pointerX == 0,
+               "downwash counted in the landed air or the pointer's")
+}
 
-    check("meadowClickLimitAndFade") {
-        var t = MeadowTuning()
-        t.density = 0.2
-        t.clickLimit = 5
-        let rig = MeadowRig(Terrain.single(width: 2560, height: 1440), cell: 13, seed: 41, tuning: t)
-        var closed: [Int] = []
-        rig.flowers.onClosing = { closed.append($0) }
-        var bloomed: [Int] = []
-        var k = 0
-        for y in stride(from: 120.0, to: 1400, by: 230) {
-            for x in stride(from: 120.0, to: 2500, by: 230) {
-                if case .bloomed(let id, _) = rig.flowers.click(x: x, y: y, rng: rig.input) { bloomed.append(id) }
-                try expect(rig.flowers.clickedOpen <= 5, "\(rig.flowers.clickedOpen) clicked flowers open, limit 5")
-                k += 1
-                rig.step()
-            }
-        }
-        try expect(bloomed.count >= 9, "only \(bloomed.count) blooms")
-        try expect(closed == Array(bloomed.prefix(bloomed.count - 5)), "closed \(closed), bloomed \(bloomed): not oldest first")
-        // The newest closing fades from 1 to 0 over 2 s, then goes.
-        let last = closed[closed.count - 1]
-        let fade0 = rig.flowers.flower(id: last)?.fade ?? -1
-        try expect(fade0 > 0.95 && rig.flowers.flower(id: last)?.fading == true, "a closing flower isn't fading: \(fade0)")
-        var steps = 0
-        while rig.flowers.flower(id: last) != nil && steps < 400 { rig.step(); steps += 1 }
-        let expected = Int(((fade0 * 2) / meadowStep).rounded(.up))
-        try expect(abs(steps - expected) <= 1, "faded in \(steps) steps, want \(expected) (2 s)")
-        // A smaller limit closes the oldest at once.
-        rig.flowers.tuning.clickLimit = 2
-        rig.flowers.limitClicked()
-        try expect(rig.flowers.clickedOpen == 2, "limit 2 leaves \(rig.flowers.clickedOpen)")
-    }
-
-    check("meadowRelayoutFadesClickedOffScreen") {
-        // A small resize (under the sketch's 80 pt) leaves a clicked flower off the screen: it fades all the same.
-        let rig = MeadowRig(Terrain.single(width: 1600, height: 1000), cell: 13, seed: 51,
-                            tuning: { var t = MeadowTuning(); t.density = 0.2; return t }())
-        var id = 0
-        for x in stride(from: 1590.0, to: 1500, by: -10) {
-            if case .bloomed(let i, _) = rig.flowers.click(x: x, y: 500, rng: rig.input) { id = i; break }
-        }
-        try expect(id > 0, "no bloom near the right edge")
-        let x = rig.flowers.flower(id: id)?.x ?? 0
-        var gone: [Int] = []
-        rig.flowers.onClosing = { gone.append($0) }
-        rig.flowers.relayout(terrain: Terrain.single(width: x - 30, height: 1000), cell: CGSize(width: 13, height: 19), rng: rig.input)
-        try expect(rig.flowers.flower(id: id)?.fading == true && gone.contains(id), "clicked flower off screen not fading")
-        rig.step(121)
-        try expect(rig.flowers.flower(id: id) == nil, "it didn't go")
-        // A big change replants: planted flowers new, every centre where a bloom may stand.
-        rig.flowers.relayout(terrain: Terrain(rects: [CGRect(x: 0, y: 0, width: 1000, height: 700),
-                                                      CGRect(x: 1000, y: 200, width: 900, height: 600)]),
-                             cell: CGSize(width: 12, height: 17), rng: rig.input)
-        for f in rig.flowers.all where !f.fading {
-            try expect(rig.flowers.mayStand(f.x, f.y), "after the replant a flower stands at (\(f.x), \(f.y))")
+private func meadowWindPeaksAtTheSketchSpeed() throws {
+    // Breeze 1.7 (the director's): the speed's theoretical top is 26 · 1.7 · 1.1 · 1.9 ≈ 92.4 pt/s.
+    let rig = MeadowRig(Terrain.single(width: 2560, height: 1440), cell: 13, seed: 5, plant: false)
+    var peak = 0.0, sum = 0.0, n = 0.0
+    for k in 0..<(60 * 3600) {
+        rig.breeze.step(meadowStep)
+        if k % 30 != 0 { continue }
+        for j in 0..<24 {
+            let x: Double = 100 + Double(j % 6) * 450
+            let y: Double = 100 + Double(j / 6) * 400
+            let a = rig.breeze.sample(x, y)
+            peak = max(peak, a.speed)
+            sum += a.speed
+            n += 1
         }
     }
+    print("  wind over an hour: peak \(String(format: "%.1f", peak)) pt/s, mean \(String(format: "%.1f", sum / n)) pt/s")
+    try expect(peak >= 88 && peak <= 100, "peak \(peak) pt/s, the sketch's about 90–100")
+}
 
-    check("meadowFiniteOnBadInput") {
-        let bad: [Double] = [.nan, .infinity, -.infinity, 1e300, -1e300]
-        let rig = MeadowRig(Terrain.single(width: 1440, height: 900), cell: 13, seed: 61)
-        for v in bad {
-            rig.breeze.pointerMoved(x: v, y: 300)
-            rig.breeze.pointerMoved(x: 300, y: v)
-            rig.breeze.stir(v, 300, 50, 50)
-            rig.breeze.stir(300, 300, v, 50)
-            rig.breeze.wash(300, 300, v, 100)
-            rig.breeze.wash(v, 300, 10, v)
-            rig.breeze.downstroke(x: 300, y: 300, z: v, sinStroke: 1, span: 100, dt: meadowStep)
-            rig.breeze.downstroke(x: 300, y: 300, z: 0.1, sinStroke: v, span: v, dt: v)
-            _ = rig.flowers.click(x: v, y: 200, rng: rig.input)
-            _ = rig.flowers.click(x: 200, y: v, rng: rig.input)
-            if let f = rig.flowers.all.first { rig.flowers.nod(id: f.id, dx: v, dy: 1, size: 1, k: 1) }
-            rig.breeze.step(v)
-            rig.flowers.step(v)
-            let a = rig.breeze.sample(v, v)
-            if v.isFinite {
-                try expect(a.x.isFinite && a.y.isFinite && a.speed.isFinite, "air at \(v): \(a)")
-            } else {
-                try expect(a == MeadowAir(), "air at a broken point: \(a)")
-            }
-        }
-        rig.breeze.pointerMoved(x: 1e15, y: -1e15)
-        rig.step(30)
-        func finite(_ rig: MeadowRig, _ at: String) throws {
+private func meadowNoFlowerInAGap() throws {
+    // Offset screens (a strip beside the shorter one), a gap between two, and a laptop under a monitor.
+    let layouts: [[CGRect]] = [
+        [CGRect(x: 0, y: 0, width: 1512, height: 982), CGRect(x: 1512, y: 0, width: 1920, height: 1080)],
+        [CGRect(x: 0, y: 0, width: 1440, height: 900), CGRect(x: 1500, y: 100, width: 1280, height: 800)],
+        [CGRect(x: 0, y: 0, width: 2560, height: 1440), CGRect(x: 375, y: 1440, width: 1800, height: 1169)],
+    ]
+    for (li, rects) in layouts.enumerated() {
+        let terrain = Terrain(rects: rects)
+        let b = terrain.bounds
+        for seed in Int32(1)...Int32(24) {
+            let rig = MeadowRig(terrain, cell: 13, seed: seed, tuning: { var t = MeadowTuning(); t.density = 3; return t }())
             for f in rig.flowers.all {
-                try expect(f.ox.isFinite && f.oy.isFinite && f.x.isFinite && f.radius.isFinite, "\(at): flower \(f.id) not finite")
-            }
-            for p in [(0.0, 0.0), (700, 400), (1e9, 1e9)] {
-                let a = rig.breeze.sample(p.0, p.1)
-                try expect(a.x.isFinite && a.y.isFinite && a.speed.isFinite && a.gust.isFinite, "\(at): air at \(p) \(a)")
-            }
-        }
-        try finite(rig, "bad input")
-        // Zero, empty, huge and broken viewports and cells.
-        let terrains: [(String, Terrain)] = [
-            ("zero", Terrain.single(width: 0, height: 0)), ("empty", Terrain(rects: [])),
-            ("thin", Terrain.single(width: 1, height: 5000)), ("huge", Terrain.single(width: 1e6, height: 1e6)),
-        ]
-        for (name, terrain) in terrains {
-            for cell in [13.0, 0, -5, .nan] {
-                let r = MeadowRig(terrain, cell: cell, seed: 62)
-                r.breeze.pointerMoved(x: 10, y: 10)
-                r.breeze.pointerMoved(x: 400, y: 300)
-                _ = r.flowers.click(x: 5, y: 5, rng: r.input)
-                r.step(3)
-                try finite(r, "\(name) at cell \(cell)")
-                try expect(r.breeze.columns * r.breeze.rows <= MeadowTuning.Stir.maxSamples, "\(name): grid too big")
+                let inBounds = Double(b.minX) <= f.x && f.x <= Double(b.maxX) && Double(b.minY) <= f.y && f.y <= Double(b.maxY)
+                try expect(terrain.contains(SIMD2(f.x, f.y)) || !inBounds,
+                           "layout \(li) seed \(seed): flower \(f.id) at (\(f.x), \(f.y)) in a gap")
+                // At most 10 pt past a real edge on either axis (the sketch's per-axis slack).
+                var off = Double.infinity
+                for r in rects {
+                    let ox: Double = max(Double(r.minX) - f.x, f.x - Double(r.maxX), 0)
+                    let oy: Double = max(Double(r.minY) - f.y, f.y - Double(r.maxY), 0)
+                    off = min(off, max(ox, oy))
+                }
+                try expect(off <= MeadowTuning.Flowers.edgeSlack + 1e-9, "layout \(li) seed \(seed): flower \(off) pt off")
             }
         }
-        // A broken tuning is put right: a value that isn't a number keeps the default (the sketch's `normalize`
-        // keeps the base's), one out of range is held to it.
-        var t = MeadowTuning()
-        t.breeze = .nan
-        t.density = .infinity
-        t.flowerSize = 9
-        t.clickLimit = -4
-        let s = t.sanitized()
-        try expect(s.breeze == 1.7 && s.density == 0.85 && s.flowerSize == 2 && s.clickLimit == 1, "sanitized \(s)")
-    }
-
-    check("meadowStepAllocatesNothing") {
-        let terrain = Terrain(rects: [CGRect(x: 0, y: 0, width: 1512, height: 982), CGRect(x: 1512, y: 0, width: 2560, height: 1440)])
-        let rig = MeadowRig(terrain, cell: 13, seed: 71)
-        _ = rig.flowers.click(x: 700, y: 500, rng: rig.input)
-        rig.step(120)
-        var k = 0
-        let n = allocations {
-            for _ in 0..<600 {
-                let t: Double = Double(k) / 60
-                rig.breeze.pointerMoved(x: 1500 + 900 * sin(t), y: 600 + 400 * cos(1.7 * t))
-                rig.breeze.downstroke(x: 1200, y: 500, z: 0.1, sinStroke: 0.8, span: 170, dt: meadowStep)
-                rig.breeze.flutter(x: 1300, y: 520, sinStroke: 0.8, span: 120, dt: meadowStep)
-                rig.step()
-                _ = rig.breeze.sample(400, 300)
-                k += 1
-            }
-        }
-        guard let n else { print("  (allocator not watchable here: skipped the count)"); return }
-        try expect(n == 0, "\(n) allocations in 600 warmed steps")
-    }
-
-    check("meadowReplaysTheSketchFixture") {
-        guard fixture("air-flowers") != nil else {
-            throw CheckFailure(detail: "Fixtures/air-flowers.json (the sketch's fix round 2) has not landed yet")
-        }
-        try replaySketchFixture()
     }
 }
 
-/// The sketch's own replay fixture (fix round 2). Filled in when its format is known.
+private func meadowNoOverlapAndPatchesFollowArea() throws {
+    let sizes: [(Double, Double, Double)] = [(1440, 900, 0.85), (2560, 1440, 0.85), (2560, 1440, 2.5), (800, 500, 0.2), (3000, 300, 1)]
+    for (w, h, density) in sizes {
+        let rig = MeadowRig(Terrain.single(width: w, height: h), cell: 13, seed: 11,
+                            tuning: { var t = MeadowTuning(); t.density = density; return t }())
+        let want = max(1, Int(MeadowMath.round(w * h / 190_000 * density)))
+        try expect(rig.flowers.patches == want, "\(w)x\(h) at \(density): \(rig.flowers.patches) patches, want \(want)")
+        let all = rig.flowers.all
+        for i in all.indices {
+            for j in all.indices where j > i {
+                let d: Double = ((all[i].x - all[j].x) * (all[i].x - all[j].x) + (all[i].y - all[j].y) * (all[i].y - all[j].y)).squareRoot()
+                let need: Double = (all[i].radius + all[j].radius) * 1.05
+                try expect(d >= need, "\(w)x\(h): flowers \(all[i].id) and \(all[j].id) overlap (\(d) < \(need))")
+            }
+        }
+        for i in all.indices.dropFirst() { try expect(all[i - 1].radius <= all[i].radius, "not small first") }
+    }
+    // Per screen: two screens get each its own share, and twice the density about twice the flowers.
+    let two = Terrain(rects: [CGRect(x: 0, y: 0, width: 1440, height: 900), CGRect(x: 1440, y: 0, width: 1920, height: 1080)])
+    let r2 = MeadowRig(two, cell: 13, seed: 4)
+    let want2 = Int(MeadowMath.round(1440 * 900 / 190_000 * 0.85)) + Int(MeadowMath.round(1920 * 1080 / 190_000 * 0.85))
+    try expect(r2.flowers.patches == want2, "two screens: \(r2.flowers.patches) patches, want \(want2)")
+    var lo = 0, hi = 0
+    for seed in Int32(1)...Int32(10) {
+        lo += MeadowRig(Terrain.single(width: 2560, height: 1440), cell: 13, seed: seed).flowers.all.count
+        hi += MeadowRig(Terrain.single(width: 2560, height: 1440), cell: 13, seed: seed,
+                        tuning: { var t = MeadowTuning(); t.density = 1.7; return t }()).flowers.all.count
+    }
+    let ratio: Double = Double(hi) / Double(lo)
+    try expect(ratio > 1.6 && ratio < 2.2, "twice the density gives \(ratio) × the flowers")
+}
+
+private func meadowHeadSpringRings() throws {
+    // No wind: a nod rings the head at f0 with ζ 0.12.
+    var calm = MeadowTuning()
+    calm.breeze = 0
+    let rig = MeadowRig(Terrain.single(width: 1600, height: 1000), cell: 13, seed: 21, tuning: calm)
+    var worstF = 0.0, worstZ = 0.0
+    for f in rig.flowers.all.prefix(6) {
+        rig.flowers.nod(id: f.id, dx: 1, dy: 0, size: 1, k: 1)
+        var xs: [Double] = []
+        for _ in 0..<600 {
+            rig.step()
+            xs.append(rig.flowers.flower(id: f.id)?.ox ?? 0)
+        }
+        // Upward zero crossings give the period; successive positive peaks the decay.
+        var ups: [Double] = []
+        var peaks: [Double] = []
+        for i in 1..<(xs.count - 1) {
+            if xs[i - 1] < 0 && xs[i] >= 0 { ups.append(Double(i - 1) + -xs[i - 1] / (xs[i] - xs[i - 1])) }
+            if xs[i] > xs[i - 1] && xs[i] >= xs[i + 1] && xs[i] > 0 { peaks.append(xs[i]) }
+        }
+        try expect(ups.count >= 4 && peaks.count >= 4, "flower \(f.id) doesn't ring")
+        let period: Double = (ups[3] - ups[0]) / 3 * meadowStep
+        let freq: Double = 1 / period
+        let decrement: Double = log(peaks[0] / peaks[3]) / 3
+        let zeta: Double = decrement / (4 * Double.pi * Double.pi + decrement * decrement).squareRoot()
+        worstF = max(worstF, abs(freq / f.f0 - 1))
+        worstZ = max(worstZ, abs(zeta - 0.12))
+        try expect(abs(freq / f.f0 - 1) < 0.05, "\(f.kind.name) rings at \(freq) Hz, f0 \(f.f0)")
+        try expect(abs(zeta - 0.12) < 0.02, "\(f.kind.name) ζ \(zeta)")
+    }
+    print("  head spring: frequency within \(String(format: "%.1f", worstF * 100)) % of f0, ζ within \(String(format: "%.3f", worstZ)) of 0.12")
+    // The strongest breeze and a stirring pointer never swing a head past 0.45 R.
+    var wild = MeadowTuning()
+    wild.breeze = 3
+    let gale = MeadowRig(Terrain.single(width: 1600, height: 1000), cell: 13, seed: 22, tuning: wild)
+    for k in 0..<3600 {
+        let t: Double = Double(k) / 60
+        gale.breeze.pointerMoved(x: 800 + 700 * sin(7 * t), y: 500 + 450 * cos(5 * t))
+        gale.step()
+        for f in gale.flowers.all {
+            let m: Double = (f.ox * f.ox + f.oy * f.oy).squareRoot()
+            try expect(m <= 0.45 * f.radius + 1e-9, "step \(k): \(f.kind.name) swung \(m / f.radius) R")
+        }
+    }
+}
+
+private func meadowClicksTouchNeverStack() throws {
+    let rig = MeadowRig(Terrain.single(width: 1600, height: 1000), cell: 13, seed: 31)
+    rig.step(30)
+    // An open spot: far from every flower.
+    var spot = SIMD2<Double>(0, 0)
+    var best = -1.0
+    for y in stride(from: 60.0, to: 940, by: 20) {
+        for x in stride(from: 60.0, to: 1540, by: 20) {
+            var d = 1e9
+            for f in rig.flowers.all { d = min(d, ((f.x - x) * (f.x - x) + (f.y - y) * (f.y - y)).squareRoot() - f.radius) }
+            if d > best { best = d; spot = SIMD2(x, y) }
+        }
+    }
+    let before = rig.flowers.all.count
+    var blooms = 0, touches = 0
+    var kinds: [String] = []
+    for _ in 0..<30 {
+        switch rig.flowers.click(x: spot.x, y: spot.y, rng: rig.input) {
+        case .bloomed: blooms += 1; kinds.append("bloom")
+        case .touched: touches += 1; kinds.append("touch")
+        case .ignored: kinds.append("ignored")
+        }
+        rig.step(6)
+    }
+    try expect(blooms == 1 && touches == 29, "30 clicks on one spot: \(blooms) blooms, \(touches) touches")
+    try expect(rig.flowers.all.count == before + 1, "flowers \(before) -> \(rig.flowers.all.count)")
+    // A touch nods the head and stays inside 0.45 R however fast the clicks.
+    for f in rig.flowers.all {
+        try expect((f.ox * f.ox + f.oy * f.oy).squareRoot() <= 0.45 * f.radius + 1e-9, "a touched head swung too far")
+    }
+    // A click off the meadow does nothing.
+    try expect(rig.flowers.click(x: -50, y: 300, rng: rig.input) == .ignored, "a click off the meadow counted")
+}
+
+private func meadowClickLimitAndFade() throws {
+    var t = MeadowTuning()
+    t.density = 0.2
+    t.clickLimit = 5
+    let rig = MeadowRig(Terrain.single(width: 2560, height: 1440), cell: 13, seed: 41, tuning: t)
+    var closed: [Int] = []
+    rig.flowers.onClosing = { closed.append($0) }
+    var bloomed: [Int] = []
+    var k = 0
+    for y in stride(from: 120.0, to: 1400, by: 230) {
+        for x in stride(from: 120.0, to: 2500, by: 230) {
+            if case .bloomed(let id, _) = rig.flowers.click(x: x, y: y, rng: rig.input) { bloomed.append(id) }
+            try expect(rig.flowers.clickedOpen <= 5, "\(rig.flowers.clickedOpen) clicked flowers open, limit 5")
+            k += 1
+            rig.step()
+        }
+    }
+    try expect(bloomed.count >= 9, "only \(bloomed.count) blooms")
+    try expect(closed == Array(bloomed.prefix(bloomed.count - 5)), "closed \(closed), bloomed \(bloomed): not oldest first")
+    // The newest closing fades from 1 to 0 over 2 s, then goes.
+    let last = closed[closed.count - 1]
+    let fade0 = rig.flowers.flower(id: last)?.fade ?? -1
+    try expect(fade0 > 0.95 && rig.flowers.flower(id: last)?.fading == true, "a closing flower isn't fading: \(fade0)")
+    var steps = 0
+    while rig.flowers.flower(id: last) != nil && steps < 400 { rig.step(); steps += 1 }
+    let expected = Int(((fade0 * 2) / meadowStep).rounded(.up))
+    try expect(abs(steps - expected) <= 1, "faded in \(steps) steps, want \(expected) (2 s)")
+    // A smaller limit closes the oldest at once.
+    rig.flowers.tuning.clickLimit = 2
+    rig.flowers.limitClicked()
+    try expect(rig.flowers.clickedOpen == 2, "limit 2 leaves \(rig.flowers.clickedOpen)")
+}
+
+private func meadowRelayoutFadesClickedOffScreen() throws {
+    // A small resize (under the sketch's 80 pt) leaves a clicked flower off the screen: it fades all the same.
+    let rig = MeadowRig(Terrain.single(width: 1600, height: 1000), cell: 13, seed: 51,
+                        tuning: { var t = MeadowTuning(); t.density = 0.2; return t }())
+    var id = 0
+    for x in stride(from: 1590.0, to: 1500, by: -10) {
+        if case .bloomed(let i, _) = rig.flowers.click(x: x, y: 500, rng: rig.input) { id = i; break }
+    }
+    try expect(id > 0, "no bloom near the right edge")
+    let x = rig.flowers.flower(id: id)?.x ?? 0
+    var gone: [Int] = []
+    rig.flowers.onClosing = { gone.append($0) }
+    rig.flowers.relayout(terrain: Terrain.single(width: x - 30, height: 1000), cell: CGSize(width: 13, height: 19), rng: rig.input)
+    try expect(rig.flowers.flower(id: id)?.fading == true && gone.contains(id), "clicked flower off screen not fading")
+    rig.step(121)
+    try expect(rig.flowers.flower(id: id) == nil, "it didn't go")
+    // A big change replants: planted flowers new, every centre where a bloom may stand.
+    rig.flowers.relayout(terrain: Terrain(rects: [CGRect(x: 0, y: 0, width: 1000, height: 700),
+                                                  CGRect(x: 1000, y: 200, width: 900, height: 600)]),
+                         cell: CGSize(width: 12, height: 17), rng: rig.input)
+    for f in rig.flowers.all where !f.fading {
+        try expect(rig.flowers.mayStand(f.x, f.y), "after the replant a flower stands at (\(f.x), \(f.y))")
+    }
+}
+
+private func meadowFiniteOnBadInput() throws {
+    let bad: [Double] = [.nan, .infinity, -.infinity, 1e300, -1e300]
+    let rig = MeadowRig(Terrain.single(width: 1440, height: 900), cell: 13, seed: 61)
+    for v in bad {
+        rig.breeze.pointerMoved(x: v, y: 300)
+        rig.breeze.pointerMoved(x: 300, y: v)
+        rig.breeze.stir(v, 300, 50, 50)
+        rig.breeze.stir(300, 300, v, 50)
+        rig.breeze.wash(300, 300, v, 100)
+        rig.breeze.wash(v, 300, 10, v)
+        rig.breeze.downstroke(x: 300, y: 300, z: v, sinStroke: 1, span: 100, dt: meadowStep)
+        rig.breeze.downstroke(x: 300, y: 300, z: 0.1, sinStroke: v, span: v, dt: v)
+        _ = rig.flowers.click(x: v, y: 200, rng: rig.input)
+        _ = rig.flowers.click(x: 200, y: v, rng: rig.input)
+        if let f = rig.flowers.all.first { rig.flowers.nod(id: f.id, dx: v, dy: 1, size: 1, k: 1) }
+        rig.breeze.step(v)
+        rig.flowers.step(v)
+        let a = rig.breeze.sample(v, v)
+        if v.isFinite {
+            try expect(a.x.isFinite && a.y.isFinite && a.speed.isFinite, "air at \(v): \(a)")
+        } else {
+            try expect(a == MeadowAir(), "air at a broken point: \(a)")
+        }
+    }
+    rig.breeze.pointerMoved(x: 1e15, y: -1e15)
+    rig.step(30)
+    func finite(_ rig: MeadowRig, _ at: String) throws {
+        for f in rig.flowers.all {
+            try expect(f.ox.isFinite && f.oy.isFinite && f.x.isFinite && f.radius.isFinite, "\(at): flower \(f.id) not finite")
+        }
+        let points: [(Double, Double)] = [(0, 0), (700, 400), (1e9, 1e9)]
+        for p in points {
+            let a = rig.breeze.sample(p.0, p.1)
+            try expect(a.x.isFinite && a.y.isFinite && a.speed.isFinite && a.gust.isFinite, "\(at): air at \(p) \(a)")
+        }
+    }
+    try finite(rig, "bad input")
+    // Zero, empty, huge and broken viewports and cells.
+    let terrains: [(String, Terrain)] = [
+        ("zero", Terrain.single(width: 0, height: 0)), ("empty", Terrain(rects: [])),
+        ("thin", Terrain.single(width: 1, height: 5000)), ("huge", Terrain.single(width: 1e6, height: 1e6)),
+    ]
+    for (name, terrain) in terrains {
+        let cells: [Double] = [13, 0, -5, .nan]
+        for cell in cells {
+            let r = MeadowRig(terrain, cell: cell, seed: 62)
+            r.breeze.pointerMoved(x: 10, y: 10)
+            r.breeze.pointerMoved(x: 400, y: 300)
+            _ = r.flowers.click(x: 5, y: 5, rng: r.input)
+            r.step(3)
+            try finite(r, "\(name) at cell \(cell)")
+            try expect(r.breeze.columns * r.breeze.rows <= MeadowTuning.Stir.maxSamples, "\(name): grid too big")
+        }
+    }
+    // A broken tuning is put right: a value that isn't a number keeps the default (the sketch's `normalize`
+    // keeps the base's), one out of range is held to it.
+    var t = MeadowTuning()
+    t.breeze = .nan
+    t.density = .infinity
+    t.flowerSize = 9
+    t.clickLimit = -4
+    let s = t.sanitized()
+    try expect(s.breeze == 1.7 && s.density == 0.85 && s.flowerSize == 2 && s.clickLimit == 1, "sanitized \(s)")
+}
+
+private func meadowStepAllocatesNothing() throws {
+    let terrain = Terrain(rects: [CGRect(x: 0, y: 0, width: 1512, height: 982), CGRect(x: 1512, y: 0, width: 2560, height: 1440)])
+    let rig = MeadowRig(terrain, cell: 13, seed: 71)
+    _ = rig.flowers.click(x: 700, y: 500, rng: rig.input)
+    rig.step(120)
+    var k = 0
+    let n = allocations {
+        for _ in 0..<600 {
+            let t: Double = Double(k) / 60
+            rig.breeze.pointerMoved(x: 1500 + 900 * sin(t), y: 600 + 400 * cos(1.7 * t))
+            rig.breeze.downstroke(x: 1200, y: 500, z: 0.1, sinStroke: 0.8, span: 170, dt: meadowStep)
+            rig.breeze.flutter(x: 1300, y: 520, sinStroke: 0.8, span: 120, dt: meadowStep)
+            rig.step()
+            _ = rig.breeze.sample(400, 300)
+            k += 1
+        }
+    }
+    guard let n else { print("  (allocator not watchable here: skipped the count)"); return }
+    try expect(n == 0, "\(n) allocations in 600 warmed steps")
+}
+
+private func meadowReplaysTheSketchFixture() throws {
+    guard fixture("air-flowers") != nil else {
+        throw CheckFailure(detail: "Fixtures/air-flowers.json (the sketch's fix round 2) has not landed yet")
+    }
+    try replaySketchFixture()
+}
+
+/// The sketch's own replay fixture (`air-flowers`, fix round 2; its format is at the top of the sketch's export
+/// code): the seed's planting, then 1800 ticks with the pointer trace fed as the sketch's handlers take it (a move
+/// stirs from where the pointer was; a press and release moving under 6 pt clicks; leaving ends it), sampled at the
+/// fixture's ticks. The replay clock is exactly 1/60 s a tick, never the file's rounded dt.
 private func replaySketchFixture() throws {
-    throw CheckFailure(detail: "the fixture's replay is not written yet")
+    guard let d = fixture("air-flowers") else { throw CheckFailure(detail: "fixture missing") }
+    let view = d["viewport"] as? [String: Any] ?? [:]
+    let cell = view["cell"] as? [String: Any] ?? [:]
+    let W = num(view["width"]), H = num(view["height"]), cw = num(cell["w"])
+    let seed = MeadowRandom.seed(num(d["seed"]))
+    let settings = d["settings"] as? [String: Any] ?? [:]
+    var t = MeadowTuning()
+    t.breeze = num(settings["breeze"])
+    t.downwash = num(settings["downwash"])
+    t.nod = num(settings["nod"])
+    t.density = num(settings["density"])
+    t.flowerSize = num(settings["flowerSize"])
+    t.leaves = num(settings["leaves"])
+    t.clickLimit = Int(num(settings["clickLimit"]))
+    try expect(t.sanitized() == t, "the fixture's settings are out of range: \(t)")
+    try expect(num(settings["timeScale"]) == 1, "the fixture runs at a time scale of \(num(settings["timeScale"]))")
+    let rig = MeadowRig(Terrain.single(width: W, height: H), cell: cw, seed: seed, tuning: t, sketchPointer: true)
+
+    let trace = d["trace"] as? [[String: Any]] ?? []
+    let samples = d["samples"] as? [[String: Any]] ?? []
+    try expect(!trace.isEmpty && samples.count >= 5, "trace \(trace.count), samples \(samples.count)")
+    let last = samples.map { Int(num($0["tick"])) }.max() ?? 0
+    // The sketch's pointer handlers, as far as the air and the flowers see them (html: the Pointer section).
+    var has = false, down = false
+    var moved = 0.0, px = 0.0, py = 0.0
+    func send(_ e: [String: Any]) {
+        let x = num(e["x"]), y = num(e["y"])
+        switch e["type"] as? String ?? "" {
+        case "move":
+            if has { moved += ((x - px) * (x - px) + (y - py) * (y - py)).squareRoot() }
+            px = x
+            py = y
+            has = true
+            rig.breeze.pointerMoved(x: x, y: y)
+        case "down":
+            down = true
+            moved = 0
+        case "up":
+            if down && moved < 6 { rig.flowers.click(x: x, y: y, rng: rig.input) }
+            down = false
+        case "leave":
+            down = false
+            has = false
+            rig.breeze.pointerLeft()
+        default:
+            break
+        }
+    }
+    var ev = 0
+    var sampled = 0
+    for tick in 0...last {
+        if let s = samples.first(where: { Int(num($0["tick"])) == tick }) {
+            try expectSample(s, rig, tick: tick)
+            sampled += 1
+        }
+        if tick == last { break }
+        while ev < trace.count && Int(num(trace[ev]["tick"])) == tick {
+            send(trace[ev])
+            ev += 1
+        }
+        rig.step()
+    }
+    try expect(sampled == samples.count && ev == trace.count, "replayed \(sampled) samples, \(ev) events")
+    print(String(format: "  air-flowers: %d samples, %d events; worst air %.1e pt/s, worst head %.1e pt", sampled, ev,
+                 replayWorst.air, replayWorst.head))
+}
+
+/// The largest differences a fixture replay met (air, head), for the record.
+nonisolated(unsafe) private var replayWorst = (air: 0.0, head: 0.0)
+
+private func expectSample(_ s: [String: Any], _ rig: MeadowRig, tick: Int) throws {
+    let at = "tick \(tick)"
+    try expectClose(rig.breeze.time, num(s["t"]), tol: 1e-6, "\(at): clock")
+    for w in s["wind"] as? [[String: Any]] ?? [] {
+        let x = num(w["x"]), y = num(w["y"])
+        let a = rig.breeze.sample(x, y)
+        let all = w["all"] as? [Any] ?? [], landed = w["landed"] as? [Any] ?? [], stir = w["stir"] as? [Any] ?? []
+        let pairs: [(String, Double, Double)] = [
+            ("all.x", a.x, num(all.first)), ("all.y", a.y, num(all.last)),
+            ("landed.x", a.landedX, num(landed.first)), ("landed.y", a.landedY, num(landed.last)),
+            ("stir.x", a.pointerX, num(stir.first)), ("stir.y", a.pointerY, num(stir.last)),
+        ]
+        for (name, got, want) in pairs {
+            replayWorst.air = max(replayWorst.air, abs(got - want))
+            try expect(abs(got - want) <= 1e-3, "\(at) air at (\(x), \(y)) \(name): \(got) vs \(want)")
+        }
+    }
+    let rows = s["flowers"] as? [[String: Any]] ?? []
+    try expect(rows.count == rig.flowers.all.count, "\(at): \(rig.flowers.all.count) flowers vs \(rows.count)")
+    for (row, f) in zip(rows, rig.flowers.all) {
+        let head = row["head"] as? [Any] ?? []
+        try expect(f.id == Int(num(row["id"])) && f.kind.name == (row["kind"] as? String ?? ""),
+                   "\(at): flower \(f.id) \(f.kind.name) vs \(num(row["id"])) \(row["kind"] ?? "")")
+        let pairs: [(String, Double, Double, Double)] = [
+            ("x", f.x, num(row["x"]), 1e-5), ("y", f.y, num(row["y"]), 1e-5), ("r", f.radius, num(row["r"]), 1e-5),
+            ("head.x", f.ox, num(head.first), 1e-3), ("head.y", f.oy, num(head.last), 1e-3), ("age", f.age, num(row["age"]), 1e-5),
+        ]
+        for (name, got, want, tol) in pairs {
+            if name.hasPrefix("head") { replayWorst.head = max(replayWorst.head, abs(got - want)) }
+            try expect(abs(got - want) <= tol, "\(at) flower \(f.id) \(name): \(got) vs \(want)")
+        }
+    }
+    try expect((s["butterflies"] as? [Any] ?? []).isEmpty, "\(at): the air-flowers fixture has butterflies")
 }

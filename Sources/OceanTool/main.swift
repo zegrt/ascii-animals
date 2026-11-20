@@ -9,6 +9,9 @@
 //   OceanTool bench [--habitat ocean|web]
 //   OceanTool bench --desk [--habitat ocean|web] [--separate] [--laptop WxH] [--density D] [--seconds S]
 //     CPU per second on the owner's desk (Bench.swift): both viewports drawn as the app draws them, at 30 and 15 fps.
+//   OceanTool meadow-air <out.png> <W>x<H> [--seed N] [--seconds S] [--under sketch.png] [--stir]
+//     The Meadow's planting and air (MeadowAir.swift): the port's flowers outlined over the sketch's own render at the
+//     same seed and size, beside the port's air field.
 //   OceanTool bench --digest [--separate] [--laptop WxH] [--frames N]
 //     A fingerprint of every Web canvas over a scripted run on the desk: unchanged digest, unchanged output.
 // A Web still is the original's ?still=1 (settled), unless --live: then the live wall after the warm-up.
@@ -102,6 +105,18 @@ case "crossing":
     try Crossing.run(out: URL(fileURLWithPath: args[0], isDirectory: true),
                      screens: [CGRect(x: 0, y: 0, width: 2560, height: 1440), CGRect(x: 375, y: 1440, width: 1800, height: 1169)],
                      seed: seed, seconds: 9, fps: 15)
+
+case "meadow-air":
+    let seed = MeadowRandom.seed(Double(option("--seed") ?? "4242") ?? 4242)
+    let seconds = Double(option("--seconds") ?? "3") ?? 3
+    let under = option("--under").map { URL(fileURLWithPath: $0) }
+    let stir = flag("--stir")
+    guard args.count == 2 else { fail("usage: OceanTool meadow-air <out.png> <W>x<H> [--seed N] [--seconds S] [--under sketch.png] [--stir]") }
+    let dims = args[1].split(separator: "x").compactMap { Double($0) }
+    guard dims.count == 2, dims.allSatisfy({ $0.isFinite && $0 >= 16 && $0 <= 8192 }) else { fail("bad size \(args[1])") }
+    guard seconds.isFinite && seconds >= 0 && seconds <= 600 else { fail("--seconds must be 0…600") }
+    try MeadowAir.run(out: URL(fileURLWithPath: args[0]), size: CGSize(width: dims[0], height: dims[1]), seed: seed,
+                      seconds: seconds, under: under, stir: stir)
 
 case "iconset":
     guard args.count == 1 else { fail("usage: OceanTool iconset <dir.iconset>") }
