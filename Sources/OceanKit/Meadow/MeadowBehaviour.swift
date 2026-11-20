@@ -60,6 +60,7 @@ extension MeadowWorld {
             if f.busy != 0 || f.age < 0.6 || f.fading { continue }
             let dx = f.x - b.x, dy = f.y - b.y, d = hypot(dx, dy)
             if d < 1.2 * sr || d > range || !onScreens(f.x, f.y) { continue }
+            if !gaps.isEmpty && segmentEntersGap(b.x, b.y, f.x, f.y) { continue }
             if (dx * hx + dy * hy) / d < -0.2 { continue }
             var crowded = false
             for o in flies where o !== b && o.landed && hypot(o.x - f.x, o.y - f.y) < 0.9 * (sr + spanRef(o)) { crowded = true; break }
@@ -111,6 +112,7 @@ extension MeadowWorld {
                 for o in flies where o !== b { sep = min(sep, hypot(o.x - x, o.y - y)) }
                 let d = hypot(x - b.x, y - b.y)
                 let sc: Double = min(sep, 400 * S) + (d > 200 * S ? 200 : 0)
+                if !gaps.isEmpty && segmentEntersGap(b.x, b.y, x, y) { continue }
                 if sc > bs { bs = sc; best = (x, y) }
             }
             b.gx = best.x
@@ -126,7 +128,8 @@ extension MeadowWorld {
     /// spirals in.
     func stepPointer(_ dt: Double) {
         cursorCd -= dt
-        if !pointerHas || screens.isEmpty { pointerStill = 0; return }
+        // A pointer off the screens (in a gap, say) is never landed on.
+        if !pointerHas || screens.isEmpty || !onScreens(pointerX, pointerY) { pointerStill = 0; return }
         pointerStill += dt
         if !tuning.cursorLand || pointerStill < tuning.holdTime || cursorCd > 0 { return }
         for b in flies where b.goal == .cursor || b.state == .cursor { return }
@@ -136,6 +139,7 @@ extension MeadowWorld {
         candWeight.removeAll(keepingCapacity: true)
         for b in flies {
             if b.leaving || b.entering || b.landed { continue }
+            if !gaps.isEmpty && segmentEntersGap(b.x, b.y, pointerX, pointerY) { continue }
             let w: Double = b.sp.cursorWeight / (1 + hypot(b.x - pointerX, b.y - pointerY) / (0.35 * diag))
             candFly.append(b)
             candWeight.append(w)

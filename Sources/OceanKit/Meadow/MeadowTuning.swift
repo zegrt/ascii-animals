@@ -434,6 +434,10 @@ public struct MeadowTuning: Equatable, Sendable {
         public static let sparkBuffer = 256
         /// Over the limit, the oldest clicked flower closes and fades over `FADE_S` = 2 s (html:886).
         public static let fadeTime = 2.0
+        /// The port's cap on flowers fading at once (the sketch has none): past it the most faded one goes at once,
+        /// so clicks faster than the meadow steps, or relayouts in a row, can't pile up fading flowers. A person
+        /// clicking ten times a second keeps about 20 fading, so the look never meets it.
+        public static let fadingMost = 32
         /// A landing nods the flower `0.12 · R · size · 2π · f0 · nod` along the butterfly's way; a take-off kicks it
         /// half as much back (html:1532–1536, 1546, 1579).
         public static let landingNod = 0.12

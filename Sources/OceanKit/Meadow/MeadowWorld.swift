@@ -64,6 +64,9 @@ public final class MeadowWorld {
         var diag: Double { (w * w + h * h).squareRoot() }
     }
     var screens: [Screen] = []
+    /// The gaps between screens side by side (not touching, by the terrain's rule), as boxes: the one between two
+    /// screens, across the span where both are level. A point in one that no screen holds is in a gap.
+    var gaps: [Screen] = []
     var screenArea = 0.0
     var wallLength = 0.0
     var single: Bool { screens.count == 1 }
@@ -80,8 +83,9 @@ public final class MeadowWorld {
         self.tuning = t
         self.terrain = terrain
         self.cell = cell
-        breeze = Breeze(terrain: terrain, cell: cell, tuning: t)
-        flowers = Flowers(terrain: terrain, cell: cell, breeze: breeze, tuning: t)
+        let usable = MeadowWorld.usable(terrain) ? terrain : Terrain(rects: [])
+        breeze = Breeze(terrain: usable, cell: cell, tuning: t)
+        flowers = Flowers(terrain: usable, cell: cell, breeze: breeze, tuning: t)
         let streams = MeadowRandom.pair(seed: seed)
         simRandom = streams.sim
         inputRandom = streams.input
@@ -91,13 +95,17 @@ public final class MeadowWorld {
         candWeight.reserveCapacity(512)
         candFly.reserveCapacity(64)
         setScreens()
-        flowers.onTouched = { [unowned self] id, x, y in
+        // Weak: the public `flowers` may outlive its world (then a touch, close or replant tells nobody).
+        flowers.onTouched = { [weak self] id, x, y in
+            guard let self else { return }
             for b in self.flies where b.flower == id && b.state == .nectar { self.takeOff(b, away: (x, y), escape: true) }
         }
-        flowers.onClosing = { [unowned self] id in
+        flowers.onClosing = { [weak self] id in
+            guard let self else { return }
             for b in self.flies where b.flower == id { self.leaveFlower(b) }
         }
-        flowers.onReplanted = { [unowned self] in
+        flowers.onReplanted = { [weak self] in
+            guard let self else { return }
             for b in self.flies where b.flower != 0 && self.flowers.index(of: b.flower) == nil { self.leaveFlower(b) }
         }
         guard !screens.isEmpty else { return }
@@ -106,20 +114,56 @@ public final class MeadowWorld {
         openingMoment()
     }
 
+    deinit {
+        flowers.onTouched = nil
+        flowers.onClosing = nil
+        flowers.onReplanted = nil
+    }
+
     public var time: Double { breeze.time }
     /// `S`: sketch points per point.
     @inline(__always) var S: Double { breeze.unit }
     /// The cell width the meadow uses (`cw`).
     @inline(__always) var cw: Double { MeadowTuning.Unit.cellWidth(Double(cell.width)) }
 
-    private func setScreens() {
-        screens = terrain.rects.compactMap { r in
-            let s = Screen(minX: Double(r.minX), minY: Double(r.minY), w: Double(r.width), h: Double(r.height))
-            return s.w.isFinite && s.h.isFinite && s.minX.isFinite && s.minY.isFinite && s.w > 0 && s.h > 0 ? s : nil
+    /// Whether every screen of `t` is one the meadow can live on: at least 1 pt each way, its edges within
+    /// ±`Unit.coordinateLimit` (so nothing derived from it overflows), and real edges to come and go by. Otherwise the
+    /// meadow has no screen: its butterflies hold still and nothing is planted until a usable layout comes.
+    static func usable(_ t: Terrain) -> Bool {
+        let lim = MeadowTuning.Unit.coordinateLimit
+        for r in t.rects {
+            let x0 = Double(r.minX), y0 = Double(r.minY), w = Double(r.width), h = Double(r.height)
+            guard x0.isFinite && y0.isFinite && w.isFinite && h.isFinite && w >= 1 && h >= 1 else { return false }
+            let x1: Double = x0 + w, y1: Double = y0 + h
+            guard abs(x0) <= lim && abs(y0) <= lim && abs(x1) <= lim && abs(y1) <= lim else { return false }
         }
-        if screens.count != terrain.rects.count { screens = [] }
+        var wall = 0.0
+        for e in t.edges { wall += e.length }
+        return !t.rects.isEmpty && wall.isFinite && wall > 0
+    }
+
+    private func setScreens() {
+        screens = []
+        gaps = []
+        screenArea = 0
+        wallLength = 0
+        guard MeadowWorld.usable(terrain) else { return }
+        screens = terrain.rects.map { r in Screen(minX: Double(r.minX), minY: Double(r.minY), w: Double(r.width), h: Double(r.height)) }
         screenArea = screens.reduce(0) { $0 + $1.w * $1.h }
         wallLength = terrain.edges.reduce(0) { $0 + $1.length }
+        // Facing sides closer than the terrain's touch are one shared edge (open); further apart, a gap.
+        for a in screens {
+            for b in screens {
+                if b.minX - a.maxX >= Terrain.touch {
+                    let lo = max(a.minY, b.minY), hi = min(a.maxY, b.maxY)
+                    if lo <= hi { gaps.append(Screen(minX: a.maxX, minY: lo, w: b.minX - a.maxX, h: hi - lo)) }
+                }
+                if b.minY - a.maxY >= Terrain.touch {
+                    let lo = max(a.minX, b.minX), hi = min(a.maxX, b.maxX)
+                    if lo <= hi { gaps.append(Screen(minX: lo, minY: a.maxY, w: hi - lo, h: b.minY - a.maxY)) }
+                }
+            }
+        }
     }
 
     // ── the screens (the sketch's W × H, per screen) ──
@@ -146,30 +190,77 @@ public final class MeadowWorld {
         return false
     }
 
-    /// In a gap: off every screen, between two screens side by side (one on each side of it, both level with it).
+    /// In a gap: off every screen, between two screens side by side (one on each side of it, both level with it,
+    /// further apart than the terrain's touch).
     func inGap(_ x: Double, _ y: Double) -> Bool {
-        guard screens.count > 1, !onScreens(x, y) else { return false }
-        var left = false, right = false, above = false, below = false
-        for s in screens {
-            if y >= s.minY && y <= s.maxY {
-                if s.maxX <= x { left = true }
-                if s.minX >= x { right = true }
-            }
-            if x >= s.minX && x <= s.maxX {
-                if s.maxY <= y { above = true }
-                if s.minY >= y { below = true }
-            }
-        }
-        return (left && right) || (above && below)
+        if gaps.isEmpty { return false }
+        var inside = false
+        for g in gaps where x >= g.minX && x <= g.maxX && y >= g.minY && y <= g.maxY { inside = true; break }
+        return inside && !onScreens(x, y)
     }
 
-    /// Whether the straight way from a to b stays on the screens (16 samples; Web's `wanderGoal`).
-    func wayOpen(_ ax: Double, _ ay: Double, _ bx: Double, _ by: Double) -> Bool {
-        for i in 1...16 {
-            let t = Double(i) / 16
-            if !onScreens(ax + (bx - ax) * t, ay + (by - ay) * t) { return false }
+    /// The part of the segment a → b (as t in 0…1) inside the closed box, or nil (Liang–Barsky).
+    @inline(__always) static func clip(_ ax: Double, _ ay: Double, _ dx: Double, _ dy: Double, _ s: Screen) -> (Double, Double)? {
+        var t0 = 0.0, t1 = 1.0
+        @inline(__always) func side(_ p: Double, _ q: Double) -> Bool {
+            if p == 0 { return q >= 0 }
+            let t: Double = q / p
+            if p < 0 { if t > t1 { return false }; if t > t0 { t0 = t } } else { if t < t0 { return false }; if t < t1 { t1 = t } }
+            return true
         }
-        return true
+        guard side(-dx, ax - s.minX), side(dx, s.maxX - ax), side(-dy, ay - s.minY), side(dy, s.maxY - ay), t0 <= t1 else { return nil }
+        return (t0, t1)
+    }
+
+    /// Whether the screens together cover the segment a → b from t0 to t1.
+    func covered(_ ax: Double, _ ay: Double, _ dx: Double, _ dy: Double, _ t0: Double, _ t1: Double) -> Bool {
+        var cur = t0
+        var moved = true
+        while cur < t1 - 1e-12 && moved {
+            moved = false
+            for s in screens {
+                guard let (c0, c1) = MeadowWorld.clip(ax, ay, dx, dy, s) else { continue }
+                if c0 <= cur + 1e-12 && c1 > cur + 1e-12 { cur = c1; moved = true }
+            }
+        }
+        return cur >= t1 - 1e-12
+    }
+
+    /// Whether any point of the segment a → b is in a gap (exact: each gap box clipped, less what the screens cover).
+    public func segmentEntersGap(_ ax: Double, _ ay: Double, _ bx: Double, _ by: Double) -> Bool {
+        if gaps.isEmpty { return false }
+        let dx: Double = bx - ax, dy: Double = by - ay
+        if dx == 0 && dy == 0 { return inGap(ax, ay) }
+        for g in gaps {
+            guard let (t0, t1) = MeadowWorld.clip(ax, ay, dx, dy, g) else { continue }
+            if !covered(ax, ay, dx, dy, t0, t1) { return true }
+        }
+        return false
+    }
+
+    /// Whether the straight way from a to b stays on the screens (exact; Web's `wanderGoal` asks the same).
+    public func wayOpen(_ ax: Double, _ ay: Double, _ bx: Double, _ by: Double) -> Bool {
+        guard !screens.isEmpty else { return false }
+        return covered(ax, ay, bx - ax, by - ay, 0, 1)
+    }
+
+    /// Moves `b` to (nx, ny), never into a gap: the whole way, else along x only, else along y only, else it stays.
+    /// One already in a gap (it can't be, but if it were) moves freely and the edge steer takes it out. One screen:
+    /// it just moves (the sketch).
+    @inline(__always) func move(_ b: Butterfly, _ nx: Double, _ ny: Double) {
+        if gaps.isEmpty || !segmentEntersGap(b.x, b.y, nx, ny) || inGap(b.x, b.y) { b.x = nx; b.y = ny }
+        else if !segmentEntersGap(b.x, b.y, nx, b.y) { b.x = nx }
+        else if !segmentEntersGap(b.x, b.y, b.x, ny) { b.y = ny }
+    }
+
+    /// Distance from (x, y) to the nearest screen (0 on one).
+    func distanceToScreens(_ x: Double, _ y: Double) -> Double {
+        var best = Double.infinity
+        for s in screens {
+            let dx: Double = max(s.minX - x, 0, x - s.maxX), dy: Double = max(s.minY - y, 0, y - s.maxY)
+            best = min(best, (dx * dx + dy * dy).squareRoot())
+        }
+        return best
     }
 
     // ── sizes (html:1296–1313) ──
@@ -263,12 +354,16 @@ public final class MeadowWorld {
     }
 
     /// `enterFromEdge` (html:1346–1365): from a real edge, picked by length, 0.15–0.85 along it, just out of sight,
-    /// heading inward ± 0.6 rad at cruise; the best of 6 for room from the others.
+    /// heading inward ± 0.6 rad at cruise; the best of 6 for room from the others. Several screens: a spot counts
+    /// only if it is off the screens, not in a gap and its way in to the edge crosses no gap (up to 48 draws for 6
+    /// such spots); with none, it comes in over the left edge of the leftmost screen, which always faces open space.
     func enterFromEdge(_ b: Butterfly) {
         let out: Double = drawReach(b) + 20 * S
         var best = (x: 0.0, y: 0.0, a: 0.0)
         var bs = -1.0
-        for _ in 0..<6 {
+        var found = 0, draws = 0
+        while found < 6 && draws < 48 {
+            draws += 1
             var x = 0.0, y = 0.0, a = 0.0
             if single {
                 let s = screens[0]
@@ -282,9 +377,10 @@ public final class MeadowWorld {
                 x += s.minX
                 y += s.minY
             } else {
+                guard let last = terrain.edges.last else { break }
                 var u: Double = rng.unit() * wallLength
                 let t = rng.range(0.15, 0.85)
-                var e = terrain.edges[terrain.edges.count - 1]
+                var e = last
                 for edge in terrain.edges {
                     u -= edge.length
                     if u < 0 { e = edge; break }
@@ -293,12 +389,18 @@ public final class MeadowWorld {
                 x = p.x - e.normal.x * out
                 y = p.y - e.normal.y * out
                 a = atan2(e.normal.y, e.normal.x)
+                if onScreens(x, y) || inGap(x, y) || segmentEntersGap(x, y, p.x, p.y) { continue }
             }
+            found += 1
             var d = 1e9
             for o in flies where o !== b {
                 d = min(d, hypot(o.x - x, o.y - y), hypot(o.wx - x, o.wy - y) * 1.5)
             }
             if d > bs { bs = d; best = (x, y, a) }
+        }
+        if found == 0, var left = screens.first {
+            for s in screens where s.minX < left.minX { left = s }
+            best = (left.minX - out, left.minY + rng.range(0.15, 0.85) * left.h, 0)
         }
         b.x = best.x
         b.y = best.y
@@ -322,7 +424,9 @@ public final class MeadowWorld {
         aimAtExit(b)
     }
 
-    /// `aimAtExit` (html:1374–1380): well past the nearest real edge.
+    /// `aimAtExit` (html:1374–1380): well past the nearest real edge. Several screens: the nearest real edge whose
+    /// point well past it is off the desk (on no screen, in no gap, out of sight of every screen) and reached by a
+    /// way that crosses no gap; failing that, any such point; failing that, past the leftmost screen's left edge.
     func aimAtExit(_ b: Butterfly) {
         guard !screens.isEmpty else { return }
         let f1 = footprint(b, 1), f0 = footprint(b, 0)
@@ -338,19 +442,29 @@ public final class MeadowWorld {
             else { b.wx = b.x; b.wy = s.maxY + out }
             return
         }
-        var best = Double.infinity
         let p = SIMD2(b.x, b.y)
-        for e in terrain.edges {
-            let d = e.b - e.a
-            let t: Double = min(1, max(0, simd_dot(p - e.a, d) / max(simd_length_squared(d), 1e-12)))
-            let q = e.a + d * t
-            let dist = simd_length(p - q)
-            if dist < best {
+        for pass in 0..<2 {
+            let routed = pass == 0
+            var best = Double.infinity
+            for e in terrain.edges {
+                let d = e.b - e.a
+                let t: Double = min(1, max(0, simd_dot(p - e.a, d) / max(simd_length_squared(d), 1e-12)))
+                let q = e.a + d * t
+                let dist = simd_length(p - q)
+                if dist >= best { continue }
+                let wx: Double = q.x - e.normal.x * out, wy: Double = q.y - e.normal.y * out
+                if inGap(wx, wy) || distanceToScreens(wx, wy) < reach { continue }
+                if routed && segmentEntersGap(b.x, b.y, wx, wy) { continue }
                 best = dist
-                b.wx = q.x - e.normal.x * out
-                b.wy = q.y - e.normal.y * out
+                b.wx = wx
+                b.wy = wy
             }
+            if best < .infinity { return }
         }
+        var left = screens[0]
+        for s in screens where s.minX < left.minX { left = s }
+        b.wx = left.minX - out
+        b.wy = clamp(b.y, left.minY, left.maxY)
     }
 
     /// The count on the meadow (`wantedCount`, html:1382; the director's settings have area scaling off). With
@@ -462,31 +576,58 @@ public final class MeadowWorld {
 
     /// The screens or the cell changed (the sketch's `resize`, html:3076–3083, on the input stream): a pointer off
     /// the screens has gone; a landed one off them takes off; the flowers follow their relayout rules (m1). The
-    /// port's rule for screens that come and go: a butterfly left more than a quarter span off the screens, or in a
-    /// gap, is put at the nearest point on a screen, so everyone stays on a screen.
+    /// port's rules for screens that come and go, so everyone stays on a screen:
+    /// - one that was on a screen and no longer is (its screen went, moved or shrank), or is more than a quarter span
+    ///   off the screens, or in a gap, is put at the nearest point on a screen;
+    /// - one waiting to come in, or coming in and still off the screens, comes in again from a real edge of the new
+    ///   screens; one leaving is taken out of a gap and aims at an exit of the new screens;
+    /// - a waypoint off the new screens, or whose way crosses off them, and a bask spot off them, are chosen again.
+    /// With no usable screen the flowers close (their terrain is empty) and the butterflies hold still.
     public func layout(terrain new: Terrain, cell: CGSize) {
         let prev = rng
         rng = inputRandom
         defer { rng = prev }
+        let old = screens
         terrain = new
         self.cell = cell
         setScreens()
         guard !screens.isEmpty else {
-            flowers.relayout(terrain: new, cell: cell, rng: inputRandom)
+            flowers.relayout(terrain: Terrain(rects: []), cell: cell, rng: inputRandom)
             return
         }
         if pointerHas && !onScreens(pointerX, pointerY) { pointerGone() }
         for b in flies where b.landed && b.state != .cursor && !onScreens(b.x, b.y) { takeOff(b) }
         flowers.relayout(terrain: new, cell: cell, rng: inputRandom)
-        for b in flies where !b.leaving && b.wait <= 0 {
-            let p = SIMD2(b.x, b.y)
-            let out = terrain.signedOutside(p)
-            if out > 0.25 * spanRef(b) || inGap(b.x, b.y) || !out.isFinite {
-                let q = terrain.nearestInside(p)
-                b.x = q.x
-                b.y = q.y
+        func wasOn(_ b: Butterfly) -> Bool {
+            for s in old where b.x >= s.minX && b.x <= s.maxX && b.y >= s.minY && b.y <= s.maxY { return true }
+            return false
+        }
+        func project(_ b: Butterfly) {
+            let q = terrain.nearestInside(SIMD2(b.x, b.y))
+            b.x = q.x
+            b.y = q.y
+        }
+        for b in flies {
+            if b.leaving {
+                if inGap(b.x, b.y) || !(b.x.isFinite && b.y.isFinite) { project(b) }
+                aimAtExit(b)
+                continue
+            }
+            if b.wait > 0 || (b.entering && !onScreens(b.x, b.y)) {
+                enterFromEdge(b)
+                continue
+            }
+            if !onScreens(b.x, b.y) {
+                let out = distanceToScreens(b.x, b.y)
+                if wasOn(b) || out > 0.25 * spanRef(b) || inGap(b.x, b.y) || !out.isFinite {
+                    project(b)
+                    if !b.landed && b.state == .fly { pickWaypoint(b) }
+                }
+            }
+            if b.state == .fly && (!onScreens(b.wx, b.wy) || (!single && !wayOpen(b.x, b.y, b.wx, b.wy) && onScreens(b.x, b.y))) {
                 pickWaypoint(b)
             }
+            if b.state == .approach && b.goal == .bask && !onScreens(b.gx, b.gy) { leaveFlower(b) }
         }
         if flies.isEmpty { syncFlies(initial: true) } else if tuning.areaCount { syncFlies() }   // html:3082
     }
@@ -543,6 +684,7 @@ public final class MeadowWorld {
         var best: Butterfly? = nil
         var bd = 1e9
         for b in flies where b.state == .fly && !b.leaving && !b.entering && b.wait <= 0 {
+            if !gaps.isEmpty && segmentEntersGap(b.x, b.y, x, y) { continue }
             let d = hypot(b.x - x, b.y - y)
             if d < bd { bd = d; best = b }
         }

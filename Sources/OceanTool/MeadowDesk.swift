@@ -6,6 +6,9 @@ import OceanKit
 /// the 1800 x 1169 built-in display (offset 375 pt, as `bench --desk`), drawn as the app draws each screen and laid
 /// out where the screens are, the space around them dark grey. Frames at `fps`, after `warmup` seconds.
 enum MeadowDesk {
+    /// The desk's bounds in points (the image at scale 1).
+    static let size = CGSize(width: 2560, height: 2609)
+
     static func run(out dir: URL, seed: UInt64, seconds: Double, fps: Int, warmup: Double, scale: CGFloat, light: Bool) throws {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var s = Settings.defaults

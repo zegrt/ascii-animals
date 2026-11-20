@@ -141,6 +141,13 @@ public final class Flowers {
     /// A replant finished: butterflies whose flower is gone (`flower(id:) == nil`) leave it (html:878).
     public var onReplanted: (() -> Void)?
 
+    /// The leaf and floret storage of flowers that have gone, reused by the next ones made (so a click, once warm,
+    /// allocates nothing). Each is sized for the most any kind has.
+    private var spareLeaves: [[FlowerLeaf]] = []
+    private var spareFlorets: [[Floret]] = []
+    private static let leafRoom = 12
+    private static let floretRoom = MeadowTuning.Florets.count.upperBound
+
     private var unit: Double { breeze.unit }
     private var cw: Double { MeadowTuning.Unit.cellWidth(Double(cell.width)) }
     private static let sparkCapacity = MeadowTuning.Clicks.sparkBuffer
@@ -197,12 +204,13 @@ public final class Flowers {
         let seed = rng.int(1, 1_000_000)
         let petals = rng.int(K.petals.lowerBound, K.petals.upperBound)
         let f0 = rng.range(K.f0.0, K.f0.1)
-        var leaves: [FlowerLeaf] = []
+        var leaves: [FlowerLeaf] = spareLeaves.popLast() ?? []
+        leaves.removeAll(keepingCapacity: true)
+        leaves.reserveCapacity(Flowers.leafRoom)
         let a0 = rng.range(0, TAU)
         switch K.rosette {
         case let .ring(count, step, jitter, length, width, leafKind):
             let n = rng.int(count.lowerBound, count.upperBound)
-            leaves.reserveCapacity(n)
             for i in 0..<n {
                 let gap: Double = step ?? TAU / Double(n)
                 let a: Double = a0 + Double(i) * gap + rng.range(-jitter, jitter)
@@ -226,6 +234,9 @@ public final class Flowers {
         }
         var florets: [Floret] = []
         if kind == .mustard {
+            florets = spareFlorets.popLast() ?? []
+            florets.removeAll(keepingCapacity: true)
+            florets.reserveCapacity(Flowers.floretRoom)
             typealias F = MeadowTuning.Florets
             let m = rng.int(F.count.lowerBound, F.count.upperBound)
             let md = Double(m)
@@ -345,7 +356,8 @@ public final class Flowers {
         let margin: Double = F.patchMargin * unit
         for (ri, r) in terrain.rects.enumerated() {
             let rx = Double(r.minX), ry = Double(r.minY), W = Double(r.width), H = Double(r.height)
-            guard W.isFinite && H.isFinite && rx.isFinite && ry.isFinite && W > 0 && H > 0 else { continue }
+            guard W.isFinite && H.isFinite && rx.isFinite && ry.isFinite && W > 0 && H > 0 && (rx + W).isFinite && (ry + H).isFinite
+            else { continue }
             let perArea: Double = W * H / (F.patchArea * unit * unit) * tuning.density
             let count = Int(min(Double(F.maxPatches), max(1, MeadowMath.round(perArea))))
             for _ in 0..<count {
@@ -380,11 +392,66 @@ public final class Flowers {
                         cand.rootX = best.x
                         cand.rootY = best.y
                         if !overlapsAny(cand) { all.append(cand); break }
+                        keep(cand)
                     }
                 }
             }
         }
         sortSmallFirst()
+        plantedOpen = 0
+        for f in all where !f.clicked && !f.fading { plantedOpen += 1 }
+        all.reserveCapacity(most)
+        spareLeaves.reserveCapacity(most)
+        spareFlorets.reserveCapacity(most)
+        // Storage for every flower a click can add before the next planting (at most `most - plantedOpen` exist at
+        // once), so clicks draw on it rather than allocate.
+        let extra = most - plantedOpen
+        while spareLeaves.count < extra {
+            var a: [FlowerLeaf] = []
+            a.reserveCapacity(Flowers.leafRoom)
+            spareLeaves.append(a)
+        }
+        while spareFlorets.count < extra {
+            var a: [Floret] = []
+            a.reserveCapacity(Flowers.floretRoom)
+            spareFlorets.append(a)
+        }
+    }
+
+    /// Planted flowers open after the last planting (planted flowers only close on a relayout or replant).
+    public private(set) var plantedOpen = 0
+
+    /// The most flowers there can be until the next planting: the planted ones, the most clicked ones open (the
+    /// click limit's top, 30) and the most fading (`Clicks.fadingMost`). `all` keeps room for them, and the painter
+    /// sizes its recordings by it, so a click allocates nothing in either.
+    public var most: Int { plantedOpen + 30 + MeadowTuning.Clicks.fadingMost + 1 }
+
+    /// How far any flower can reach from its centre at the current size and cell (pt): the biggest bloom of the
+    /// biggest kind with its longest leaf. The painter sizes each flower's recording by it.
+    public var reachBound: Double {
+        typealias F = MeadowTuning.Flowers
+        var longest = 0.0
+        for k in FlowerKind.allCases {
+            let K = k.spec
+            let R: Double = K.r * unit * tuning.flowerSize * F.sizeHigh
+            var leaf: Double = F.reachHead
+            switch K.rosette {
+            case let .ring(_, _, _, length, _, _): leaf = max(leaf, Flowers.top(length))
+            case let .cross(main, _, extra):
+                for l in main { leaf = max(leaf, Flowers.top(l.length)) }
+                for l in extra { leaf = max(leaf, Flowers.top(l.length)) }
+            }
+            longest = max(longest, R * leaf)
+        }
+        for f in all { longest = max(longest, f.reach - F.reachCells * cw) }
+        return longest + F.reachCells * cw
+    }
+
+    private static func top(_ p: MeadowTuning.Pick) -> Double {
+        switch p {
+        case .fixed(let v): return v
+        case .between(let a, let b): return max(a, b)
+        }
     }
 
     private func overlapsAny(_ f: Flower) -> Bool {
@@ -394,6 +461,27 @@ public final class Flowers {
             if (dx * dx + dy * dy).squareRoot() < (o.radius + f.radius) * MeadowTuning.Flowers.spacing { return true }
         }
         return false
+    }
+
+    /// Keeps flower `i`'s leaf and floret storage for the next flowers made (call just before it is removed).
+    private func recycle(_ i: Int) { keep(all[i]) }
+
+    /// Keeps `f`'s leaf and floret storage (a flower going, or one made and not planted), only into room already made
+    /// (the pools are sized at planting), so this never allocates.
+    private func keep(_ f: Flower) {
+        if f.leaves.capacity > 0 && spareLeaves.count < spareLeaves.capacity { spareLeaves.append(f.leaves) }
+        if f.florets.capacity > 0 && spareFlorets.count < spareFlorets.capacity { spareFlorets.append(f.florets) }
+    }
+
+    /// Removes every flower `gone` says has gone, keeping their storage (in order, as `removeAll(where:)`).
+    private func remove(where gone: (Flower) -> Bool) {
+        var n = 0
+        for i in all.indices {
+            if gone(all[i]) { recycle(i); continue }
+            if n != i { all.swapAt(n, i) }
+            n += 1
+        }
+        all.removeLast(all.count - n)
     }
 
     /// Small ones first so the big blooms lie over them (a stable sort, as the sketch's).
@@ -443,7 +531,7 @@ public final class Flowers {
                 all[i].ox = 0; all[i].oy = 0; all[i].vx = 0; all[i].vy = 0
             }
         }
-        if gone { all.removeAll { $0.fading && $0.fade <= 0 } }
+        if gone { remove { $0.fading && $0.fade <= 0 } }
     }
 
     // ── what the butterflies do to them (the world calls these) ──
@@ -519,7 +607,10 @@ public final class Flowers {
             let need: Double = (o.radius + f.radius) * MeadowTuning.Flowers.spacing
             if d - need < 0 && abs(d - o.radius) < bd { bd = abs(d - o.radius); block = i }
         }
-        if block >= 0 { return touch(index: block, x: x, y: y, rng: rng) }
+        if block >= 0 {
+            keep(f)
+            return touch(index: block, x: x, y: y, rng: rng)
+        }
         all.append(f)
         for _ in 0..<C.bloomSparks {
             let a = rng.range(0, TAU)
@@ -528,6 +619,7 @@ public final class Flowers {
             addSpark(PollenSpark(x: x, y: y, vx: cos(a) * v, vy: sin(a) * v, life: life, max: C.bloomLifeHigh))
         }
         limitClicked()
+        capFading()
         return .bloomed(id: f.id, sparks: C.bloomSparks)
     }
 
@@ -605,6 +697,29 @@ public final class Flowers {
         }
     }
 
+    /// Flowers fading now.
+    public var fadingCount: Int {
+        var n = 0
+        for f in all where f.fading { n += 1 }
+        return n
+    }
+
+    /// The port's cap (`Clicks.fadingMost`): past it, the most faded flower goes at once (the oldest of equals). It
+    /// has closed already, so no butterfly is bound for it.
+    func capFading() {
+        var n = fadingCount
+        while n > MeadowTuning.Clicks.fadingMost {
+            var k = -1
+            for i in all.indices where all[i].fading {
+                if k < 0 || all[i].fade < all[k].fade || (all[i].fade == all[k].fade && all[i].id < all[k].id) { k = i }
+            }
+            guard k >= 0 else { break }
+            recycle(k)
+            all.remove(at: k)
+            n -= 1
+        }
+    }
+
     /// `fadeFlower` (html:945–949): it closes and fades over 2 s; every butterfly bound for or on it leaves it.
     private func close(index i: Int) {
         all[i].fading = true
@@ -656,6 +771,7 @@ public final class Flowers {
             if let k = screen(at: all[i].x, all[i].y) { all[i].screen = k }
         }
         if big { replant(fresh: false, rng: rng) }
+        capFading()
     }
 
     /// `replant(fresh)` (html:863–879), the one replant transition: keeps the flowers you clicked (none when
@@ -665,9 +781,9 @@ public final class Flowers {
     /// drops the planted ones and any clicked one off the window at once.
     public func replant(fresh: Bool, rng: MeadowRandom) {
         if fresh {
-            all.removeAll()
+            remove { _ in true }
         } else {
-            all.removeAll { f in !(f.fading || (f.clicked && terrain.contains(SIMD2(f.x, f.y)))) }
+            remove { f in !(f.fading || (f.clicked && terrain.contains(SIMD2(f.x, f.y)))) }
         }
         for i in all.indices { resize(index: i) }
         var mine: [Int] = all.indices.filter { !all[$0].fading }
@@ -689,6 +805,7 @@ public final class Flowers {
         }
         plant(rng: rng)
         limitClicked()
+        capFading()
         onReplanted?()
     }
 

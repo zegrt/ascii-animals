@@ -62,6 +62,11 @@ extension MeadowFrame {
     mutating func drawFlowers() {
         let sparkleK: Double = 1 / (1 + tuning.depth)
         let vx1: Double = ox + Double(cols) * cw, vy1: Double = oy + Double(rows) * ch
+        // A recording has at most 3 writes a cell (a block, a glyph and a shade) over the box its reach covers.
+        let reachB: Double = world.flowers.reachBound
+        let boxC: Double = min(Double(cols), 2 * reachB / cw + 2), boxR: Double = min(Double(rows), 2 * reachB / ch + 2)
+        let opsN: Int = boxC.isFinite && boxR.isFinite ? 3 * Int(boxC.rounded(.up)) * Int(boxR.rounded(.up)) : 0
+        v.ensureSlots(world.flowers.most, ops: opsN)
         for f in world.flowers.all {
             let fk: Double = f.fading ? ease01(clamp(f.fade, 0, 1)) : 1
             if fk <= 0 { continue }
@@ -71,9 +76,8 @@ extension MeadowFrame {
             let leafGrow: Double = (f.age >= 1 ? 1 : clamp(f.age * 1.6, 0, 1)) * (0.85 + 0.15 * fk)
             let vd: Double = (f.visitDim * 50).rounded() / 50
             let hx = f.x + f.ox, hy = f.y + f.oy
-            let cache: FlowerCache
-            if let c = v.flowers[f.id] { cache = c } else { cache = FlowerCache(); v.flowers[f.id] = cache }
-            cache.used = paintCount
+            let cache = v.slot(f.id, paint: viewPaints)
+            cache.used = viewPaints
             let moved = !(abs(hx - cache.hx) <= 0.25 * cw && abs(hy - cache.hy) <= 0.25 * ch)
             if moved || cache.grow != grow || cache.leafGrow != leafGrow || cache.fk != fk || cache.vd != vd || cache.radius != f.radius {
                 cache.ops.removeAll(keepingCapacity: true)
@@ -116,14 +120,7 @@ extension MeadowFrame {
             INK_K = 1
             farPush(0)
         }
-        if paintCount % 600 == 0 {
-            var stale = false
-            for (_, c) in v.flowers where c.used + 600 < paintCount { stale = true; break }
-            if stale {
-                let keep = v.flowers.filter { $0.value.used + 600 >= paintCount }
-                v.flowers = keep
-            }
-        }
+        if viewPaints % ViewportCache.sweepEvery == 0 { v.sweep(viewPaints, keepLast: false) }
     }
 
     @inline(__always) mutating func shadeNow(_ i: Int, _ k: Double) {
