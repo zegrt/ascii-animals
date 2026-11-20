@@ -167,7 +167,7 @@ private struct WingInks {
         case .cabbageWhite:
             // White on paper vanishes: a pale graphite block with ink glyphs, tips in ink.
             w.block = RGB(214, 212, 204); w.glyph = RGB(96, 96, 90)
-            w.underBlock = RGB(214, 214, 196); w.underGlyph = RGB(104, 106, 84)
+            w.underBlock = RGB(208, 212, 168); w.underGlyph = RGB(104, 106, 84)
             w.ring = w.glyph; w.centre = w.markBlock
             w.dot = w.glyph
         }
@@ -364,9 +364,21 @@ private struct WingShape {
 
 /// What a wing sample shows.
 private let FIELD = 0, MARK = 1, DOT = 2, RING = 3, CENTRE = 4, BLUE = 5, SHINE = 6, SEAM = 7
+/// A dark line glyph (`WingHit.line`) on the face's block: an underside's veins and bars, so the folded wing stays one
+/// solid shape with its marks drawn on it.
+private let LINE = 8
 
-/// Under this projected width a wing is seen edge-on: a line, never blocks.
+/// Under this projected width a wing is seen edge-on: a line, never blocks (a single banked wing, below the clap).
 private let EDGE_ON = 0.18
+/// The clap and the closed pose (the restart's design, at the top of the report): from a stroke of 45° to 62° each
+/// wing's drawn width is held up to `CLAP_HOLD`, so the pair never narrows to a stick; past `UNDER_FROM` it shows its
+/// underside (the morpho's blue and brown flash in turn); from 84° to 89° (at rest; the flight's stroke tops out at
+/// 80°) the pair folds into one solid underside wing pair beside the body, as a perched butterfly is seen from the
+/// side, the far pair tucked behind.
+private let CLAP_HOLD = 0.45
+private let HOLD_FROM = 45 * Double.pi / 180, HOLD_FULL = 62 * Double.pi / 180
+private let UNDER_FROM = 68 * Double.pi / 180
+private let FOLD_FROM = 84 * Double.pi / 180, FOLD_FULL = 89 * Double.pi / 180
 /// The width an edge-on wing's outline is traced at, so its forewing and hindwing still read as lines.
 private let EDGE_LINE = 0.36
 
@@ -382,6 +394,10 @@ private struct Pose {
     let hsC: Double, hhR: Double
     /// Each wing's projected width, the model's signed cos(stroke ± bank): under 0 the underside shows.
     let sL: Double, sR: Double
+    /// Each wing as drawn: its width (≥ 0), whether it shows its underside, and whether it is an edge-on line.
+    let wL: Double, wR: Double
+    let underL: Bool, underR: Bool
+    let lineL: Bool, lineR: Bool
     /// How far the tips climb (pt, at the tip): −0.4 row · sin φ drops them on the downstroke.
     let climb: Double
     let id: Double
@@ -407,13 +423,26 @@ private struct Pose {
         let s = b.wings()
         sL = s.left
         sR = s.right
+        let hold: Double = CLAP_HOLD * smoothstep(HOLD_FROM, HOLD_FULL, b.stroke)
+        let fold: Double = smoothstep(FOLD_FROM, FOLD_FULL, b.stroke)
+        let late: Bool = b.stroke >= UNDER_FROM
+        // The folded pair shows on the side the butterfly faces; the other tucks behind it.
+        let nearRight: Bool = b.bank < -0.05 || (abs(b.bank) <= 0.05 && cos(b.heading) >= -1e-9)
+        let heldL: Double = max(abs(sL), hold), heldR: Double = max(abs(sR), hold)
+        wL = nearRight ? heldL * (1 - fold) : heldL + (1 - heldL) * fold
+        wR = nearRight ? heldR + (1 - heldR) * fold : heldR * (1 - fold)
+        underL = sL < 0 || late
+        underR = sR < 0 || late
+        lineL = wL < EDGE_ON && fold == 0
+        lineR = wR < EDGE_ON && fold == 0
         climb = 0.4 * ch * sin(b.stroke)
         self.id = id
         twoSpots = hash3(id, 7, 3) < 0.5
     }
 
-    /// Projected width of the wing on `v`'s side.
-    @inline(__always) func width(_ v: Double) -> Double { v < 0 ? sL : sR }
+    /// The drawn width of the wing on `v`'s side, and whether it shows its underside.
+    @inline(__always) func width(_ v: Double) -> Double { v < 0 ? wL : wR }
+    @inline(__always) func under(_ v: Double) -> Bool { v < 0 ? underL : underR }
 }
 
 /// A wing sample: how much of it is covered (0…1, soft at the edge) and, where covered, what it shows.
@@ -431,6 +460,8 @@ private struct WingHit {
     var X: Double = 0, Y: Double = 0
     var qx: Double = 0, qy: Double = 0
     var side = 0
+    /// The glyph a `LINE` sample draws.
+    var line: UInt8 = 0
 }
 
 /// Signed distance (cells; < 0 inside) from `q` to an outline scaled by (sx, sy), with the nearest edge's kind and
@@ -495,8 +526,7 @@ private struct WingHit {
     let dx: Double = px - p.x, dy: Double = py - p.y
     let u: Double = dx * p.ax + dy * p.ay
     let v: Double = dx * p.rx + dy * p.ry
-    let s: Double = p.width(v)
-    let w: Double = abs(s)
+    let w: Double = p.width(v)
     guard w >= EDGE_ON else { return }
     // On screen, cells: across from the body and along it, the tips climbing with the stroke.
     let qx: Double = abs(v) / p.cw
@@ -528,14 +558,14 @@ private struct WingHit {
     hit.Y = Y
     hit.qx = qx
     hit.qy = qy
-    hit.under = s < 0
+    hit.under = p.under(v)
     hit.side = v < 0 ? 0 : 1
-    hit.flag = pattern(p, hit, sx, sy)
+    hit.flag = pattern(p, &hit, sx, sy)
 }
 
 /// The species' markings (research §5.2), each where the real species has it: borders a cell deep along the free
 /// edges, veins as lines from the root, spots at fixed places on the wing.
-private func pattern(_ p: Pose, _ h: WingHit, _ sx: Double, _ sy: Double) -> Int {
+private func pattern(_ p: Pose, _ h: inout WingHit, _ sx: Double, _ sy: Double) -> Int {
     let d: Double = h.depth, X: Double = h.X, Y: Double = h.Y
     let q = SIMD2<Double>(h.qx, h.qy)
     /// Every other cell along the edge.
@@ -546,6 +576,54 @@ private func pattern(_ p: Pose, _ h: WingHit, _ sx: Double, _ sy: Double) -> Int
     }
     @inline(__always) func vein(_ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double) -> Bool {
         segment(q, SIMD2<Double>(x0, y0), SIMD2<Double>(x1, y1), sx, sy) < 0.42
+    }
+    /// A vein drawn as a line glyph along it, on the face's block.
+    func lineVein(_ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double) -> Bool {
+        guard vein(x0, y0, x1, y1) else { return false }
+        let out: Double = h.side == 0 ? -1 : 1
+        h.line = lineGlyph(out * (x1 - x0) * sx, -(y1 - y0) * sy)
+        return true
+    }
+    /// How wide this wing is drawn, as a share of open: spots shrink with it so a narrow wing isn't all spots.
+    let open: Double = min(1, sx / max(1e-9, p.hsC) / 0.9)
+    if h.under {
+        // The underside (research §5.4 and the restart's change 1), seen near the clap and folded at rest.
+        switch p.kind {
+        case .monarch:
+            // Pale orange with bold black veins and the white-dotted black border; the apex pale, not black.
+            if h.edge == OUTER && d < 0.8 { return alternate && d > 0.15 ? DOT : MARK }
+            if h.part == 0 && near(0.84, 0.8, 0.45) { return DOT }
+            if h.part == 1 && lineVein(0.1, -0.14, 0.58, -0.5) { return LINE }
+            if h.part == 1 && open > 0.7 && lineVein(0.1, -0.24, 0.34, -0.86) { return LINE }
+            if h.part == 0 && open > 0.7 && lineVein(0.1, 0.06, 0.8, 0.3) { return LINE }
+            return FIELD
+        case .morpho:
+            // Brown with a row of ringed eyespots along the outer margin, a dark edge.
+            let ring: Double = 1.05 * open, eye: Double = 0.45 * open
+            for (x, y) in [(0.62, 0.52), (0.7, 0.16), (0.5, -0.3), (0.44, -0.6)] where near(x, y, ring) {
+                return near(x, y, eye) ? CENTRE : RING
+            }
+            if h.edge == OUTER && d < 0.6 { return MARK }
+            return FIELD
+        case .swallowtail:
+            // Pale yellow crossed by dark bands: the veins, a dark outer band, on the hindwing a row of blue and an
+            // orange-red spot at the inner corner; the tail dark.
+            if h.part == 2 { return MARK }
+            if h.part == 1 && near(0.18, -0.82, 0.55 * open + 0.1) { return RING }
+            if h.edge == OUTER && d < 0.6 { return MARK }
+            if h.part == 1 && h.edge == OUTER && d < 1.3 && alternate { return BLUE }
+            if h.part == 0 && h.edge == COSTA && d < 0.7 && X > 0.3 && Int(floor(h.along / 2.4)) % 2 == 0 {
+                h.line = MG.MARK[0]
+                return LINE
+            }
+            if h.part == 0 && open > 0.7 && lineVein(0.12, 0.08, 0.76, 0.44) { return LINE }
+            if h.part == 1 && open > 0.7 && lineVein(0.12, -0.14, 0.5, -0.56) { return LINE }
+            return FIELD
+        case .cabbageWhite:
+            // Creamy green-yellow, one dark dot on the forewing.
+            if h.part == 0 && near(0.55, 0.22, 0.5 * open + 0.1) { return MARK }
+            return FIELD
+        }
     }
     switch p.kind {
     case .monarch:
@@ -558,15 +636,6 @@ private func pattern(_ p: Pose, _ h: WingHit, _ sx: Double, _ sy: Double) -> Int
         if h.part == 0 && h.edge == INNER && d < 0.8 { return SEAM }
         return FIELD
     case .morpho:
-        if h.under {
-            // Brown with ringed eyespots.
-            if h.part == 0 && near(0.56, 0.42, 1.1) { return near(0.56, 0.42, 0.5) ? CENTRE : RING }
-            if h.part == 1 && near(0.42, -0.34, 1.0) { return near(0.42, -0.34, 0.45) ? CENTRE : RING }
-            if h.part == 1 && near(0.42, -0.74, 0.9) { return near(0.42, -0.74, 0.4) ? CENTRE : RING }
-            if h.edge == OUTER && d < 0.7 { return MARK }
-            if h.part == 0 && h.edge == INNER && d < 0.8 { return SEAM }
-            return FIELD
-        }
         // Blue with a broad black forewing margin holding white dots, a narrow black hindwing margin, a shine.
         if h.part == 0 && (h.edge == OUTER || h.edge == COSTA) && X > 0.45 && d < 1.3 {
             return near(0.84, 0.78, 0.5) || near(0.95, 0.5, 0.45) ? DOT : MARK
@@ -578,7 +647,6 @@ private func pattern(_ p: Pose, _ h: WingHit, _ sx: Double, _ sy: Double) -> Int
         return FIELD
     case .swallowtail:
         if h.part == 2 { return MARK }
-        if h.under { return h.edge == OUTER && d < 0.8 ? MARK : FIELD }
         // A black base; black bars along the forewing's leading edge; a black outer band with yellow lunules;
         // on the hindwing a blue row inside that band and a red-orange eyespot at the inner corner.
         if X < 0.11 { return MARK }
@@ -594,7 +662,6 @@ private func pattern(_ p: Pose, _ h: WingHit, _ sx: Double, _ sy: Double) -> Int
         if h.part == 0 && h.edge == INNER && d < 0.8 { return SEAM }
         return FIELD
     case .cabbageWhite:
-        if h.under { return h.part == 0 && near(0.55, 0.1, 0.5) ? MARK : FIELD }
         // A black forewing tip and one or two black spots.
         if h.part == 0 && h.edge != INNER && X + 0.5 * Y > 1.18 && d < 1.4 { return MARK }
         if h.part == 0 && near(0.55, 0.3, 0.55) { return MARK }
@@ -1297,7 +1364,8 @@ public final class MeadowPainter {
         case DOT:
             out.put(c, r, (key >> 4) % 3 == 0 ? MG.dot : MG.ring, tone.pack(ink.dot), tone.pack(ink.markBlock))
         case RING:
-            out.put(c, r, MG.o, tone.pack(ink.ring), tone.pack(ink.ring * (tone.light ? 1 : 0.62)))
+            // On paper the ring's block is a tint of its ink, so the `o` shows on it.
+            out.put(c, r, MG.o, tone.pack(ink.ring), tone.pack(tone.light ? PAPER + (ink.ring - PAPER) * 0.45 : ink.ring * 0.62))
         case CENTRE:
             out.put(c, r, MG.at, tone.pack(ink.ring), tone.pack(ink.centre))
         case BLUE:
@@ -1307,6 +1375,8 @@ public final class MeadowPainter {
             let tick: Double = floor(time * 2.4)
             let glint: Bool = hash3(Double(key & 0xffff), tick, 5) < 0.35 * tone.accentRate
             out.put(c, r, glint ? MG.dot : CellCanvas.noGlyph, tone.pack(ink.glyph), tone.pack(ink.shine))
+        case LINE:
+            out.put(c, r, h.line, tone.pack(ink.markBlock), tone.pack(shaded))
         case SEAM:
             let k: Double = p.kind == .cabbageWhite ? 0.5 : 1
             out.put(c, r, CellCanvas.noGlyph, 0, tone.pack(tone.light ? shaded + (INK - shaded) * (0.1 * k) : shaded * (1 - 0.2 * k)))
@@ -1327,8 +1397,7 @@ public final class MeadowPainter {
             max(outlineReach(p.shape.fore, y, sx, sy), outlineReach(p.shape.hind, y, sx, sy))
         }
         for side in 0..<2 {
-            let s: Double = side == 0 ? p.sL : p.sR
-            guard abs(s) < EDGE_ON else { continue }
+            guard side == 0 ? p.lineL : p.lineR else { continue }
             let sign: Double = side == 0 ? -1 : 1
             var y: Double = sy * 1.05
             while y > -sy * 1.5 {
