@@ -135,6 +135,12 @@ Director's profile: none
 
 ## Decisions
 
+- 2026-11-20: The port plan is written (docs/plans/2026-11-20-meadow-port-plan.md, from research r2 and the sketch
+  review) and sent to the director with three questions; nothing is built from it until approved (Design size).
+  Proposed in it, by the manager: a fresh stack from main (m1–m8), superseding the side-view branches, instead of
+  stacking on meadow-t1-2 (every t1-2 file is replaced); this supersedes the 2026-11-20 stacking base once
+  approved, not the no-merge rule.
+
 - 2026-11-19: Meadow 3.1 plan approved ("ok"); species, slow motion, monarch-only life cycle, courtship chases,
   caterpillar horn deferred, morphos sip flowers (the director, via the plan's questions).
 - 2026-11-19: Order: T1, T2, T5 (painter and a first still), T3, T4, T6, then the T7 gate, T8, T9, T10, so the
@@ -206,7 +212,7 @@ Director's profile: none
 | p2a | Look development 1: butterfly motion from above (the measured flight turned on its side) and wingbeat speed | Design (look development; approved; reviewed later in the plan's tasks) | new Meadow/OceanTool files, OceanTool/main.swift, additive Butterfly/ButterflySpecies | look-top-down (from proto-top-down) | builder-p2a (Claude Opus, T3 child thread) | later | 0 | held (the director: "take a step back"); notes only at look-top-down @ adc632f, no code changed | briefs/p2a.md |
 | s1 | The Meadow sketch: a live web original with sliders (published for the director) | Design (look development; approved; one review before the port, the director asked) | Tools/meadow-sketch/meadow.html (new) | meadow-sketch (from main) | builder-s1 (Claude Opus, T3 child thread) | Codex | 0 | built (meadow-sketch @ 0e2ecf7); round 2 built (meadow-sketch @ d893c50, done with concerns); round 3 built (meadow-sketch @ caca692, done with concerns); round 4 built (meadow-sketch @ ee6009b, done with concerns); leaves 0.9 set by the manager (f8811f6); round 5 built (meadow-sketch @ b01db3f, done); round 6 built (meadow-sketch @ 3f02cb3, done); the director: "ok for now", then "dbbl check shit then go": Codex review a8f02d4 in (15 findings, routed below); fix round 1 building | briefs/s1.md, briefs/s1r2.md … briefs/s1r6.md |
 | r1 | Research: what makes Ocean and Web look and feel alive, and the Meadow's gaps | Small (read-only research) | docs/plans/2026-11-20-family-details.md | main | research agent | none | 0 | done (saved on main) | none |
-| r2 | Research for the port: the sketch's model, numbers and behaviours mapped against the Swift Meadow code on the task branches | Small (read-only research) | none (findings in the agent's final message; the manager writes docs/plans) | main | research agent (Claude Opus, T3 child thread) | none | 0 | building | none |
+| r2 | Research for the port: the sketch's model, numbers and behaviours mapped against the Swift Meadow code on the task branches | Small (read-only research) | docs/plans/2026-11-20-meadow-port-inventory.md (saved by the manager) | main | research agent (Claude Opus, T3 child thread) | none | 0 | done (saved on main) | none |
 | t5w | A new wingbeat (both wings together), wing shading and detail, and butterflies that turn to face where they fly, learning from the director's reference | Content | Meadow/MeadowPainter.swift, Meadow/Butterfly.swift (drawn heading, open), OceanChecks/MeadowChecks.swift | meadow-t5w (from meadow-t3) | | Codex | 0 | held (the view changed; replaced by look development) | briefs/t5w.md |
 | t3 | Meadow world and behaviours (plan T3), with the director's film verdict | Content | Meadow/{MeadowWorld,Behaviour}.swift (new), OceanChecks/MeadowChecks.swift, Meadow/MeadowPainter.swift (convenience paint, breeze trail), Meadow/Breeze.swift (pointer field), Meadow/{Butterfly,ButterflySpecies}.swift (roaming, spacing, stays), OceanTool/{MeadowStill,MeadowFrames,main}.swift | meadow-t3 (from meadow-t5v) | builder-t3 (Claude Opus, T3 child thread) | Codex | 0 | held (2026-11-20: the view may change to top-down); WIP saved at meadow-t3 @ 11394be (does not build yet; checks written, world not started) | briefs/t3.md |
 | t4 | Cursor landing, courtship, crossings, monarch life cycle (plan T4) | Content | to brief | meadow-t4 | | | 0 | open (waits on t3) | |
