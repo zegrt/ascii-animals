@@ -142,6 +142,10 @@ Director's profile: none
 
 ## Decisions
 
+- 2026-11-20: m1's pointer air trails the pointer by 0.14 s, the smallest lag that keeps bursty 15 Hz input within
+  5 % (the sketch responds at once). Kept for now; the director judges it in m7's pointer film, and requiring
+  faster input (30 Hz: 0.1 s; 60 Hz: 0.083 s) is the fallback (manager).
+
 - 2026-11-20: The port plan is approved: the director said "dbbl check shit then go" and answered its three
   questions. Ground colour per cell: "Yes, change it" (m3). The monarch life cycle and courtship chases: "Leave out
   of 3.1" (t4's life cycle and courtship are dropped from 3.1; crossings move into m6). What users can change:
@@ -236,7 +240,7 @@ Director's profile: none
 | t8 | Energy, measured with the director (plan T8) | Content | to brief | meadow-t8 | | | 0 | open (waits on t7) | |
 | t9 | Choosing the Meadow: menu, Settings, welcome (plan T9) | Content | to brief | meadow-t9 | | | 0 | open (waits on t8); the what's-new is not full screen (Corrections, 2026-11-20) | |
 | t10 | Words, watch and release 3.1 (plan T10; outward-facing, the director approves the release) | Content | to brief | meadow-t10 | | | 0 | open (waits on t9) | |
-| m1 | Air and flowers from above (breeze, pointer air, downwash, flowers, planting, clicks on flowers, the tuning file) | Content | Sources/OceanKit/Meadow/{MeadowTuning,MeadowMath,Breeze,Flowers}.swift (new), Sources/OceanChecks/MeadowChecks.swift (new), Sources/OceanChecks/main.swift, Sources/OceanTool/{MeadowAir,main}.swift (optional), a copy of the sketch fixture in the checks' resources, Package.swift (grown: bundles the fixtures as the checks' resources; for the review to judge) | meadow-m1 (from main) | builder-m1 (Claude Opus, T3 child thread) | 0 | open (waits for the sketch's fix round 1 and its re-check) | built (meadow-m1 @ 5965216, done with concerns); Codex review af7dbb1 in (7 findings, routed below); CI green on 5965216 (draft PR #3); fix round 1 building
+| m1 | Air and flowers from above (breeze, pointer air, downwash, flowers, planting, clicks on flowers, the tuning file) | Content | Sources/OceanKit/Meadow/{MeadowTuning,MeadowMath,Breeze,Flowers}.swift (new), Sources/OceanChecks/MeadowChecks.swift (new), Sources/OceanChecks/main.swift, Sources/OceanTool/{MeadowAir,main}.swift (optional), a copy of the sketch fixture in the checks' resources, Package.swift (grown: bundles the fixtures as the checks' resources; for the review to judge) | meadow-m1 (from main) | builder-m1 (Claude Opus, T3 child thread) | 0 | open (waits for the sketch's fix round 1 and its re-check) | built (meadow-m1 @ 5965216, done with concerns); Codex review af7dbb1 in (7 findings, routed below); CI green on 5965216 (draft PR #3); fix round 1 done with concerns (meadow-m1 @ 3e54973); Codex re-check building; CI on PR #3
 | m2 | Flight from above | Content | Sources/OceanKit/Meadow/{ButterflySpecies,Butterfly}.swift (new), Meadow/MeadowTuning.swift (additions), Sources/OceanChecks/{MeadowFlightChecks,main}.swift, Sources/OceanTool/{MeadowPaths,main}.swift | meadow-m2 (from meadow-m1) | | Codex | 0 | open (waits on m1) | briefs/m2.md |
 | m3 | A ground colour per cell in the shared canvas | Content | Sources/OceanKit/Render/{CellCanvas,OceanRenderer,Shaders}.swift, Sources/OceanChecks/CanvasChecks.swift, Sources/OceanChecks/main.swift (only if a new check group needs registering) | meadow-m3 (from main) | builder-m3 (Claude Opus, T3 child thread) | Codex | 1 | reviewed (meadow-m3 @ 796d61e: review 3f52b22, fix round 1 5d12bea, re-check e811cc2 passed, CI green on 796d61e); waits for the end of the stack | briefs/m3.md |
 | m4 | Painter: the meadow | Content | to brief (port plan m4) | meadow-m4 (from meadow-m2, with m3 merged up the stack) | | Codex | 0 | open (waits on m2, m3) | |
