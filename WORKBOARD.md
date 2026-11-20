@@ -234,16 +234,35 @@ Director's profile: none
 | t8 | Energy, measured with the director (plan T8) | Content | to brief | meadow-t8 | | | 0 | open (waits on t7) | |
 | t9 | Choosing the Meadow: menu, Settings, welcome (plan T9) | Content | to brief | meadow-t9 | | | 0 | open (waits on t8); the what's-new is not full screen (Corrections, 2026-11-20) | |
 | t10 | Words, watch and release 3.1 (plan T10; outward-facing, the director approves the release) | Content | to brief | meadow-t10 | | | 0 | open (waits on t9) | |
-| m1 | Air and flowers from above (breeze, pointer air, downwash, flowers, planting, clicks on flowers, the tuning file) | Content | Sources/OceanKit/Meadow/{MeadowTuning,MeadowMath,Breeze,Flowers}.swift (new), Sources/OceanChecks/MeadowChecks.swift (new), Sources/OceanChecks/main.swift, Sources/OceanTool/{MeadowAir,main}.swift (optional), a copy of the sketch fixture in the checks' resources, Package.swift (grown: bundles the fixtures as the checks' resources; for the review to judge) | meadow-m1 (from main) | builder-m1 (Claude Opus, T3 child thread) | 0 | open (waits for the sketch's fix round 1 and its re-check) | built (meadow-m1 @ 5965216, done with concerns); Codex review building (review-m1); CI green on 5965216 (draft PR #3)
+| m1 | Air and flowers from above (breeze, pointer air, downwash, flowers, planting, clicks on flowers, the tuning file) | Content | Sources/OceanKit/Meadow/{MeadowTuning,MeadowMath,Breeze,Flowers}.swift (new), Sources/OceanChecks/MeadowChecks.swift (new), Sources/OceanChecks/main.swift, Sources/OceanTool/{MeadowAir,main}.swift (optional), a copy of the sketch fixture in the checks' resources, Package.swift (grown: bundles the fixtures as the checks' resources; for the review to judge) | meadow-m1 (from main) | builder-m1 (Claude Opus, T3 child thread) | 0 | open (waits for the sketch's fix round 1 and its re-check) | built (meadow-m1 @ 5965216, done with concerns); Codex review af7dbb1 in (7 findings, routed below); CI green on 5965216 (draft PR #3); fix round 1 building
 | m2 | Flight from above | Content | Sources/OceanKit/Meadow/{ButterflySpecies,Butterfly}.swift (new), Meadow/MeadowTuning.swift (additions), Sources/OceanChecks/{MeadowFlightChecks,main}.swift, Sources/OceanTool/{MeadowPaths,main}.swift | meadow-m2 (from meadow-m1) | | Codex | 0 | open (waits on m1) | briefs/m2.md |
 | m3 | A ground colour per cell in the shared canvas | Content | Sources/OceanKit/Render/{CellCanvas,OceanRenderer,Shaders}.swift, Sources/OceanChecks/CanvasChecks.swift, Sources/OceanChecks/main.swift (only if a new check group needs registering) | meadow-m3 (from main) | builder-m3 (Claude Opus, T3 child thread) | Codex | 1 | reviewed (meadow-m3 @ 796d61e: review 3f52b22, fix round 1 5d12bea, re-check e811cc2 passed, CI green on 796d61e); waits for the end of the stack | briefs/m3.md |
 | m4 | Painter: the meadow | Content | to brief (port plan m4) | meadow-m4 (from meadow-m2, with m3 merged up the stack) | | Codex | 0 | open (waits on m2, m3) | |
 | m5 | Painter: the butterflies | Content | to brief (port plan m5) | meadow-m5 | | Codex | 0 | open (waits on m4) | |
 | m6 | World and behaviours, several screens | Content | to brief (port plan m6) | meadow-m6 | | Codex | 0 | open (waits on m5) | |
-| m7 | Pointer and clicks | Content | to brief (port plan m7) | meadow-m7 | | Codex | 0 | open (waits on m6) | |
+| m7 | Pointer and clicks | Content | to brief (port plan m7) | meadow-m7 | | Codex | 0 | open (waits on m6) | |; carries m1 finding 1's host side (each pointer event's own time and position)
 | m8 | The Meadow habitat, its presets and settings, OceanTool | Content | to brief (port plan m8) | meadow-m8 | | Codex | 0 | open (waits on m7) | |
 
 ## Review routing
+
+- m1, Codex review af7dbb1 (review-m1, 2026-11-20, of meadow-m1 @ 5965216), routed by the manager. Faithful at the
+  director's settings on one screen (weather, flowers, seven kinds, RNG and hash, feeding, clicks, replant matched
+  the sketch run headless; format-2 fixture replays unchanged; CI green). Rulings judged: Package.swift bundling
+  accepted (scope recorded); supplemental probes kept; clicks off the screens ignored (fits m7's rule); pollen
+  inside Flowers accepted (document the spark buffer); wind-peak check 88-100 over an hour accepted; the 0.1 s
+  pointer lag stays open until finding 1's matrix passes; the planted-flower fade is kept as a port extension but
+  must work (finding 2).
+  - Fix (all caused by m1, in its Files): 1 (timestamped 15 Hz bursts miss 5 %; re-entry drops a queued move:
+    keep queued segments, test paired and jittered delivery at 15/30/60/120 Hz, define the timestamped input
+    contract the host must meet), 2 (planted-flower fade fails for small and big resizes; a cell-only change
+    skips the sizing transition), 3 (bad input: subnormal cell width hangs layout, huge coordinates give NaN,
+    non-tick step lengths accepted), 4 (fixture to format 2, validated; replay from viewport-derived points),
+    5 (shared-edge corner leak), 6 (regressions the checks miss: add the checks the review lists), 7 (constants
+    into the tuning file; document the repeat-touch rule and the sketch citations at 4e1b869), and the review's
+    "What is missing". The fix list is at the end of briefs/m1.md.
+  - Rewrite the brief: finding 1's host side (PointerMonitor and OceanDirector supplying each event's own time and
+    position) goes into m7's brief.
+  - Dropped: none. Asked of the director: none.
 
 - m3, Codex review 3f52b22 (review-m3, 2026-11-20, of meadow-m3 @ 2640dc6), routed by the manager. Ocean and Web
   verified byte for byte (checks, digests, 8 stills, 60 Ocean frames); the dissolve ruling upheld (unrevealed cells
