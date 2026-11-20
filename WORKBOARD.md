@@ -85,7 +85,7 @@ Director's profile: none
 | Id | Task | Size | Files | Branch | Builder | Reviewer | Rounds | State | Brief |
 |---|---|---|---|---|---|---|---|---|---|
 | t1-2 | Breeze, flowers and butterfly flight (plan T1 + T2), with the director's path fix | Content | Sources/OceanKit/Meadow/{Breeze,Flowers,ButterflySpecies,Butterfly}.swift, Sources/OceanChecks/MeadowChecks.swift, Sources/OceanTool/{Paths,main}.swift | meadow-t1-2 | builder-t1-2 (Claude Opus, T3 child thread; fix round 1) | reviewer-t1-2 (Claude Opus, T3 child thread) | 1 | reviewed, waits for the end of the stack (director: no merge yet): reviewed (review-t1-2 @ 68288c7), CI passed on 1e11a1b (PR #1), merge rehearsed 2026-11-20 (200 passed, app builds) | briefs/t1-2.md |
-| t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered); fix round 1 adds the director's bigger butterflies and better flowers | Content (grown: now also t1-2's sizes and flower shapes; the director set the look, so no separate plan) | Meadow/MeadowPainter.swift (new), OceanTool/{MeadowStill,main}.swift, OceanChecks/MeadowChecks.swift, Render/GlyphAtlas.swift (append only); fix round 1 adds Meadow/ButterflySpecies.swift (sizes) and Meadow/Flowers.swift (heads, leaves, clumps) | meadow-t5 (from meadow-t1-2) | builder-t5 (Claude Opus, T3 child thread) | reviewer-t5 (Codex) | 1 | building (fix round 1) | briefs/t5.md |
+| t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered); fix round 1 adds the director's bigger butterflies and better flowers | Content (grown: now also t1-2's sizes and flower shapes; the director set the look, so no separate plan) | Meadow/MeadowPainter.swift (new), OceanTool/{MeadowStill,main}.swift, OceanChecks/MeadowChecks.swift, Render/GlyphAtlas.swift (append only); fix round 1 adds Meadow/ButterflySpecies.swift (sizes) and Meadow/Flowers.swift (heads, leaves, clumps) | meadow-t5 (from meadow-t1-2) | builder-t5 (Claude Opus, T3 child thread) | reviewer-t5 (Codex) | 1 | in review (re-check of fix round 1, meadow-t5 @ d6abff1) | briefs/t5.md |
 | t3 | Meadow world and behaviours (plan T3) | Content | Meadow/{MeadowWorld,Behaviour}.swift (new), OceanChecks/MeadowChecks.swift, Meadow/MeadowPainter.swift (convenience paint, breeze trail), Meadow/Breeze.swift (pointer field), OceanTool/MeadowStill.swift | meadow-t3 (from meadow-t5) | | Codex | 0 | open (waits on t5 reviewed: its Files overlap t5's) | briefs/t3.md |
 | t4 | Cursor landing, courtship, crossings, monarch life cycle (plan T4) | Content | to brief | meadow-t4 | | | 0 | open (waits on t3) | |
 | t6 | Meadow habitat, settings and tools (plan T6) | Content | to brief | meadow-t6 | | | 0 | open (waits on t4) | |
@@ -126,6 +126,11 @@ Director's profile: none
     buffers allocate when the band grows), 5 (any moving plant redraws the whole ground band), 6 (plants above a
     lower display leak glyphs into its top row), 7 (a same-size relayout can keep the old garden), 9 (light + Calm
     check), 10 (meadow-still validates its numbers), and the report's local folder paths.
+  - Fix round 1 reported 2026-11-20 (d6abff1, done with concerns): the bigger size is drawn only (flight still at
+    the old size, because a monarch of 19+ cells fails t1-2's coverage check, whose wall margins are in
+    wingspans); painter 0.36 ms a frame at 2560 x 1440 with 8 butterflies (was 0.14); closed wings drawn wider than
+    true; round 0's report commit bbab77d still holds local paths, so meadow-t5's history needs rewriting before it
+    is pushed. Routed after the re-check, together with its findings.
   - Rewrite t3's brief: 8 (the pointer's breeze trail needs the pointer's air apart from the weather; t3 owns the
     pointer input).
   - The director on the stills, 2026-11-20: "would like bigger butterflies and better flowrs". In t5's fix round 1.
