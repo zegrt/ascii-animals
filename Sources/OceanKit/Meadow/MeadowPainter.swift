@@ -161,7 +161,8 @@ final class ViewportCache {
     var light = false
     var bright = 1.0
     var green = -1.0, grass = -1.0, unit = -1.0
-    var gR = MBuf<Float>(0), gG = MBuf<Float>(0), gB = MBuf<Float>(0)
+    /// The ground's colour per cell (r, g, b; w unused), side by side so a cell's first write reads one place.
+    var gRGB = MBuf<SIMD4<Float>>(.zero)
     var packed = MBuf<UInt32>(0)
     var built = false
     var tuftCells: [Int32] = []
@@ -237,7 +238,7 @@ final class ViewportCache {
         sweepIds.removeAll(keepingCapacity: true)
     }
 
-    deinit { gR.free(); gG.free(); gB.free(); packed.free() }
+    deinit { gRGB.free(); packed.free() }
 }
 
 /// The Meadow's painter: owns the buffers and caches; each frame is drawn by a `MeadowFrame` over them.
@@ -334,7 +335,7 @@ struct Cells {
     let HB: UnsafeMutablePointer<UInt8>, GI: UnsafeMutablePointer<UInt8>
     let IR: UnsafeMutablePointer<Float>, IG: UnsafeMutablePointer<Float>, IB: UnsafeMutablePointer<Float>, IA: UnsafeMutablePointer<Float>
     let stamp: UnsafeMutablePointer<UInt32>, touched: UnsafeMutablePointer<Int32>
-    let gR: UnsafeMutablePointer<Float>, gG: UnsafeMutablePointer<Float>, gB: UnsafeMutablePointer<Float>
+    let ground: UnsafeMutablePointer<SIMD4<Float>>
     let frame: UInt32
 
     /// The cell's first write this frame starts it from the ground (`n` counts the cells touched).
@@ -343,7 +344,8 @@ struct Cells {
             stamp[i] = frame
             touched[n] = Int32(i)
             n += 1
-            BR[i] = gR[i]; BG[i] = gG[i]; BB[i] = gB[i]
+            let gc = ground[i]
+            BR[i] = gc.x; BG[i] = gc.y; BB[i] = gc.z
             HB[i] = 0
             GI[i] = MG.none
             IA[i] = 0
@@ -403,7 +405,7 @@ struct MeadowFrame {
     let recMark: UnsafeMutablePointer<UInt32>, recList: UnsafeMutablePointer<Int32>
     let rimMark: UnsafeMutablePointer<UInt32>, rimW: UnsafeMutablePointer<Float>, rimList: UnsafeMutablePointer<Int32>
     let wingStamp: UnsafeMutablePointer<UInt32>
-    var gR: UnsafeMutablePointer<Float>, gG: UnsafeMutablePointer<Float>, gB: UnsafeMutablePointer<Float>
+    var ground: UnsafeMutablePointer<SIMD4<Float>>
     /// The same cells as `Cells` (made again when the ground's buffers move).
     var cells: Cells
     let spans: WingSpans
@@ -448,9 +450,9 @@ struct MeadowFrame {
         stamp = p.stamp.p; touched = p.touched.p
         recMark = p.recMark.p; recList = p.recList.p; rimMark = p.rimMark.p; rimW = p.rimW.p; rimList = p.rimList.p
         wingStamp = p.wingStamp.p
-        gR = v.gR.p; gG = v.gG.p; gB = v.gB.p
+        ground = v.gRGB.p
         cells = Cells(BR: p.BR.p, BG: p.BG.p, BB: p.BB.p, HB: p.HB.p, GI: p.GI.p, IR: p.IR.p, IG: p.IG.p, IB: p.IB.p, IA: p.IA.p,
-                      stamp: p.stamp.p, touched: p.touched.p, gR: v.gR.p, gG: v.gG.p, gB: v.gB.p, frame: p.frame)
+                      stamp: p.stamp.p, touched: p.touched.p, ground: v.gRGB.p, frame: p.frame)
         spans = p.spans
         veins = p.veins.p
         edges = p.edges.p; edgeN = p.edgeN.p
@@ -645,10 +647,10 @@ struct MeadowFrame {
         v.cols = cols; v.rows = rows; v.cw = cw; v.ch = ch; v.light = LIGHT; v.bright = bright; v.green = green; v.grass = grassAmt
         v.unit = S
         let count = cols * rows
-        v.gR.ensure(count); v.gG.ensure(count); v.gB.ensure(count); v.packed.ensure(count)
-        gR = v.gR.p; gG = v.gG.p; gB = v.gB.p
+        v.gRGB.ensure(count); v.packed.ensure(count)
+        ground = v.gRGB.p
         cells = Cells(BR: BR, BG: BG, BB: BB, HB: HB, GI: GI, IR: IR, IG: IG, IB: IB, IA: IA, stamp: stamp, touched: touched,
-                      gR: gR, gG: gG, gB: gB, frame: frame)
+                      ground: ground, frame: frame)
         let packed = v.packed.p
         v.tuftCells.removeAll(keepingCapacity: true)
         v.tuftGlyph.removeAll(keepingCapacity: true)
@@ -672,7 +674,7 @@ struct MeadowFrame {
                 let gr: Double = clamp(bgc.x + (gc.x - bgc.x) * k, 0, 255)
                 let gg: Double = clamp(bgc.y + (gc.y - bgc.y) * k, 0, 255)
                 let gb: Double = clamp(bgc.z + (gc.z - bgc.z) * k, 0, 255)
-                gR[i] = Float(gr); gG[i] = Float(gg); gB[i] = Float(gb)
+                ground[i] = SIMD4(Float(gr), Float(gg), Float(gb), 0)
                 packed[i] = packRound(gr, gg, gb, pr)
                 let dens: Double = (0.09 + 0.22 * patch + 0.08 * MeadowMath.vnoise(x / 40, y / 40, 23)) * grassAmt
                 let h = mhash(gcx, gry, 11)
