@@ -110,3 +110,92 @@ crossing; marking coverage a run of columns at a time.
   whose four output arrays are `CellCanvas`'s layout.
 
 Pushed and clean: no push (instructed not to push); folder clean, everything committed on `meadow-pf`.
+
+## Fix round 1
+
+Status: done
+Board commit: 8fbf6ed (main; "pf review routed; small fix round 1")
+Commit: 246777b (code); this report is the commit after it, on `meadow-pf` (from 45103eb)
+Files changed: Sources/OceanKit/Meadow/MeadowPainter.swift, Sources/OceanKit/Meadow/FlowerPainter.swift (in Files)
+
+### What changed
+
+1. **The flower record is 36 bytes again (8e215f0's size).** The three pushed-back doubles are gone from
+   `FlowerOp`. A block's pushed-back colour goes in the record's last three words, which only a shimmer uses (its
+   key, tick and roll; a block has no shimmer), stored as `Float`. That is exact, because `block` stores the colour
+   as a `Float` anyway. So a block's colour is still pushed back once per push, not on every replay. The colour
+   costs no storage, and a relayout reserves what 8e215f0 reserved.
+2. **A glyph's colour is pushed back as it is replayed**, as 8e215f0 did. `glyph` flattens it toward the block
+   under it in `Double` before storing it, so a `Float` copy would change pixels, and 24 more bytes per record was
+   the finding.
+3. **A grass tuft is 32 bytes, not 64.** This is the rest of the memory rise; the flower records were not all of
+   it. pf's `Tuft` kept its four air indices as an `SIMD4<Int32>`, aligned to 16, so the stride was 64; 8e215f0
+   spent about 17 bytes per tuft in five arrays. Now a tuft keeps its first air sample and a column step and a row
+   step (0 or 1 each), and the other three indices come from them with the same values as before
+   (`j1 = j + dx`, `j2 = j + dy × columns`, `j3 = j2 + dx`).
+
+### Peak memory and allocations
+
+A scratch probe (not committed) built from the review's evidence uses seed 42 and one world and painter
+throughout, stepping 4 times a frame and painting 31 frames per stage. The stages are: the owner's desk (dark);
+1 × 1; the desk plus `(-6000, -3500, 6144, 3456)`, `(180, -3500, 5120, 2880)` and `(2560, -580, 3008, 1692)` at
+8 × 12, light Calm; the same five at 13 × 19, dark; the same five at 8 × 12, dark; and the desk again. Footprint
+is `peak memory footprint` from `/usr/bin/time -l`; allocations are counted on the painting thread around the
+paints.
+
+| | 8e215f0 | 45103eb (pf) | fix |
+|---|---:|---:|---:|
+| Review's probe, peak footprint | 151.5 MiB | 231.0 MiB | **157.8 MiB** |
+| Owner's desk alone (300 frames), peak footprint | 8.3 MiB | 8.8 MiB | **8.3 MiB** |
+| First paint at 13 × 19 (the finding), allocations | 5 | 4,052 | **5** |
+| First paints of the other stages, allocations | 654, 142, 13,311, 205, 2 | 559, 136, 13,118, 205, 2 | 559, 136, 13,118, 205, 2 |
+| The 30 frames after each first paint | 0 | 0 | 0 |
+| Canvas digests, all six stages | — | equal to 8e215f0 | equal to 8e215f0 |
+
+The probe's figures repeated exactly over two runs of each build. My reconstruction of the probe counts 4,052 where
+the review counted 4,331 on 45103eb, and its baseline footprint is 151.5 MiB where the review's was 156 MiB.
+The stages differ slightly, but it shows the same fault and the same jump. The remaining 6 MiB above 8e215f0 in the
+probe comes from pf's other records, which are the CPU gain: the ground colour is padded to 16 bytes a cell, and a
+32-byte tuft against 8e215f0's 17 bytes. On the owner's desk the peak is the same as 8e215f0's.
+
+### CPU
+
+- `meadowWithinWebsCPU`, three full runs: **0.78, 0.77, 0.75** at 30 fps; **0.55, 0.54, 0.54** at 15 fps. Before
+  this fix: 0.76 and 0.53 here, 0.75 and 0.53 in the review.
+- Cycles (`/usr/bin/time -l`) on the desk alone for 900 frames, two runs each: 8e215f0 3.39 G and 3.42 G; 45103eb
+  2.98 G and 2.97 G; fix 3.02 G and 2.99 G. The fix keeps about 90–97 % of pf's saving.
+
+### Checks run
+
+- `swift build` (app, debug): Build complete. The only warnings are the linker's search-path warnings from this
+  machine's Command Line Tools.
+- `swift run -c release OceanChecks`, three times in a row: **250 passed, 0 failed** each time, exit 0. The
+  allocation checks passed every run: `meadowFrameAllocatesNothing`, `meadowStepAllocatesNothing`,
+  `meadowHostedStepsAllocateNothing`, `meadowArrivalsAllocateNothing`, and `meadowClicksAllocateNothingLater`
+  ("0 allocations in the clicks, 0 in the 1,800 frames after them").
+- Byte for byte against 8e215f0: the same `OceanTool` commands from both builds produced 1,673 files, and
+  `diff -qr` found no difference. The files:
+  - Meadow stills, 1800 × 1169, at seeds 1, 42 and 4242, in dark, light, Calm, and light with Calm, after 9 s of
+    warm-up.
+  - The flowers and flies sheets in dark, light, and light with Calm.
+  - Two two-screen films of the owner's desk (`meadow-desk`, seed 4242, 30 s): 900 dark frames at 30 fps and 450
+    light frames at 15 fps.
+  - A 20 s Calm film (`frames --habitat meadow`, 300 frames).
+  - Ocean and Web stills in dark, and in light with Calm.
+  - `bench --digest` (Web): `612a0c22c778b40b`, the same.
+- Types: no long mixed-literal expressions were added. The new index arithmetic is all `Int`, typed.
+
+### Rulings
+
+- Glyph colours are not cached; block colours are. This is the only exact cache that adds no storage. If wrong:
+  the CPU stays within about 1.5 % of 45103eb by cycles and the check medians are unchanged within this machine's
+  noise; caching glyph colours too would need a side buffer of 24 bytes per glyph op.
+- The tuft change is outside the finding's two lines, but it is in a listed file and is the same kind of fault (a
+  pf record that grew). Without it the probe peaked at 164.6 MiB, not near 151.5. If wrong: revert that one
+  commit's tuft hunk; the flower fix stands alone.
+
+### Noticed
+
+- none
+
+Pushed and clean: not pushed (instructed not to push); folder clean, everything committed on `meadow-pf`.
