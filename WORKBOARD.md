@@ -45,6 +45,8 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-20, on the sketch: "aslo colors in light mode doesnt look right". Applies: new (the sketch's next round:
+  light mode redone to match how Ocean and Web do light, from the research).
 - 2026-11-20, on the sketch: "aslo need reset button seperately for each tweak". Applies: new (the sketch's next
   round: a reset beside every slider and choice, back to its default).
 - 2026-11-20: "no viual detail i meant about this: yeah figure all all the small devil in the edtails type stuff from
