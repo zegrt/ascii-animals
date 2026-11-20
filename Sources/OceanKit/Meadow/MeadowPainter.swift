@@ -153,6 +153,46 @@ struct MBuf<T> {
     func free() { p.deallocate() }
 }
 
+/// One cell's state this frame (the sketch's `BR`, `BG`, `BB`, `HB`, `GI`, `IR`, `IG`, `IB`, `IA`, html:642, and the
+/// frame it was last touched), side by side: a cell's reads and writes land on one or two cache lines instead of one
+/// per array (the painter waits on memory more than it adds).
+struct MCell {
+    var r: Float = 0, g: Float = 0, b: Float = 0
+    var ir: Float = 0, ig: Float = 0, ib: Float = 0, ia: Float = 0
+    var stamp: UInt32 = 0
+    var hb: UInt8 = 0, gi: UInt8 = MG.none
+
+    static let r0 = MemoryLayout<MCell>.offset(of: \MCell.r)!, g0 = MemoryLayout<MCell>.offset(of: \MCell.g)!
+    static let b0 = MemoryLayout<MCell>.offset(of: \MCell.b)!, ir0 = MemoryLayout<MCell>.offset(of: \MCell.ir)!
+    static let ig0 = MemoryLayout<MCell>.offset(of: \MCell.ig)!, ib0 = MemoryLayout<MCell>.offset(of: \MCell.ib)!
+    static let ia0 = MemoryLayout<MCell>.offset(of: \MCell.ia)!, stamp0 = MemoryLayout<MCell>.offset(of: \MCell.stamp)!
+    static let hb0 = MemoryLayout<MCell>.offset(of: \MCell.hb)!, gi0 = MemoryLayout<MCell>.offset(of: \MCell.gi)!
+}
+
+/// One field of every cell, indexed as an array of it (`BR[i]`).
+struct CellField<T> {
+    let p: UnsafeMutableRawPointer
+    init(_ cells: UnsafeMutablePointer<MCell>, _ offset: Int) { p = UnsafeMutableRawPointer(cells) + offset }
+    @inline(__always) subscript(i: Int) -> T {
+        get { p.load(fromByteOffset: i &* MemoryLayout<MCell>.stride, as: T.self) }
+        nonmutating set { p.storeBytes(of: newValue, toByteOffset: i &* MemoryLayout<MCell>.stride, as: T.self) }
+    }
+}
+
+/// The cells' fields, made from the painter's cells.
+struct CellFields {
+    let BR: CellField<Float>, BG: CellField<Float>, BB: CellField<Float>
+    let HB: CellField<UInt8>, GI: CellField<UInt8>
+    let IR: CellField<Float>, IG: CellField<Float>, IB: CellField<Float>, IA: CellField<Float>
+    let stamp: CellField<UInt32>
+    init(_ c: UnsafeMutablePointer<MCell>) {
+        BR = CellField(c, MCell.r0); BG = CellField(c, MCell.g0); BB = CellField(c, MCell.b0)
+        HB = CellField(c, MCell.hb0); GI = CellField(c, MCell.gi0)
+        IR = CellField(c, MCell.ir0); IG = CellField(c, MCell.ig0); IB = CellField(c, MCell.ib0); IA = CellField(c, MCell.ia0)
+        stamp = CellField(c, MCell.stamp0)
+    }
+}
+
 /// One screen's cached ground (`buildGround`, html:2523–2543) and its flowers' recordings.
 final class ViewportCache {
     var rect = CGRect.null
@@ -244,10 +284,8 @@ final class ViewportCache {
 /// The Meadow's painter: owns the buffers and caches; each frame is drawn by a `MeadowFrame` over them.
 public final class MeadowPainter {
     var n = 0
-    var BR = MBuf<Float>(0), BG = MBuf<Float>(0), BB = MBuf<Float>(0)
-    var HB = MBuf<UInt8>(0), GI = MBuf<UInt8>(MG.none)
-    var IR = MBuf<Float>(0), IG = MBuf<Float>(0), IB = MBuf<Float>(0), IA = MBuf<Float>(0)
-    var stamp = MBuf<UInt32>(0), touched = MBuf<Int32>(0)
+    var cellBuf = MBuf<MCell>(MCell())
+    var touched = MBuf<Int32>(0)
     var recMark = MBuf<UInt32>(0), recList = MBuf<Int32>(0), rimMark = MBuf<UInt32>(0), rimW = MBuf<Float>(0), rimList = MBuf<Int32>(0)
     var wingStamp = MBuf<UInt32>(0)
     var frame: UInt32 = 0, recStamp: UInt32 = 0, rimStamp: UInt32 = 0, wingStampN: UInt32 = 0
@@ -267,17 +305,14 @@ public final class MeadowPainter {
     public init() { veins.ensure(16); grassInk.ensure(65); edges.ensure(4 * WingSpans.maxPoints); edgeN.ensure(4) }
 
     deinit {
-        BR.free(); BG.free(); BB.free(); HB.free(); GI.free(); IR.free(); IG.free(); IB.free(); IA.free()
-        stamp.free(); touched.free(); recMark.free(); recList.free(); rimMark.free(); rimW.free(); rimList.free()
+        cellBuf.free(); touched.free(); recMark.free(); recList.free(); rimMark.free(); rimW.free(); rimList.free()
         wingStamp.free(); airX.free(); airY.free(); lattice1.free(); lattice2.free(); order.free(); veins.free(); spans.free(); grassInk.free(); edges.free(); edgeN.free()
     }
 
     private func ensure(_ count: Int) {
         guard count > n else { return }
         n = count
-        BR.ensure(n); BG.ensure(n); BB.ensure(n); HB.ensure(n); GI.ensure(n)
-        IR.ensure(n); IG.ensure(n); IB.ensure(n); IA.ensure(n)
-        stamp.ensure(n); touched.ensure(n); recMark.ensure(n); recList.ensure(n); rimMark.ensure(n); rimW.ensure(n); rimList.ensure(n)
+        cellBuf.ensure(n); touched.ensure(n); recMark.ensure(n); recList.ensure(n); rimMark.ensure(n); rimW.ensure(n); rimList.ensure(n)
         wingStamp.ensure(n)
         frame = 0; recStamp = 0; rimStamp = 0; wingStampN = 0
     }
@@ -308,7 +343,7 @@ public final class MeadowPainter {
         guard cols > 0, rows > 0 else { return }
         ensure(cols * rows)
         frame &+= 1
-        if frame == 0 { stamp.p.update(repeating: 0, count: n); frame = 1 }
+        if frame == 0 { for i in 0..<n { cellBuf.p[i].stamp = 0 }; frame = 1 }
         paintCount += 1
         let v = view(for: viewport)
         v.used = paintCount
@@ -331,10 +366,10 @@ public final class MeadowPainter {
 /// into a local, where nothing it stores through the pointers can move them, so they stay in registers (read through
 /// the frame, every store makes the compiler load them again).
 struct Cells {
-    let BR: UnsafeMutablePointer<Float>, BG: UnsafeMutablePointer<Float>, BB: UnsafeMutablePointer<Float>
-    let HB: UnsafeMutablePointer<UInt8>, GI: UnsafeMutablePointer<UInt8>
-    let IR: UnsafeMutablePointer<Float>, IG: UnsafeMutablePointer<Float>, IB: UnsafeMutablePointer<Float>, IA: UnsafeMutablePointer<Float>
-    let stamp: UnsafeMutablePointer<UInt32>, touched: UnsafeMutablePointer<Int32>
+    let BR: CellField<Float>, BG: CellField<Float>, BB: CellField<Float>
+    let HB: CellField<UInt8>, GI: CellField<UInt8>
+    let IR: CellField<Float>, IG: CellField<Float>, IB: CellField<Float>, IA: CellField<Float>
+    let stamp: CellField<UInt32>, touched: UnsafeMutablePointer<Int32>
     let ground: UnsafeMutablePointer<SIMD4<Float>>
     let frame: UInt32
 
@@ -398,10 +433,10 @@ struct MeadowFrame {
     unowned let v: ViewportCache
     let n: Int
     // This frame's cells (html:642). HB: 1 the cell has a block; 2 no block but its ground was shaded; 0 neither.
-    let BR: UnsafeMutablePointer<Float>, BG: UnsafeMutablePointer<Float>, BB: UnsafeMutablePointer<Float>
-    let HB: UnsafeMutablePointer<UInt8>, GI: UnsafeMutablePointer<UInt8>
-    let IR: UnsafeMutablePointer<Float>, IG: UnsafeMutablePointer<Float>, IB: UnsafeMutablePointer<Float>, IA: UnsafeMutablePointer<Float>
-    let stamp: UnsafeMutablePointer<UInt32>, touched: UnsafeMutablePointer<Int32>
+    let BR: CellField<Float>, BG: CellField<Float>, BB: CellField<Float>
+    let HB: CellField<UInt8>, GI: CellField<UInt8>
+    let IR: CellField<Float>, IG: CellField<Float>, IB: CellField<Float>, IA: CellField<Float>
+    let stamp: CellField<UInt32>, touched: UnsafeMutablePointer<Int32>
     let recMark: UnsafeMutablePointer<UInt32>, recList: UnsafeMutablePointer<Int32>
     let rimMark: UnsafeMutablePointer<UInt32>, rimW: UnsafeMutablePointer<Float>, rimList: UnsafeMutablePointer<Int32>
     let wingStamp: UnsafeMutablePointer<UInt32>
@@ -445,14 +480,15 @@ struct MeadowFrame {
         self.world = world
         self.v = v
         n = p.n
-        BR = p.BR.p; BG = p.BG.p; BB = p.BB.p; HB = p.HB.p; GI = p.GI.p
-        IR = p.IR.p; IG = p.IG.p; IB = p.IB.p; IA = p.IA.p
-        stamp = p.stamp.p; touched = p.touched.p
+        let cf = CellFields(p.cellBuf.p)
+        BR = cf.BR; BG = cf.BG; BB = cf.BB; HB = cf.HB; GI = cf.GI
+        IR = cf.IR; IG = cf.IG; IB = cf.IB; IA = cf.IA
+        stamp = cf.stamp; touched = p.touched.p
         recMark = p.recMark.p; recList = p.recList.p; rimMark = p.rimMark.p; rimW = p.rimW.p; rimList = p.rimList.p
         wingStamp = p.wingStamp.p
         ground = v.gRGB.p
-        cells = Cells(BR: p.BR.p, BG: p.BG.p, BB: p.BB.p, HB: p.HB.p, GI: p.GI.p, IR: p.IR.p, IG: p.IG.p, IB: p.IB.p, IA: p.IA.p,
-                      stamp: p.stamp.p, touched: p.touched.p, ground: v.gRGB.p, frame: p.frame)
+        cells = Cells(BR: cf.BR, BG: cf.BG, BB: cf.BB, HB: cf.HB, GI: cf.GI, IR: cf.IR, IG: cf.IG, IB: cf.IB, IA: cf.IA,
+                      stamp: cf.stamp, touched: p.touched.p, ground: v.gRGB.p, frame: p.frame)
         spans = p.spans
         veins = p.veins.p
         edges = p.edges.p; edgeN = p.edgeN.p
