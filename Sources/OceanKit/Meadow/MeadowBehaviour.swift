@@ -9,6 +9,7 @@ extension MeadowWorld {
     /// and their goals, and roughly ahead; a waypoint lasts 4–9 s. Several screens: each point on a screen picked by
     /// area, kept only if the straight way there stays on the screens (Web's `wanderGoal`), else one on its own screen.
     func pickWaypoint(_ b: Butterfly) {
+        guard !screens.isEmpty else { return }
         if b.leaving { aimAtExit(b); b.wpLeft = 1e9; return }
         let own = screens[screen(near: b.x, b.y)]
         let diag = own.diag
@@ -46,6 +47,7 @@ extension MeadowWorld {
     /// `pickFlower` (html:1471–1490): a flower it can sense, within `sense` wingspans and not behind it, weighted by
     /// the species' favourites and by room from the others. Returns its index in `flowers.all`.
     func pickFlower(_ b: Butterfly) -> Int? {
+        guard !screens.isEmpty else { return nil }
         let diag = screens[screen(near: b.x, b.y)].diag
         let sr = spanRef(b)
         let range: Double = tuning.sense * sr
@@ -88,6 +90,7 @@ extension MeadowWorld {
     /// `chooseNext` (html:1498–1513): on arrival, a flower visit, a bask on open ground, or travel on.
     func chooseNext(_ b: Butterfly) {
         releaseFlower(b)
+        guard !screens.isEmpty else { return }
         let u = rng.unit(), pv = clamp(visitChance(b), 0, 1)
         if u < pv {
             if let f = pickFlower(b) { goToFlower(b, f); return }
@@ -123,7 +126,7 @@ extension MeadowWorld {
     /// spirals in.
     func stepPointer(_ dt: Double) {
         cursorCd -= dt
-        if !pointerHas { pointerStill = 0; return }
+        if !pointerHas || screens.isEmpty { pointerStill = 0; return }
         pointerStill += dt
         if !tuning.cursorLand || pointerStill < tuning.holdTime || cursorCd > 0 { return }
         for b in flies where b.goal == .cursor || b.state == .cursor { return }

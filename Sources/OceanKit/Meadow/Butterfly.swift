@@ -59,7 +59,8 @@ public final class Butterfly {
     var senseT = 0.0
     var tag = 0, tagTries = 0, circleT = 0.0, circleDir = 1.0
     var spiral: Spiral? = nil
-    var called = false
+    /// Called to a fresh bloom by a click (one at a time).
+    public internal(set) var called = false
     /// Antenna twitches: time left and side (html:1329).
     public internal(set) var antT0 = 0.0, antT1 = 0.0
     public internal(set) var antS0 = 1.0, antS1 = -1.0

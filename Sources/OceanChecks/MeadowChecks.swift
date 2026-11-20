@@ -48,7 +48,7 @@ private let countingLogger: MallocLogger = { type, _, _, _, _, _ in
 }
 
 /// Heap allocations `body` makes, or nil where the allocator can't be watched.
-private func allocations(_ body: () -> Void) -> Int? {
+func allocations(_ body: () -> Void) -> Int? {
     guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "malloc_logger") else { return nil }
     let slot = sym.assumingMemoryBound(to: MallocLogger?.self)
     guard slot.pointee == nil else { return nil }

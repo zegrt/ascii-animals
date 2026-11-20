@@ -49,7 +49,7 @@ extension MeadowWorld {
         pickWaypoint(b)
         if let (ax, ay) = away {
             let a: Double = atan2(b.y - ay, b.x - ax) + (escape ? rng.range(-0.5, 0.5) : 0)
-            if !b.leaving {
+            if !b.leaving && !screens.isEmpty {
                 let s = screens[screen(near: b.x, b.y)]
                 b.wx = clamp(b.x + cos(a) * 500 * S, s.minX + 40, s.maxX - 40)
                 b.wy = clamp(b.y + sin(a) * 500 * S, s.minY + 40, s.maxY - 40)

@@ -324,6 +324,7 @@ public final class MeadowWorld {
 
     /// `aimAtExit` (html:1374–1380): well past the nearest real edge.
     func aimAtExit(_ b: Butterfly) {
+        guard !screens.isEmpty else { return }
         let f1 = footprint(b, 1), f0 = footprint(b, 0)
         let reach: Double = max(f1.l, f1.r, f1.u, f1.d, f0.l, f0.r, f0.u, f0.d)
         let out: Double = max(400 * S, reach + 200 * S)
@@ -591,7 +592,8 @@ public final class MeadowWorld {
         flowers.takeSparks { s in
             self.addDust(MeadowDust(x: s.x, y: s.y, vx: s.vx, vy: s.vy, life: s.life, max: s.max, spark: true))
         }
-        for b in flies { stepFly(b, dt) }
+        // With no screen (a broken layout) the butterflies hold still until there is one.
+        if !screens.isEmpty { for b in flies { stepFly(b, dt) } }
         var anyDead = false
         for b in flies where b.dead { anyDead = true; releaseFlower(b) }
         if anyDead { flies.removeAll { $0.dead } }
@@ -670,6 +672,7 @@ public final class MeadowWorld {
     /// `cursorSpot` (html:1516–1523): the proboscis at the pointer, the body behind it, held on the pointer's screen
     /// so its whole body stays on it.
     func cursorSpot(_ b: Butterfly) -> (Double, Double) {
+        guard !screens.isEmpty else { return (b.x, b.y) }
         let hh: Double = b.sp.span * 13 * S * b.size * depthScale(b.z) * b.sp.aspect / 2
         let off: Double = 0.4 * hh + 1.0 * cw
         let s = screens[screen(near: pointerX, pointerY)]

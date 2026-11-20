@@ -12,6 +12,9 @@
 //   OceanTool meadow-sheet <out.png> <W>x<H> --sheet flowers|flies [--z Z] [--light] [--calm] [--seed N] [--scale N]
 //     The Meadow sketch's ?sheet=flowers|flies at the same seed and size: one bloom of each kind, or each species at
 //     four wing phases at height Z (default 0.5), drawn at load.
+//   OceanTool meadow-desk <dir> [--seconds S] [--fps F] [--warmup S] [--seed N] [--scale N] [--light]
+//     The Meadow on the owner's desk (MeadowDesk.swift): one scene over the monitor and the laptop below it, each
+//     screen drawn as the app draws it and laid out where it is.
 //   OceanTool meadow-air <out.png> <W>x<H> [--seed N] [--seconds S] [--under sketch.png] [--stir]
 //     The Meadow's planting and air (MeadowAir.swift): the port's flowers outlined over the sketch's own render at the
 //     same seed and size, beside the port's air field.
@@ -143,6 +146,19 @@ case "meadow-sheet":
     guard let img = try rec.capture().first else { fail("no image") }
     try StillRenderer.writePNG(img, to: URL(fileURLWithPath: args[0]))
     print("wrote \(args[0]) \(img.width)x\(img.height)")
+
+case "meadow-desk":
+    let seed = UInt64(option("--seed") ?? "4242") ?? 4242
+    let seconds = Double(option("--seconds") ?? "0") ?? 0
+    let fps = Int(option("--fps") ?? "15") ?? 15
+    let warmup = Double(option("--warmup") ?? "0.0167") ?? 0.0167
+    let scale = CGFloat(Double(option("--scale") ?? "0.5") ?? 0.5)
+    let light = flag("--light")
+    guard args.count == 1, fps > 0, 60 % fps == 0, seconds.isFinite, seconds >= 0, warmup.isFinite, warmup >= 0 else {
+        fail("usage: OceanTool meadow-desk <dir> [--seconds S] [--fps 15|30|60] [--warmup S] [--seed N] [--scale N] [--light]")
+    }
+    try MeadowDesk.run(out: URL(fileURLWithPath: args[0], isDirectory: true), seed: seed, seconds: seconds, fps: fps,
+                       warmup: warmup, scale: scale, light: light)
 
 case "iconset":
     guard args.count == 1 else { fail("usage: OceanTool iconset <dir.iconset>") }
