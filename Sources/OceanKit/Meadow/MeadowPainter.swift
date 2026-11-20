@@ -411,18 +411,16 @@ private struct Pose {
     init(_ b: Butterfly, cw: Double, ch: Double, id: Double) {
         kind = b.kind
         shape = WingShape.of(b.kind)
-        x = b.x
-        y = b.y
-        let side: Double = cos(b.heading) >= 0 ? 1 : -1
-        // The body leans toward where it flies and pitches with the stroke, never far from upright.
-        let tilt: Double = clamp(0.3 * cos(b.heading) - 0.5 * b.pitch * side, -0.5, 0.5)
+        x = b.x + b.drawnOffset.x
+        y = b.y + b.drawnOffset.y
+        let tilt: Double = b.drawnLean
         ax = sin(tilt)
         ay = -cos(tilt)
         rx = cos(tilt)
         ry = sin(tilt)
         self.cw = cw
         self.ch = ch
-        let k: Double = b.scale * b.size
+        let k: Double = b.scale * b.size * b.fit
         hsC = b.species.drawnSpan * 13 * k / 2 / cw
         hhR = b.species.drawnHeight * 19 * k / 2 / ch
         let s = b.wings()
@@ -1267,7 +1265,7 @@ public final class MeadowPainter {
 
     private func drawButterfly(_ b: Butterfly, _ k: Int, _ slot: inout Slot, _ time: Double, _ ox: Double, _ oy: Double,
                                _ cw: Double, _ ch: Double, _ out: Layer) {
-        let lx: Double = b.x - ox, ly: Double = b.y - oy
+        let lx: Double = b.x + b.drawnOffset.x - ox, ly: Double = b.y + b.drawnOffset.y - oy
         guard lx.isFinite, ly.isFinite, b.stroke.isFinite, b.bank.isFinite, b.heading.isFinite, b.pitch.isFinite else {
             slot.owner = nil
             return
@@ -1516,5 +1514,61 @@ public final class MeadowPainter {
             let fade: Double = 1 - age / mote.life
             out.putOver(c, r, fade > 0.5 ? MG.dot : MG.period, tone.pack(plants.gold, 0.9 * fade))
         }
+    }
+}
+
+// ── How far a drawing reaches (for the flight's hard walls) ──
+
+extension Butterfly {
+    /// The lean the painter draws the body at, radians (+ head to the right): toward where it flies, pitching with the
+    /// stroke, never far from upright.
+    var drawnLean: Double {
+        let side: Double = cos(heading) >= 0 ? 1 : -1
+        return leanRoom * clamp(0.3 * cos(heading) - 0.5 * pitch * side, -0.5, 0.5)
+    }
+
+    /// How far the painter's drawing of this butterfly reaches from where its body is drawn, pt, as (left, right, up,
+    /// down), leaning by `lean`, its tips climbing `climb` pt, drawn at `fit` of its size, on cells of `cw` × `ch` pt.
+    /// It holds every point the painter puts a glyph at (body, antennae and clubs, proboscis, edge-on lines) and every
+    /// point a wing sample can cover: the outlines at any drawn width from 0 to open, softened by a quarter cell (a
+    /// sample covers within a quarter cell of the outline). So each cell the painter draws holds a point inside it.
+    func drawnExtent(lean: Double, climb: Double, fit: Double, cw: Double, ch: Double) -> SIMD4<Double> {
+        let k: Double = scale * size * fit
+        let hs: Double = species.drawnSpan * 13 * k / 2, hh: Double = species.drawnHeight * 19 * k / 2
+        let rows: Double = hh / ch
+        let c: Double = cos(lean), s: Double = sin(lean)
+        var lo = SIMD2<Double>(0, 0), hi = SIMD2<Double>(0, 0)
+        /// A point `v` pt across the body (+ right) and `u` pt along it (+ toward the head).
+        @inline(__always) func add(_ v: Double, _ u: Double) {
+            let q = SIMD2<Double>(c * v + s * u, s * v - c * u)
+            lo = simd_min(lo, q)
+            hi = simd_max(hi, q)
+        }
+        /// An outline's corners at no width and open, both sides, and where an edge-on line is put (0.75 column out).
+        func outline(_ o: Outline) {
+            for p in o.p {
+                let u: Double = p.y * hh + climb * min(p.x, 1.1)
+                add(0, u)
+                add(p.x * hs, u)
+                add(-p.x * hs, u)
+                add(0.75 * cw, u)
+                add(-0.75 * cw, u)
+            }
+        }
+        let shape = WingShape.of(kind)
+        outline(shape.fore)
+        outline(shape.hind)
+        // The body, from the head's `o` to the tail; the proboscis; the antennae and their clubs (with the sway).
+        let head: Double = 0.42 * rows + 0.3, tail: Double = -0.66 * rows
+        add(0, (head + 1) * ch)
+        add(0, tail * ch)
+        add(2.12 * cw, (head + 2) * ch)
+        add(-2.12 * cw, (head + 2) * ch)
+        add(2.72 * cw, (head + 3) * ch)
+        add(-2.72 * cw, (head + 3) * ch)
+        // The soft edge, a quarter cell across and along (and the tips' climb past the outline's widest point).
+        let pv: Double = 0.25 * cw, pu: Double = 0.25 * ch + 0.2 * abs(climb)
+        let px: Double = abs(c) * pv + abs(s) * pu, py: Double = abs(s) * pv + abs(c) * pu
+        return SIMD4<Double>(px - lo.x, hi.x + px, py - lo.y, hi.y + py)
     }
 }
