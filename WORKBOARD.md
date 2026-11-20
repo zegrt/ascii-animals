@@ -45,6 +45,11 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-20, after playing with sketch round 2, the director sent their settings "for now": count 7, sizeLow 0.75,
+  sizeHigh 1.4, wingbeat 0.5, lurch 2, zigzag 1.29, glide 0.44, speed 2, turning 1.23, bob 1, height 0.5, visits
+  0.35, stay 0.25, bask 0.2, density 0.85, flowerSize 1.32, leaves 1.24, breeze 1.7, shadow 1, green 0.69, grass 1,
+  sparkle 1, all four species. Applies: new (these become the sketch's defaults; the round-2 look is accepted for
+  now; the sketch's next round, motion and behaviour, starts from them).
 - 2026-11-20, on the sketch: "aslo colors in light mode doesnt look right". Applies: new (the sketch's next round:
   light mode redone to match how Ocean and Web do light, from the research).
 - 2026-11-20, on the sketch: "aslo need reset button seperately for each tweak". Applies: new (the sketch's next
@@ -161,6 +166,11 @@ Director's profile: none
   version). Look development: no reviews or checks while exploring; the team process resumes for the Swift port.
   The manager delegates the sketch to a builder (team.manager: the manager does not build) and publishes it.
 
+- 2026-11-20: Sketch round 3 is motion and behaviour, from the research's gap list (§3.2–3.6), built on the
+  director's settings. The settings read as: more travel, more lurch and zig-zag, less gliding, more breeze, more
+  butterflies. So nothing added this round may make them sit more or move less by default; every new behaviour gets
+  its own slider or switch with a reset, so the director tunes it (manager).
+
 ## Tasks
 
 | Id | Task | Size | Files | Branch | Builder | Reviewer | Rounds | State | Brief |
@@ -170,7 +180,7 @@ Director's profile: none
 | t5v | A 30 s film of the butterflies flying, for the director to judge the motion | Content (small) | OceanTool/MeadowFrames.swift (new), OceanTool/main.swift | meadow-t5v (from meadow-t5r) | builder-t5v (Claude Opus, T3 child thread) | Codex | 0 | reviewed (review-t5v @ 94d9d2b); its 4 tool fixes moved into t3 (which rewrites meadow-frames) | briefs/t5v.md |
 | p1 | Throwaway prototype film of the Meadow seen from above, with depth | Prototype (never merged, no review) | new OceanTool files, OceanTool/main.swift | proto-top-down (from meadow-t5v) | builder-p1 (Claude Opus, T3 child thread) | none | 0 | built (proto-top-down @ de1f728); director's notes in Corrections | briefs/p1.md |
 | p2a | Look development 1: butterfly motion from above (the measured flight turned on its side) and wingbeat speed | Design (look development; approved; reviewed later in the plan's tasks) | new Meadow/OceanTool files, OceanTool/main.swift, additive Butterfly/ButterflySpecies | look-top-down (from proto-top-down) | builder-p2a (Claude Opus, T3 child thread) | later | 0 | held (the director: "take a step back"); notes only at look-top-down @ adc632f, no code changed | briefs/p2a.md |
-| s1 | The Meadow sketch: a live web original with sliders (published for the director) | Design (look development; approved; no review) | Tools/meadow-sketch/meadow.html (new) | meadow-sketch (from main) | builder-s1 (Claude Opus, T3 child thread) | none | 0 | built (meadow-sketch @ 0e2ecf7); round 2 built (meadow-sketch @ d893c50, done with concerns), served on localhost for the director | briefs/s1.md |
+| s1 | The Meadow sketch: a live web original with sliders (published for the director) | Design (look development; approved; no review) | Tools/meadow-sketch/meadow.html (new) | meadow-sketch (from main) | builder-s1 (Claude Opus, T3 child thread) | none | 0 | built (meadow-sketch @ 0e2ecf7); round 2 built (meadow-sketch @ d893c50, done with concerns); round 3 building (motion and behaviour) | briefs/s1.md, briefs/s1r2.md, briefs/s1r3.md |
 | r1 | Research: what makes Ocean and Web look and feel alive, and the Meadow's gaps | Small (read-only research) | docs/plans/2026-11-20-family-details.md | main | research agent | none | 0 | done (saved on main) | none |
 | t5w | A new wingbeat (both wings together), wing shading and detail, and butterflies that turn to face where they fly, learning from the director's reference | Content | Meadow/MeadowPainter.swift, Meadow/Butterfly.swift (drawn heading, open), OceanChecks/MeadowChecks.swift | meadow-t5w (from meadow-t3) | | Codex | 0 | held (the view changed; replaced by look development) | briefs/t5w.md |
 | t3 | Meadow world and behaviours (plan T3), with the director's film verdict | Content | Meadow/{MeadowWorld,Behaviour}.swift (new), OceanChecks/MeadowChecks.swift, Meadow/MeadowPainter.swift (convenience paint, breeze trail), Meadow/Breeze.swift (pointer field), Meadow/{Butterfly,ButterflySpecies}.swift (roaming, spacing, stays), OceanTool/{MeadowStill,MeadowFrames,main}.swift | meadow-t3 (from meadow-t5v) | builder-t3 (Claude Opus, T3 child thread) | Codex | 0 | held (2026-11-20: the view may change to top-down); WIP saved at meadow-t3 @ 11394be (does not build yet; checks written, world not started) | briefs/t3.md |
