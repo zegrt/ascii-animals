@@ -236,7 +236,7 @@ Director's profile: none
 | t10 | Words, watch and release 3.1 (plan T10; outward-facing, the director approves the release) | Content | to brief | meadow-t10 | | | 0 | open (waits on t9) | |
 | m1 | Air and flowers from above (breeze, pointer air, downwash, flowers, planting, clicks on flowers, the tuning file) | Content | to brief (port plan m1) | meadow-m1 (from main) | | Codex | 0 | open (waits for the sketch's fix round 1 and its re-check) | |
 | m2 | Flight from above | Content | to brief (port plan m2) | meadow-m2 (from meadow-m1) | | Codex | 0 | open (waits on m1) | |
-| m3 | A ground colour per cell in the shared canvas | Content | Sources/OceanKit/Render/{CellCanvas,OceanRenderer,Shaders}.swift, Sources/OceanChecks/CanvasChecks.swift, Sources/OceanChecks/main.swift (only if a new check group needs registering) | meadow-m3 (from main) | builder-m3 (Claude Opus, T3 child thread) | Codex | 0 | built (meadow-m3 @ 2640dc6, done); Codex review building (review-m3) | briefs/m3.md |
+| m3 | A ground colour per cell in the shared canvas | Content | Sources/OceanKit/Render/{CellCanvas,OceanRenderer,Shaders}.swift, Sources/OceanChecks/CanvasChecks.swift, Sources/OceanChecks/main.swift (only if a new check group needs registering) | meadow-m3 (from main) | builder-m3 (Claude Opus, T3 child thread) | Codex | 0 | built (meadow-m3 @ 2640dc6, done); Codex review 3f52b22 in (4 findings, routed below); fix round 1 building | briefs/m3.md |
 | m4 | Painter: the meadow | Content | to brief (port plan m4) | meadow-m4 (from meadow-m2, with m3 merged up the stack) | | Codex | 0 | open (waits on m2, m3) | |
 | m5 | Painter: the butterflies | Content | to brief (port plan m5) | meadow-m5 | | Codex | 0 | open (waits on m4) | |
 | m6 | World and behaviours, several screens | Content | to brief (port plan m6) | meadow-m6 | | Codex | 0 | open (waits on m5) | |
@@ -244,6 +244,16 @@ Director's profile: none
 | m8 | The Meadow habitat, its presets and settings, OceanTool | Content | to brief (port plan m8) | meadow-m8 | | Codex | 0 | open (waits on m7) | |
 
 ## Review routing
+
+- m3, Codex review 3f52b22 (review-m3, 2026-11-20, of meadow-m3 @ 2640dc6), routed by the manager. Ocean and Web
+  verified byte for byte (checks, digests, 8 stills, 60 Ocean frames); the dissolve ruling upheld (unrevealed cells
+  show the plain background).
+  - Fix (small, in m3's Files, caused by m3): 1 (Web keeps uploading an empty ground after a ground painter used
+    the viewport: track ground use per paint, fall back when none), 2 (a failed ground texture retries the whole
+    ring every frame: bound it, log once), 3 (the 77-line check closure into a named function, CI rule),
+    4 (the texture layout comment), and the review's "What is missing" (the GPU check covers ring-slot reuse, a
+    resize, and that ground-free frames skip the upload).
+  - Dropped: none. Asked of the director: none.
 
 - s1, Codex review a8f02d4 (review-s1, 2026-11-20, of meadow-sketch @ 3f02cb3), routed by the manager. The sketch
   is the reference the port copies, so a wrong rule here becomes a wrong rule in Swift: everything the sketch
