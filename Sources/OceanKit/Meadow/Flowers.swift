@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// The seven kinds, in the sketch's `KINDS` order (html:761); their numbers are `MeadowTuning.kinds`.
+/// The seven kinds, in the sketch's `KINDS` order (html:769); their numbers are `MeadowTuning.kinds`.
 public enum FlowerKind: Int, CaseIterable, Sendable {
     case daisy, coneflower, milkweed, fennel, clover, mustard, dandelion
 
@@ -27,7 +27,7 @@ public struct Floret: Equatable, Sendable {
     public var turn: Double
 }
 
-/// A bloom seen from above (the sketch's flower object, html:774–802). Found by `id`, never by its place in the array:
+/// A bloom seen from above (the sketch's flower object, html:782–810). Found by `id`, never by its place in the array:
 /// the array is reordered by a replant and shrinks as faded flowers go.
 public struct Flower: Equatable, Sendable {
     public let id: Int
@@ -67,20 +67,22 @@ public struct Flower: Equatable, Sendable {
     /// Closing and fading: `fade` runs 1 → 0 over `Clicks.fadeTime`, then it goes.
     public var fading = false
     public var fade = 1.0
-    /// When it was last touched (simulation s).
-    public var touchedAt = -9.0
+    /// When it was last touched (simulation s; `Clicks.neverTouched` before its first touch).
+    public var touchedAt = MeadowTuning.Clicks.neverTouched
+    /// The screen it belongs to (`Terrain.rects` index): the one its patch was planted on, or the one clicked.
+    public var screen = 0
     /// `flowerSize · S` it was made at (a replant rescales it to the current one).
     public var sizeK: Double
     /// How far its drawing reaches from the centre (pt).
     public var reach: Double
 
-    /// Drawn growth: `easeOutBack(age)`, 1 once grown (`growOf`, html:880).
+    /// Drawn growth: `easeOutBack(age)`, 1 once grown (`growOf`, html:888).
     public var grow: Double { age >= 1 ? 1 : MeadowMath.easeOutBack(age) }
-    /// The visited dim, 0…1 (`visitDim`, html:978).
-    public var visitDim: Double { dimT > 0 ? MeadowMath.smooth(0, 0.35, dimT / dimMax) : 0 }
+    /// The visited dim, 0…1 (`visitDim`, html:986).
+    public var visitDim: Double { dimT > 0 ? MeadowMath.smooth(0, MeadowTuning.Flowers.dimEase, dimT / dimMax) : 0 }
 }
 
-/// A pollen spark a click let off (the sketch pushes them onto its dust, html:900–903, 926–930). The flowers draw
+/// A pollen spark a click let off (the sketch pushes them onto its dust, html:908–911, 931–936). The flowers draw
 /// them so the input stream keeps the sketch's order; the world takes them for its dust (`takeSparks`).
 public struct PollenSpark: Equatable, Sendable {
     public var x: Double
@@ -101,7 +103,7 @@ public enum FlowerClick: Equatable, Sendable {
     case bloomed(id: Int, sparks: Int)
 }
 
-/// The meadow's flowers, ported from the sketch (html:761–968): planted in patches per screen, each head a damped
+/// The meadow's flowers, ported from the sketch (html:769–976): planted in patches per screen, each head a damped
 /// spring in the wind, growing in with an overshoot, lit while fed, dimmed after a visit; clicks touch a bloom or
 /// bloom one where there's room, with the click limit and the 2 s fade; and the replant transition.
 ///
@@ -114,12 +116,16 @@ public final class Flowers {
     public let breeze: Breeze
     public private(set) var terrain: Terrain
     public private(set) var cell: CGSize
-    public var tuning: MeadowTuning
-    /// The last flower id given (`flowerId`, html:772): every made flower takes one, kept or not, as the sketch's.
+    /// The director's settings; put right on every write (finite and inside each slider's range).
+    public var tuning: MeadowTuning {
+        didSet { tuning = tuning.sanitized() }
+    }
+    /// The last flower id given (`flowerId`, html:780): every made flower takes one, kept or not, as the sketch's.
     public private(set) var lastId = 0
     /// Patches the last planting laid out.
     public private(set) var patches = 0
-    /// Pollen sparks let off by clicks, not yet taken.
+    /// Pollen sparks let off by clicks, not yet taken: at most `Clicks.sparkBuffer`; the world takes them every step
+    /// (`takeSparks`), and a click's sparks beyond the buffer are not kept.
     public private(set) var sparks: [PollenSpark] = []
 
     /// A touch on a bloom: any butterfly feeding on flower `id` takes off away from (x, y) (the sketch's
@@ -128,15 +134,12 @@ public final class Flowers {
     /// Flower `id` is closing (over the limit, off the screens, or crowded out by a replant): every butterfly bound
     /// for or on it leaves it (`fadeFlower` → `leaveFlower`).
     public var onClosing: ((_ id: Int) -> Void)?
-    /// A replant finished: butterflies whose flower is gone (`flower(id:) == nil`) leave it (html:870).
+    /// A replant finished: butterflies whose flower is gone (`flower(id:) == nil`) leave it (html:878).
     public var onReplanted: (() -> Void)?
 
     private var unit: Double { breeze.unit }
-    private var cw: Double {
-        let w = Double(cell.width)
-        return w.isFinite && w > 0 ? min(w, 1000) : MeadowTuning.Unit.referenceCell
-    }
-    private static let sparkCapacity = 256
+    private var cw: Double { MeadowTuning.Unit.cellWidth(Double(cell.width)) }
+    private static let sparkCapacity = MeadowTuning.Clicks.sparkBuffer
 
     public init(terrain: Terrain, cell: CGSize, breeze: Breeze, tuning: MeadowTuning = .director) {
         self.terrain = terrain
@@ -154,12 +157,12 @@ public final class Flowers {
         return nil
     }
 
-    /// Flower `id`, or nil once it has gone (`flowerById`, html:970).
+    /// Flower `id`, or nil once it has gone (`flowerById`, html:978).
     public func flower(id: Int) -> Flower? { index(of: id).map { all[$0] } }
 
     // ── making and planting ──
 
-    /// `pickKind` (html:804–807): a kind by weight, one draw.
+    /// `pickKind` (html:812–815): a kind by weight, one draw.
     public func pickKind(_ rng: MeadowRandom) -> FlowerKind {
         var tot = 0.0
         for k in FlowerKind.allCases { tot += k.spec.weight }
@@ -178,7 +181,7 @@ public final class Flowers {
         }
     }
 
-    /// `makeFlower(kind, x, y, grown)` (html:774–802): draws its size, turn, seed, petals, f0, rosette and florets
+    /// `makeFlower(kind, x, y, grown)` (html:782–810): draws its size, turn, seed, petals, f0, rosette and florets
     /// in the sketch's order, and takes the next id.
     public func make(_ kind: FlowerKind, x: Double, y: Double, grown: Bool, rng: MeadowRandom) -> Flower {
         let K = kind.spec
@@ -244,28 +247,54 @@ public final class Flowers {
         return longest + MeadowTuning.Flowers.reachCells * cw
     }
 
-    /// Whether a bloom of the screen `r` may stand at p (the sketch: up to 10 pt past the window's edge,
-    /// html:829). The port: on screen `r`, or up to 10 pt past one of its real edges; never on another screen
-    /// (a patch doesn't cross an edge two screens share) and never in a gap between screens (a point inside the
-    /// terrain's bounds that no screen holds).
-    public func mayStand(_ x: Double, _ y: Double, screen r: CGRect) -> Bool {
-        guard x.isFinite && y.isFinite else { return false }
+    /// Whether a bloom of screen `i` (`terrain.rects[i]`) may stand at (x, y). The sketch: up to 10 pt past the
+    /// window's edge on either axis (html:839). The port: on screen `i`, or up to 10 pt past it across its real
+    /// edges only. On each axis where the point is past the screen, the side it is past must be a real edge (no
+    /// screen beside it) level with the point, so a bloom never reaches across an edge two screens share, nor round
+    /// the end of one; and never onto another screen or into a gap between screens (a point inside the terrain's
+    /// bounds that no screen holds). With one screen this is the sketch's test.
+    public func mayStand(_ x: Double, _ y: Double, screen i: Int) -> Bool {
+        guard x.isFinite && y.isFinite, i >= 0 && i < terrain.rects.count else { return false }
+        let r = terrain.rects[i]
         let s = MeadowTuning.Flowers.edgeSlack
         let minX = Double(r.minX), maxX = Double(r.maxX), minY = Double(r.minY), maxY = Double(r.maxY)
         if x < minX - s || y < minY - s || x > maxX + s || y > maxY + s { return false }
         if x >= minX && x <= maxX && y >= minY && y <= maxY { return true }
-        if terrain.contains(SIMD2(x, y)) { return false }   // past a shared edge, on the next screen
+        if terrain.contains(SIMD2(x, y)) { return false }   // on another screen
         let b = terrain.bounds
         let inBounds = x >= Double(b.minX) && x <= Double(b.maxX) && y >= Double(b.minY) && y <= Double(b.maxY)
-        return !inBounds
+        if inBounds { return false }                         // in a gap
+        let qx: Double = min(maxX, max(minX, x))
+        let qy: Double = min(maxY, max(minY, y))
+        if x < minX && !realEdge(i, SIMD2(1, 0), at: qy) { return false }
+        if x > maxX && !realEdge(i, SIMD2(-1, 0), at: qy) { return false }
+        if y < minY && !realEdge(i, SIMD2(0, 1), at: qx) { return false }
+        if y > maxY && !realEdge(i, SIMD2(0, -1), at: qx) { return false }
+        return true
     }
 
-    /// Whether a flower centre at p is somewhere a bloom may stand at all (on some screen, or just past a real edge).
+    /// Whether screen `i`'s side facing away from `normal` (the terrain's inward normal) is a real edge at `v` along
+    /// it (y for a vertical side, x for a horizontal one).
+    private func realEdge(_ i: Int, _ normal: SIMD2<Double>, at v: Double) -> Bool {
+        for e in terrain.edges where e.rect == i && e.normal == normal {
+            let lo: Double = normal.x != 0 ? min(e.a.y, e.b.y) : min(e.a.x, e.b.x)
+            let hi: Double = normal.x != 0 ? max(e.a.y, e.b.y) : max(e.a.x, e.b.x)
+            if v >= lo && v <= hi { return true }
+        }
+        return false
+    }
+
+    /// Whether a flower centre at (x, y) is somewhere a bloom of some screen may stand.
     public func mayStand(_ x: Double, _ y: Double) -> Bool {
-        terrain.rects.contains { mayStand(x, y, screen: $0) }
+        terrain.rects.indices.contains { mayStand(x, y, screen: $0) }
     }
 
-    /// `plant()` (html:809–843): the meadow's patches around the flowers already there, screen by screen, then all
+    /// The screen holding (x, y), or nil.
+    private func screen(at x: Double, _ y: Double) -> Int? {
+        terrain.rects.firstIndex { Double($0.minX) <= x && x <= Double($0.maxX) && Double($0.minY) <= y && y <= Double($0.maxY) }
+    }
+
+    /// `plant()` (html:817–851): the meadow's patches around the flowers already there, screen by screen, then all
     /// sorted small first. Per screen: `max(1, round(area / (190000 · S²) · density))` patches, each centre the best
     /// of 10 for distance from the others, 20 · S in from the edges; blooms within the patch's spread, up to 14 tries
     /// each, never overlapping (centres `(R1 + R2) · 1.05` apart).
@@ -274,7 +303,7 @@ public final class Flowers {
         patches = 0
         var centres: [SIMD2<Double>] = []
         let margin: Double = F.patchMargin * unit
-        for r in terrain.rects {
+        for (ri, r) in terrain.rects.enumerated() {
             let rx = Double(r.minX), ry = Double(r.minY), W = Double(r.width), H = Double(r.height)
             guard W.isFinite && H.isFinite && rx.isFinite && ry.isFinite && W > 0 && H > 0 else { continue }
             let perArea: Double = W * H / (F.patchArea * unit * unit) * tuning.density
@@ -305,8 +334,9 @@ public final class Flowers {
                         let rr: Double = spread * rng.unit().squareRoot()
                         let x: Double = best.x + cos(a) * rr
                         let y: Double = best.y + sin(a) * rr
-                        if !mayStand(x, y, screen: r) { continue }
-                        let cand = make(kind, x: x, y: y, grown: true, rng: rng)
+                        if !mayStand(x, y, screen: ri) { continue }
+                        var cand = make(kind, x: x, y: y, grown: true, rng: rng)
+                        cand.screen = ri
                         if !overlapsAny(cand) { all.append(cand); break }
                     }
                 }
@@ -332,10 +362,11 @@ public final class Flowers {
 
     // ── stepping ──
 
-    /// One fixed step of every flower (`stepFlowers`, html:948–968): lift, fade, growth, the visited dim and the
-    /// head's spring in the wind at its centre. Faded flowers go (their ids are never reused).
-    public func step(_ dt: Double) {
-        guard dt.isFinite && dt > 0 else { return }
+    /// One fixed step of every flower (`stepFlowers`, html:956–976): lift, fade, growth, the visited dim and the
+    /// head's spring in the wind at its centre. Faded flowers go (their ids are never reused). Only a step of exactly
+    /// `OceanClock.step` is taken; any other is refused.
+    public func step(_ dt: Double = OceanClock.step) {
+        guard dt == OceanClock.step else { return }
         typealias F = MeadowTuning.Flowers
         var gone = false
         let liftK: Double = min(1, dt * F.liftRate)
@@ -375,7 +406,7 @@ public final class Flowers {
 
     // ── what the butterflies do to them (the world calls these) ──
 
-    /// `nodFlower` (html:1514–1518): an impulse to the head along (dx, dy), peaking near 0.12 R × size × k. A
+    /// `nodFlower` (html:1532–1536): an impulse to the head along (dx, dy), peaking near 0.12 R × size × k. A
     /// landing nods with k 1 along the butterfly's way, a take-off with k 0.5 back.
     public func nod(id: Int, dx: Double, dy: Double, size: Double, k: Double) {
         guard tuning.nod > 0, let i = index(of: id), dx.isFinite, dy.isFinite, size.isFinite, k.isFinite else { return }
@@ -384,7 +415,7 @@ public final class Flowers {
         all[i].vy += dy * v
     }
 
-    /// A butterfly fed on flower `id` and left: its disc dims for 20–40 s (one draw, html:1525).
+    /// A butterfly fed on flower `id` and left: its disc dims for 20–40 s (one draw, html:1543).
     public func visited(id: Int, rng: MeadowRandom) {
         guard let i = index(of: id) else { return }
         all[i].dimMax = rng.range(MeadowTuning.Flowers.dimLow, MeadowTuning.Flowers.dimHigh)
@@ -403,7 +434,7 @@ public final class Flowers {
 
     // ── clicks ──
 
-    /// `clickAt(x, y)`'s flower part (html:882–906): on or near a bloom (within about its drawn radius, from the head
+    /// `clickAt(x, y)`'s flower part (html:890–914): on or near a bloom (within about its drawn radius, from the head
     /// as it sways), touch the nearest; on open ground, a new bloom only where it has room by the planting rule,
     /// else touch the bloom in the way whose edge is nearest; then the click limit. Draws from `rng` (the input
     /// stream) in the sketch's order. A click off the meadow does nothing. Answering a fresh bloom with a butterfly
@@ -424,7 +455,8 @@ public final class Flowers {
         }
         if hit >= 0 { return touch(index: hit, x: x, y: y, rng: rng) }
         let kind = pickKind(rng)
-        let f = make(kind, x: x, y: y, grown: false, rng: rng)
+        var f = make(kind, x: x, y: y, grown: false, rng: rng)
+        f.screen = screen(at: x, y) ?? 0
         var block = -1
         var bd = 1e9
         for i in all.indices where !all[i].fading {
@@ -439,15 +471,15 @@ public final class Flowers {
         all.append(f)
         for _ in 0..<C.bloomSparks {
             let a = rng.range(0, TAU)
-            let v: Double = rng.range(20, 70) * unit
-            let life = rng.range(1.2, 2.2)
-            addSpark(PollenSpark(x: x, y: y, vx: cos(a) * v, vy: sin(a) * v, life: life, max: 2.2))
+            let v: Double = rng.range(C.bloomSpeedLow, C.bloomSpeedHigh) * unit
+            let life = rng.range(C.bloomLifeLow, C.bloomLifeHigh)
+            addSpark(PollenSpark(x: x, y: y, vx: cos(a) * v, vy: sin(a) * v, life: life, max: C.bloomLifeHigh))
         }
         limitClicked()
         return .bloomed(id: f.id, sparks: C.bloomSparks)
     }
 
-    /// `touchFlower` (html:917–931): the head nods away from the click on its spring (less if already swung far),
+    /// `touchFlower` (html:925–939): the head nods away from the click on its spring (less if already swung far),
     /// a small puff of pollen, and a butterfly feeding on it takes off (`onTouched`).
     private func touch(index i: Int, x: Double, y: Double, rng: MeadowRandom) -> FlowerClick {
         typealias C = MeadowTuning.Clicks
@@ -475,15 +507,15 @@ public final class Flowers {
         let n = now - all[i].touchedAt < C.puffWithin ? C.puffAgain : C.puff
         all[i].touchedAt = now
         let R = all[i].radius
+        let push: Double = C.puffPush * unit
         for _ in 0..<n {
             let a = rng.range(0, TAU)
-            let v: Double = rng.range(15, 45) * unit
-            let r: Double = rng.range(0, 0.3) * R
-            let life = rng.range(0.7, 1.4)
-            let push: Double = 20 * unit
+            let v: Double = rng.range(C.puffSpeedLow, C.puffSpeedHigh) * unit
+            let r: Double = rng.range(0, C.puffFrom) * R
+            let life = rng.range(C.puffLifeLow, C.puffLifeHigh)
             let sx: Double = cos(a) * v + dx * push
             let sy: Double = sin(a) * v + dy * push
-            addSpark(PollenSpark(x: hx + cos(a) * r, y: hy + sin(a) * r, vx: sx, vy: sy, life: life, max: 1.4))
+            addSpark(PollenSpark(x: hx + cos(a) * r, y: hy + sin(a) * r, vx: sx, vy: sy, life: life, max: C.puffLifeHigh))
         }
         let id = all[i].id
         onTouched?(id, x, y)
@@ -507,7 +539,7 @@ public final class Flowers {
         return n
     }
 
-    /// `limitClicked` (html:933–936): beyond the limit, the oldest clicked flowers close and fade.
+    /// `limitClicked` (html:941–944): beyond the limit, the oldest clicked flowers close and fade.
     public func limitClicked() {
         var open = clickedOpen
         while open > tuning.clickLimit {
@@ -521,7 +553,7 @@ public final class Flowers {
         }
     }
 
-    /// `fadeFlower` (html:937–941): it closes and fades over 2 s; every butterfly bound for or on it leaves it.
+    /// `fadeFlower` (html:945–949): it closes and fades over 2 s; every butterfly bound for or on it leaves it.
     private func close(index i: Int) {
         all[i].fading = true
         all[i].fade = 1
@@ -532,39 +564,58 @@ public final class Flowers {
 
     // ── relayout and replant ──
 
-    /// The screens changed (the sketch's `resize`, html:2881–2886, with the port's rules). Any clicked flower the new
-    /// screens leave off the meadow closes and fades, at any size of change (the re-check's finding 4); a planted
-    /// one whose centre may no longer stand there (off the screens or in a gap) fades too. If any screen changed by
-    /// more than 80 pt (or screens came or went), the meadow is replanted (`replant(false)`); a cell size change
-    /// rescales the clicked flowers then. Draws from `rng` (the input stream, as the sketch's resize).
+    /// The screens or the cell changed (the sketch's `resize`, html:3076–3082, with the port's rules,
+    /// `MeadowTuning.Relayout`). Lays the breeze out again (the sketch's `pfInit`). At any size of change, a flower
+    /// the change leaves off the screens closes and fades over 2 s (`onClosing`): a clicked one whose centre is off
+    /// the screens, a planted one that stood on a screen and no longer does, and any that may no longer stand where it
+    /// is. If a screen moved or changed size by more than 80 pt, screens came or went, or the cell size changed, the
+    /// meadow is replanted (`replant(false)`, which resizes the clicked flowers to the new cell and keeps every fading
+    /// one until its fade ends). Draws from `rng` (the input stream, as the sketch's resize).
     public func relayout(terrain new: Terrain, cell: CGSize, rng: MeadowRandom) {
         let old = terrain
+        let oldCell = cw
         terrain = new
         self.cell = cell
-        var big = old.rects.count != new.rects.count
+        breeze.layout(terrain: new, cell: cell)
+        var big = old.rects.count != new.rects.count || cw != oldCell
         if !big {
+            let lim = MeadowTuning.Relayout.replantBeyond
             for (a, b) in zip(old.rects, new.rects) {
-                let lim = MeadowTuning.Relayout.replantBeyond
-                if abs(Double(a.width - b.width)) > lim || abs(Double(a.height - b.height)) > lim
-                    || abs(Double(a.minX - b.minX)) > lim || abs(Double(a.minY - b.minY)) > lim { big = true; break }
+                let dw: Double = abs(Double(a.width - b.width))
+                let dh: Double = abs(Double(a.height - b.height))
+                let dx: Double = abs(Double(a.minX - b.minX))
+                let dy: Double = abs(Double(a.minY - b.minY))
+                if dw > lim || dh > lim || dx > lim || dy > lim { big = true; break }
             }
         }
+        let count = terrain.rects.count
         for i in all.indices where !all[i].fading {
             let f = all[i]
-            if !mayStand(f.x, f.y) || (f.clicked && !terrain.contains(SIMD2(f.x, f.y))) { close(index: i) }
+            let p = SIMD2(f.x, f.y)
+            let onNow = terrain.contains(p)
+            let displaced = old.contains(p) && !onNow
+            // Judged by the screen that holds it now, else the one it was planted for (screens may come, go or reorder).
+            let k = screen(at: f.x, f.y) ?? f.screen
+            let stands = k >= 0 && k < count ? mayStand(f.x, f.y, screen: k) : mayStand(f.x, f.y)
+            if displaced || (f.clicked && !onNow) || (!f.clicked && !stands) { close(index: i) }
+        }
+        // The screen each flower is on now (screens may have come, gone or moved).
+        for i in all.indices {
+            if let k = screen(at: all[i].x, all[i].y) { all[i].screen = k }
         }
         if big { replant(fresh: false, rng: rng) }
     }
 
-    /// `replant(fresh)` (html:855–871), the one replant transition: keeps the flowers you clicked (none when
-    /// `fresh`) that are still on the meadow, at the current flower size (a clicked one off it is already fading,
-    /// and finishes); of two now overlapping, the newer closes and fades; plants the rest; applies the click limit;
-    /// then `onReplanted`, so butterflies whose flower has gone leave it.
+    /// `replant(fresh)` (html:863–879), the one replant transition: keeps the flowers you clicked (none when
+    /// `fresh`) that are still on the meadow, at the current flower size and cell; of two now overlapping, the newer
+    /// closes and fades; plants the rest; applies the click limit; then `onReplanted`, so butterflies whose flower has
+    /// gone leave it. The port keeps every fading flower (clicked or planted) until its fade ends, where the sketch
+    /// drops the planted ones and any clicked one off the window at once.
     public func replant(fresh: Bool, rng: MeadowRandom) {
         if fresh {
             all.removeAll()
         } else {
-            all.removeAll { f in !(f.clicked && (f.fading || terrain.contains(SIMD2(f.x, f.y)))) }
+            all.removeAll { f in !(f.fading || (f.clicked && terrain.contains(SIMD2(f.x, f.y)))) }
         }
         for i in all.indices { resize(index: i) }
         var mine: [Int] = all.indices.filter { !all[$0].fading }
@@ -589,7 +640,7 @@ public final class Flowers {
         onReplanted?()
     }
 
-    /// `sizeFlower` (html:845–852): a clicked flower follows the flower size and the cell, scaled from the size it was
+    /// `sizeFlower` (html:853–860): a clicked flower follows the flower size and the cell, scaled from the size it was
     /// made at.
     private func resize(index i: Int) {
         let now: Double = tuning.flowerSize * unit

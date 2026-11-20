@@ -1,13 +1,13 @@
 import Foundation
 
 // The Meadow sketch's own numbers, ported exactly so a seed gives the same draws, hashes and noise as the sketch
-// (Tools/meadow-sketch/meadow.html on meadow-sketch, "Basics", html:140–177). `html:N` below is a line of that file
-// at f20b833.
+// (Tools/meadow-sketch/meadow.html on meadow-sketch, "Basics", html:140–182). `html:N` below is a line of that file
+// at 4e1b869.
 //
 // These differ from Web's on purpose: Web's `hash3` and `WebRandom` are ports of a different original and give other
 // numbers (port inventory §4 item 6). Only `clamp`, `lerp` and `smoothstep` are shared, being the same functions.
 
-/// The sketch's seeded generator, Mulberry32 (html:148–151): one 32-bit state, the same sequence as the sketch's
+/// The sketch's seeded generator, Mulberry32 (html:153–156): one 32-bit state, the same sequence as the sketch's
 /// `mulberry32(a)` in every engine.
 public struct Mulberry32: Sendable {
     public private(set) var state: UInt32
@@ -26,9 +26,9 @@ public struct Mulberry32: Sendable {
     }
 }
 
-/// One of the sketch's random streams with its helpers (`R`, `RI`, `gauss`, `shuffle`, html:158–162).
+/// One of the sketch's random streams with its helpers (`R`, `RI`, `gauss`, `shuffle`, html:163–167).
 ///
-/// The sketch keeps two streams from the one seed (html:152–157): the meadow's own (planting, flight, the opening)
+/// The sketch keeps two streams from the one seed (html:157–162): the meadow's own (planting, flight, the opening)
 /// and the input's (clicks, resizing, pointer moves), so a click never shifts the meadow's draws. `MeadowRandom.pair`
 /// makes both. A class, so every part of the meadow that draws from one stream shares it, as the sketch's `rnd` is
 /// shared.
@@ -73,7 +73,7 @@ public final class MeadowRandom {
         return sqrt(-2 * log(a)) * cos(TAU * b)
     }
 
-    /// `shuffle(a)`: the sketch's seeded Fisher–Yates, in place (html:162).
+    /// `shuffle(a)`: the sketch's seeded Fisher–Yates, in place (html:167).
     public func shuffle<T>(_ a: inout [T]) {
         var i = a.count - 1
         while i > 0 {
@@ -84,7 +84,7 @@ public final class MeadowRandom {
     }
 }
 
-/// The sketch's hashes and noise (html:164–177).
+/// The sketch's hashes and noise (html:169–182).
 public enum MeadowMath {
     /// `hash3(x, y, z)`: a stable hash of three integers (each read as `| 0`) to [0, 1).
     public static func hash3(_ x: Double, _ y: Double, _ z: Double) -> Double {
@@ -98,7 +98,7 @@ public enum MeadowMath {
         return Double(h) / 4_294_967_296
     }
 
-    /// `keyOf(x, y, s)`: the hash as a 32-bit key (html:603).
+    /// `keyOf(x, y, s)`: the hash as a 32-bit key (html:611).
     public static func key(_ x: Double, _ y: Double, _ s: Double) -> UInt32 {
         UInt32(hash3(x, y, s) * 4_294_967_296)
     }
@@ -128,7 +128,7 @@ public enum MeadowMath {
         smoothstep(a, b, x)
     }
 
-    /// `easeOutBack(t)` with the sketch's overshoot c1 = 1.4 (html:1274): a bloom's growth.
+    /// `easeOutBack(t)` with the sketch's overshoot c1 = 1.4 (html:1282): a bloom's growth.
     public static func easeOutBack(_ t: Double) -> Double {
         let c1 = MeadowTuning.Flowers.growOvershoot
         let c3: Double = c1 + 1

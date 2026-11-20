@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// The air at one point, in pt/s (ocean space, y down): the sketch's three sums (html:711–712).
+/// The air at one point, in pt/s (ocean space, y down): the sketch's three sums (html:719–720).
 public struct MeadowAir: Equatable, Sendable {
     /// All the air: what grass, flowers, pollen and a flying butterfly's drift feel (`wind.x/y`).
     public var x = 0.0
@@ -21,30 +21,55 @@ public struct MeadowAir: Equatable, Sendable {
     public init() {}
 }
 
-/// The meadow's air, ported from the sketch's breeze (html:705–756, 1607–1615, 1969–1978): a slowly turning wind with
-/// gust bands that roll downwind, plus two fields on a coarse grid, the air the pointer stirs and the wings'
-/// downwash, both decaying with a half-life of about 0.43 s.
+/// How the pointer's path becomes stir.
+public enum PointerPlayback: Equatable, Sendable {
+    /// The sketch's `stirStep` exactly (html:1987–1996): each step stirs from where the pointer was at the last step
+    /// to where it is now, whatever the events' times. Only the replays of the sketch run it.
+    case sketch
+    /// The port's rule (`MeadowTuning.Stir`): the path is played back from the events' own times and places, `lag`
+    /// seconds behind them; a step whose place on the path isn't known yet waits, and is stirred when its samples
+    /// arrive, as it would have been (see `Breeze.pointerMoved(x:y:at:)`).
+    case played(lag: Double)
+}
+
+/// The meadow's air, ported from the sketch's breeze (html:713–764, 1625–1633, 1987–1996): a slowly
+/// turning wind with gust bands that roll downwind, plus two fields on a coarse grid, the air the pointer stirs and
+/// the wings' downwash, both decaying with a half-life of about 0.43 s.
 ///
-/// Stepped at the family's fixed 1/60 s (`OceanClock`), never at a frame's time. The pointer is read once a step, as
-/// Web does: `pointerMoved` only records where the pointer was and when; `step` stirs along the way it went since the
-/// last step (see `MeadowTuning.Stir.pathLag`). Nothing allocates per step once laid out.
+/// Stepped at the family's fixed tick only (`OceanClock.step`, 1/60 s); any other step length is refused. The
+/// pointer is read once a step: `pointerMoved` only records where the pointer was and when; `step` stirs along the
+/// way it went (see `PointerPlayback`). Nothing allocates per step once laid out.
+///
+/// **The host's input contract (m7).** For every pointer event over the meadow, in the order they happened, the host
+/// calls `pointerMoved(x:y:hostTime:)` with the event's own position (ocean space) and its own timestamp
+/// (`NSEvent.timestamp`, seconds on the system's uptime clock, the clock `CACurrentMediaTime` and the display link
+/// use), never the time it was delivered; `pointerLeft()` when the pointer leaves the meadow. Once a frame, after the
+/// frame's steps, it calls `syncInputClock(hostTime:speed:)` with the frame's timestamp and speed (the ones
+/// `OceanClock.advance` got), so the breeze can place those timestamps on its own input clock across frame batches,
+/// stalls and speed changes. The steps are `step(_:speed:)` at that same speed.
+/// Events may arrive late, in pairs or in bursts (a frame's worth together): each is played back at its own time.
+/// A host that keeps its own input clock may call `pointerMoved(x:y:at:)` instead.
 public final class Breeze {
-    /// The director's settings (the breeze and downwash sliders are read).
-    public var tuning: MeadowTuning
+    /// The director's settings (the breeze and downwash sliders are read). Put right on every write (finite and
+    /// inside each slider's range).
+    public var tuning: MeadowTuning {
+        didSet { tuning = tuning.sanitized() }
+    }
     /// Seconds of simulation stepped (the sketch's `simT`).
     public private(set) var time = 0.0
+    /// Steps taken.
+    public private(set) var steps = 0
     /// The wind's direction (unit) and base speed this step (`wind.cx/cy`, `wind.base`).
     public private(set) var directionX = 1.0
     public private(set) var directionY = 0.0
     public private(set) var base = 0.0
-    /// `S`: sketch points per point (cell width / 13).
+    /// `S`: sketch points per point (cell width / 13, the width held to `MeadowTuning.Unit.cellRange`).
     public private(set) var unit = 1.0
-    /// The pointer's own time: seconds stepped at the pointer's pace (`dt / speed` a step). `pointerMoved(at:)`
+    /// The pointer's own time: real seconds, as stepped (`OceanClock.step / pace` a step). `pointerMoved(at:)`
     /// takes its times on this clock.
     public private(set) var inputClock = 0.0
-    /// How far behind the pointer the stir point plays its path back, s (the port's rule, `Stir.pathLag`). The
-    /// replay of the sketch's fixture sets 0: the sketch's own per-step difference.
-    public private(set) var pathLag = MeadowTuning.Stir.pathLag
+    /// How the pointer's path is stirred (the port's rule unless a replay of the sketch asks for the sketch's).
+    public private(set) var playback: PointerPlayback = .played(lag: MeadowTuning.Stir.pathLag)
 
     // The grid: `PG`, its origin (the terrain's top-left) and size; the two fields, stored as Float as the sketch's
     // Float32Arrays are, so a replay rounds the same way.
@@ -55,18 +80,38 @@ public final class Breeze {
     private var pfx: [Float] = [], pfy: [Float] = []
     private var dwx: [Float] = [], dwy: [Float] = []
 
-    // The pointer: its path as reported (a ring of timed samples, oldest first from `pathStart`), whether it is
-    // over the meadow (or still playing out the way it went before it left), and the stir point after the last step
-    // (the sketch's `ptr.sx/sy`).
+    // The pointer's path as reported: a ring of samples (time on the input clock, place, and whether the pointer
+    // came onto the meadow there, so nothing is stirred along the way into it), oldest first from `pathStart`. The
+    // first sample is the one the stir point is on or past.
     private static let pathCapacity = 256
     private var pathT = [Double](repeating: 0, count: Breeze.pathCapacity)
     private var pathX = [Double](repeating: 0, count: Breeze.pathCapacity)
     private var pathY = [Double](repeating: 0, count: Breeze.pathCapacity)
+    private var pathEntry = [Bool](repeating: false, count: Breeze.pathCapacity)
     private var pathStart = 0, pathCount = 0
+    // The steps whose place on the path isn't known yet (no sample at or after it has arrived): the path time each
+    // is to reach, its real length, and which step it was. Played, oldest first, once their samples arrive.
+    private static let pendingCapacity = Int(MeadowTuning.Stir.waitSteps)
+    private var pendT = [Double](repeating: 0, count: Breeze.pendingCapacity)
+    private var pendReal = [Double](repeating: 0, count: Breeze.pendingCapacity)
+    private var pendStep = [Int](repeating: 0, count: Breeze.pendingCapacity)
+    private var pendStart = 0, pendCount = 0
     /// The pointer is over the meadow.
     public private(set) var pointerActive = false
     private var playing = false              // the stir point is following a path (also just after the pointer left)
-    private var headX = 0.0, headY = 0.0
+    private var headX = 0.0, headY = 0.0     // the stir point (the sketch's `ptr.sx/sy`)
+    private var headT = 0.0                  // the path time it has reached
+    // The host's clock: the last frame's host time, the family clock's simulation time accumulated but not yet stepped
+    // then (mirrored), the speed it ran at, and the steps taken by then.
+    private var hostLast: Double? = nil
+    private var hostAcc = 0.0
+    private var hostPace = 1.0
+    private var hostSteps = 0
+    // The last frames' anchors: each frame's host time and its moment on the input clock, newest at `anchorEnd − 1`.
+    private static let anchorCapacity = 32
+    private var anchorHost = [Double](repeating: 0, count: Breeze.anchorCapacity)
+    private var anchorInput = [Double](repeating: 0, count: Breeze.anchorCapacity)
+    private var anchorEnd = 0, anchorCount = 0
 
     public init(terrain: Terrain, cell: CGSize, tuning: MeadowTuning = .director) {
         self.tuning = tuning.sanitized()
@@ -75,10 +120,9 @@ public final class Breeze {
 
     /// The grid laid over the terrain's bounds at this cell size (the sketch's `pfInit`, on every resize): both
     /// fields start still. A broken size gives a one-sample grid; a huge one widens the spacing (never more than
-    /// `Stir.maxSamples` samples).
+    /// `Stir.maxSamples` samples). The cell width is held to `Unit.cellRange` (13 when it isn't a number).
     public func layout(terrain: Terrain, cell: CGSize) {
-        let cw = Double(cell.width)
-        unit = cw.isFinite && cw > 0 ? min(cw, 1000) / MeadowTuning.Unit.referenceCell : 1
+        unit = MeadowTuning.Unit.cellWidth(Double(cell.width)) / MeadowTuning.Unit.referenceCell
         let b = terrain.bounds
         let bx = Double(b.minX), by = Double(b.minY), bw = Double(b.width), bh = Double(b.height)
         originX = bx.isFinite ? bx : 0
@@ -86,7 +130,7 @@ public final class Breeze {
         let W = bw.isFinite ? max(0, bw) : 0
         let H = bh.isFinite ? max(0, bh) : 0
         var pg: Double = MeadowTuning.Stir.grid * unit
-        // pgc = ceil(W / PG) + 1, pgr = ceil(H / PG) + 1 (html:715), widened past the cap.
+        // pgc = ceil(W / PG) + 1, pgr = ceil(H / PG) + 1 (html:723), widened past the cap.
         func cells(_ pg: Double) -> (Int, Int) {
             let c: Double = min(1e9, ceil(W / pg) + 1)
             let r: Double = min(1e9, ceil(H / pg) + 1)
@@ -94,7 +138,7 @@ public final class Breeze {
         }
         var (c, r) = cells(pg)
         while c * r > MeadowTuning.Stir.maxSamples {
-            pg *= 2
+            pg = pg > 0 && pg.isFinite ? pg * 2 : 1   // never stuck: a spacing of 0 (a unit gone to 0) starts at 1
             (c, r) = cells(pg)
         }
         spacing = pg
@@ -107,78 +151,160 @@ public final class Breeze {
         dwy = pfx
     }
 
-    /// How far behind the pointer the stir point follows, s (0…1; 0 is the sketch's own rule).
-    public func setPathLag(_ seconds: Double) {
-        pathLag = seconds.isFinite ? min(1, max(0, seconds)) : MeadowTuning.Stir.pathLag
+    /// How the pointer's path is stirred. A `played` lag is held to 0…`Stir.lagLimit` (the default when it isn't a
+    /// number). Changing it forgets the path played so far.
+    public func setPlayback(_ p: PointerPlayback) {
+        switch p {
+        case .sketch:
+            playback = .sketch
+        case .played(let lag):
+            let l: Double = lag.isFinite ? min(MeadowTuning.Stir.lagLimit, max(0, lag)) : MeadowTuning.Stir.pathLag
+            playback = .played(lag: l)
+        }
+        pathStart = 0
+        pathCount = 0
+        pendStart = 0
+        pendCount = 0
+        playing = false
+        pointerActive = false
+    }
+
+    private var lag: Double {
+        if case .played(let l) = playback { return l }
+        return 0
     }
 
     // ── the pointer ──
 
-    /// The pointer is at (x, y) over the meadow; it was there at `at`, on `inputClock` (nil: now, when it arrives).
-    /// Only recorded: the steps stir along the way it went. A host that knows when each event happened passes it, so
-    /// moves that arrive late or together are still played back at their own pace. Times never run backwards or
-    /// ahead of now; a non-finite point is ignored.
+    /// The pointer was at (x, y) over the meadow at `at`, a time on `inputClock` (nil: now, as it arrives). Only
+    /// recorded: the steps stir along the way it went, from these times. Times never run backwards (a sample older
+    /// than the last is taken as at the last's time) and never more than `Stir.aheadLimit` ahead of now; a
+    /// non-finite point is ignored. Coming onto the meadow (the first move, or the first after `pointerLeft`) starts
+    /// a new way there: nothing is stirred along the jump from where it left.
     public func pointerMoved(x: Double, y: Double, at: Double? = nil) {
         guard x.isFinite && y.isFinite else { return }
+        let px: Double = clamp(x, -MeadowTuning.Unit.coordinateLimit, MeadowTuning.Unit.coordinateLimit)
+        let py: Double = clamp(y, -MeadowTuning.Unit.coordinateLimit, MeadowTuning.Unit.coordinateLimit)
         var t = inputClock
-        if let a = at, a.isFinite { t = min(inputClock, a) }
-        if !pointerActive {
-            // Coming onto the meadow: its way starts here (the sketch's `ptr.sx = x` on entry, html:2672).
+        if let a = at, a.isFinite { t = min(inputClock + MeadowTuning.Stir.aheadLimit, a) }
+        let entering = !pointerActive
+        pointerActive = true
+        if case .sketch = playback {
+            // The sketch: `ptr.x/y` is the latest move; on entry the stir point starts there (html:2690).
+            if entering { headX = px; headY = py }
+            pathStart = 0
+            pathCount = 1
+            pathT[0] = t
+            pathX[0] = px
+            pathY[0] = py
+            playing = true
+            return
+        }
+        if entering && !playing {
+            // A fresh way: the stir point starts on its first sample. The recent steps due after it (its samples
+            // may arrive later than the lag) wait to be played; those due before it are dropped.
             pathStart = 0
             pathCount = 0
-            headX = x
-            headY = y
-            pointerActive = true
+            while pendCount > 0 && pendT[pendStart] < t {
+                pendStart = (pendStart + 1) % Breeze.pendingCapacity
+                pendCount -= 1
+            }
+            headX = px
+            headY = py
+            headT = t
         }
         playing = true
         if pathCount > 0 { t = max(t, pathT[(pathStart + pathCount - 1) % Breeze.pathCapacity]) }
         if pathCount == Breeze.pathCapacity {
+            // Full (a flood of events more than `pathCapacity` ahead of the stir point): the oldest unplayed sample
+            // is dropped.
             pathStart = (pathStart + 1) % Breeze.pathCapacity
             pathCount -= 1
         }
         let i = (pathStart + pathCount) % Breeze.pathCapacity
         pathT[i] = t
-        pathX[i] = x
-        pathY[i] = y
+        pathX[i] = px
+        pathY[i] = py
+        pathEntry[i] = entering && pathCount > 0
         pathCount += 1
     }
 
-    /// The pointer left the meadow: the way it went before it left still plays out, then it stirs nothing until it
-    /// comes back, and its way back starts where it enters.
-    public func pointerLeft() {
-        pointerActive = false
-        // With no lag, the sketch's rule: a pointer gone stirs nothing more (`if (!ptr.has) return`, html:1970).
-        if pathLag == 0 { playing = false }
+    /// `pointerMoved` with the event's own timestamp on the host's clock (`NSEvent.timestamp`), placed on the input
+    /// clock by the last `syncInputClock(hostTime:speed:)`. Before the first sync it is taken as now.
+    public func pointerMoved(x: Double, y: Double, hostTime: Double) {
+        guard hostTime.isFinite, anchorCount > 0 else { pointerMoved(x: x, y: y); return }
+        // Placed through the frame it happened in (the latest at or before it), so an event delivered a frame or a
+        // speed change later lands where it happened.
+        let cap = Breeze.anchorCapacity
+        var k = (anchorEnd - 1 + cap) % cap
+        for _ in 1..<anchorCount {
+            if anchorHost[k] <= hostTime { break }
+            k = (k - 1 + cap) % cap
+        }
+        pointerMoved(x: x, y: y, at: anchorInput[k] + (hostTime - anchorHost[k]))
     }
 
-    /// Where the pointer's path was at time `t`: between the samples either side, else the nearest end. Drops the
-    /// samples the stir point has passed.
-    private func pathPoint(_ t: Double) -> (Double, Double) {
-        let cap = Breeze.pathCapacity
-        while pathCount > 1 && pathT[(pathStart + 1) % cap] <= t {
-            pathStart = (pathStart + 1) % cap
-            pathCount -= 1
+    /// Ties the input clock to the host's: once a frame, after that frame's steps, with the frame's timestamp and the
+    /// speed `OceanClock.advance` got. The frame's moment on the input clock is the input clock plus what the family
+    /// clock has accumulated but not yet stepped (`acc / speed`, under a step); the breeze keeps that remainder as
+    /// `OceanClock` does (each frame adds its real time, held to `Stir.frameLimit`, times the speed; each step takes
+    /// `OceanClock.step`; a frame at the step cap drops the rest), held to 0…one step. An event's host time then lands
+    /// on the input clock where it happened between the steps, at any frame rate, steady or uneven.
+    public func syncInputClock(hostTime: Double, speed: Double = 1) {
+        guard hostTime.isFinite else { return }
+        let n = steps - hostSteps
+        hostSteps = steps
+        hostPace = MeadowTuning.Unit.pace(speed)
+        if let last = hostLast {
+            if hostTime > last {
+                hostAcc += min(MeadowTuning.Stir.frameLimit, hostTime - last) * hostPace
+                hostLast = hostTime
+            }
+            hostAcc -= Double(n) * OceanClock.step
+            if n >= OceanClock.maxSteps { hostAcc = 0 }
+        } else {
+            hostLast = hostTime
+            hostAcc = 0
         }
-        let a = pathStart
-        if pathCount == 1 || t <= pathT[a] { return (pathX[a], pathY[a]) }
-        let b = (a + 1) % cap
-        let span: Double = pathT[b] - pathT[a]
-        let f: Double = span > 0 ? (t - pathT[a]) / span : 1
-        return (pathX[a] + (pathX[b] - pathX[a]) * f, pathY[a] + (pathY[b] - pathY[a]) * f)
+        hostAcc = min(OceanClock.step, max(0, hostAcc))
+        guard let last = hostLast else { return }
+        let cap = Breeze.anchorCapacity
+        let newest = (anchorEnd - 1 + cap) % cap
+        let moment: Double = inputClock + hostAcc / hostPace
+        if anchorCount > 0 && anchorHost[newest] == last {
+            anchorInput[newest] = moment
+        } else {
+            anchorHost[anchorEnd] = last
+            anchorInput[anchorEnd] = moment
+            anchorEnd = (anchorEnd + 1) % cap
+            anchorCount = min(cap, anchorCount + 1)
+        }
+    }
+
+    /// The pointer left the meadow: the way it went before it left still plays out, then it stirs nothing until it
+    /// comes back, and its way back starts where it enters (nothing is stirred along the jump).
+    public func pointerLeft() {
+        pointerActive = false
+        // The sketch: a pointer gone stirs nothing more (`if (!ptr.has) return`, html:1988).
+        if case .sketch = playback { playing = false }
     }
 
     // ── stepping ──
 
-    /// One fixed step: the wind turns and the fields decay (`updateWind`), then the pointer stirs along its way
-    /// (`stirStep`). `speed` is the app's speed setting (the sketch's time scale): a step is `dt / speed` of the
-    /// pointer's own time.
-    public func step(_ dt: Double, speed: Double = 1) {
-        guard dt.isFinite && dt > 0 else { return }
+    /// One step of exactly `OceanClock.step` (any other length is refused): the wind turns and the fields decay
+    /// (`updateWind`), then the pointer stirs along its way (`stirStep`). `speed` is the app's speed setting (the
+    /// sketch's Slow motion, held to `Unit.paceRange`): a step is `OceanClock.step / speed` of the pointer's real time.
+    public func step(_ dt: Double = OceanClock.step, speed: Double = 1) {
+        guard dt == OceanClock.step else { return }
+        let pace: Double = MeadowTuning.Unit.pace(speed)
         time += dt
-        let pace: Double = speed.isFinite && speed > 0 ? speed : 1
+        steps += 1
         inputClock += dt / pace
         updateWind(dt)
-        stirStep(dt, speed: pace)
+        switch playback {
+        case .sketch: sketchStir(dt, real: dt / pace)
+        case .played(let l): playStir(dt, real: dt / pace, lag: l)
+        }
     }
 
     private func updateWind(_ dt: Double) {
@@ -198,40 +324,132 @@ public final class Breeze {
         }
     }
 
-    /// The sketch's `stirStep` (html:1969–1978), fed by the port's played-back stir point: the stir point moves from
-    /// where it was after the last step to where the pointer's path was `pathLag` ago, and the air is stirred along
-    /// that way at the speed the pointer went, one stir per grid spacing of the way. With no lag it is the sketch's
-    /// rule exactly: from where the pointer was at the last step to where it is now.
-    private func stirStep(_ dt: Double, speed: Double) {
+    /// The sketch's `stirStep` (html:1987–1996): from where the pointer was at the last step to where it is now.
+    private func sketchStir(_ dt: Double, real: Double) {
         guard playing && pathCount > 0 else { return }
-        let (sx, sy) = pathPoint(inputClock - pathLag)
-        // Past the last sample after the pointer left: the way is played out.
-        if !pointerActive && pathCount == 1 && inputClock - pathLag >= pathT[pathStart] { playing = false }
-        let dx: Double = sx - headX
-        let dy: Double = sy - headY
-        headX = sx
-        headY = sy
+        let x = pathX[pathStart], y = pathY[pathStart]
+        stirWay(fromX: headX, fromY: headY, toX: x, toY: y, dt: dt, real: real, weight: 1)
+        headX = x
+        headY = y
+    }
+
+    /// The sketch's stroke along one way (html:1990–1995): at the speed the pointer went (each axis held to ±1500
+    /// pt/s), an impulse of 60 · dt × that speed, split into one stir per grid spacing of the way. `weight` scales the
+    /// impulse (a late step's decay since it was due).
+    private func stirWay(fromX: Double, fromY: Double, toX: Double, toY: Double, dt: Double, real: Double,
+                         weight: Double) {
+        let dx: Double = toX - fromX
+        let dy: Double = toY - fromY
         if dx == 0 && dy == 0 { return }
         typealias St = MeadowTuning.Stir
-        let real: Double = dt / speed
-        let k: Double = St.impulseRate * dt
+        let k: Double = St.impulseRate * dt * weight
         let vx: Double = clamp(dx / real, -St.speedLimit, St.speedLimit) * k
         let vy: Double = clamp(dy / real, -St.speedLimit, St.speedLimit) * k
         let way: Double = (dx * dx + dy * dy).squareRoot() / spacing
-        let n = Int(max(1, min(100_000, ceil(way))))
+        let n = Int(max(1, min(St.maxStirs, ceil(way))))
         let nd = Double(n)
         for i in 1...n {
             let back: Double = Double(n - i) / nd
-            stir(sx - dx * back, sy - dy * back, vx / nd, vy / nd)
+            stir(toX - dx * back, toY - dy * back, vx / nd, vy / nd)
         }
     }
+
+    /// The port's playback: this step is due at path time `inputClock − lag`. Each step waiting (this one and any
+    /// before it whose samples hadn't arrived) is played as soon as its place on the path is known, oldest first,
+    /// stirring the way from the stir point to it as that step would have, its impulse decayed by the steps since it
+    /// was due. Its place is known once a sample at or after its time has arrived, or once the pointer has left (the
+    /// way ended at the last sample). A step that waits longer than `Stir.waitSteps` is played as if the pointer had
+    /// stopped at the last sample.
+    private func playStir(_ dt: Double, real: Double, lag: Double) {
+        // Every step is remembered (the last `waitSteps`), playing or not, so a way whose first samples arrive later
+        // than the lag still plays the steps due after its start.
+        let cap = Breeze.pendingCapacity
+        let live = playing && pathCount > 0
+        if pendCount == cap {
+            if live {
+                playPending(dt, force: true)
+            } else {
+                pendStart = (pendStart + 1) % cap
+                pendCount -= 1
+            }
+        }
+        let j = (pendStart + pendCount) % cap
+        pendT[j] = inputClock - lag
+        pendReal[j] = real
+        pendStep[j] = steps
+        pendCount += 1
+        guard live else { return }
+        while pendCount > 0 && playPending(dt, force: !pointerActive) {}
+        // Past the last sample after the pointer left: the way is played out (and the queue empty).
+        if !pointerActive && pendCount == 0 && pathCount == 1 && headT >= pathT[pathStart] { playing = false }
+    }
+
+    /// Plays the oldest waiting step if its place is known (or `force`); false if it must wait.
+    @discardableResult
+    private func playPending(_ dt: Double, force: Bool) -> Bool {
+        let cap = Breeze.pendingCapacity
+        let tau = pendT[pendStart]
+        let newest: Double = pathT[(pathStart + pathCount - 1) % Breeze.pathCapacity]
+        if !force && tau > newest { return false }
+        let real = pendReal[pendStart]
+        let late = Double(steps - pendStep[pendStart])
+        let weight: Double = late > 0 ? exp(-MeadowTuning.Stir.decay * dt * late) : 1
+        pendStart = (pendStart + 1) % cap
+        pendCount -= 1
+        advanceHead(to: max(tau, headT), dt: dt, real: real, weight: weight)
+        return true
+    }
+
+    /// Moves the stir point along the path to time `tau`, stirring the way it goes (straight, as the sketch's one
+    /// stroke a step), except across a re-entry, where it jumps without stirring. Drops the samples it has passed.
+    private func advanceHead(to tau: Double, dt: Double, real: Double, weight: Double) {
+        let cap = Breeze.pathCapacity
+        var fromX = headX, fromY = headY
+        // Past each sample the time reaches: a re-entry ends the stroke there and starts the next at the entry.
+        while pathCount > 1 && pathT[(pathStart + 1) % cap] <= tau {
+            let b = (pathStart + 1) % cap
+            if pathEntry[b] {
+                let a = pathStart
+                stirWay(fromX: fromX, fromY: fromY, toX: pathX[a], toY: pathY[a], dt: dt, real: real, weight: weight)
+                fromX = pathX[b]
+                fromY = pathY[b]
+            }
+            pathStart = b
+            pathCount -= 1
+        }
+        let (x, y) = pathPoint(tau)
+        stirWay(fromX: fromX, fromY: fromY, toX: x, toY: y, dt: dt, real: real, weight: weight)
+        headX = x
+        headY = y
+        headT = tau
+    }
+
+    /// Where the path was at time `t`, on the segment from the first sample: between it and the next; at the first
+    /// before it is reached, and at the last past the end. Into a re-entry the pointer stays where it left until
+    /// the entry's time; a gap longer than `Stir.longestMove` is taken as the pointer resting, then moving over the
+    /// last `longestMove` of it.
+    private func pathPoint(_ t: Double) -> (Double, Double) {
+        let cap = Breeze.pathCapacity
+        let a = pathStart
+        if pathCount == 1 || t <= pathT[a] { return (pathX[a], pathY[a]) }
+        let b = (a + 1) % cap
+        if pathEntry[b] { return (pathX[a], pathY[a]) }
+        let start: Double = max(pathT[a], pathT[b] - MeadowTuning.Stir.longestMove)
+        if t <= start { return (pathX[a], pathY[a]) }
+        let span: Double = pathT[b] - start
+        let f: Double = span > 0 ? min(1, (t - start) / span) : 1
+        return (pathX[a] + (pathX[b] - pathX[a]) * f, pathY[a] + (pathY[b] - pathY[a]) * f)
+    }
+
+    /// Steps waiting for their samples (for checks).
+    public var waitingSteps: Int { pendCount }
 
     /// A grid index held to −1…count (the loops skip the samples outside), safe for any finite value.
     @inline(__always) private static func index(_ v: Double, _ count: Int) -> Int {
         Int(min(Double(count), max(-1, v)))
     }
 
-    /// `stir(x, y, vx, vy)` (html:747–756): adds the pointer's push within 3 grid cells, weight `(1 − d)² · 0.16`,
+    /// `stir(x, y, vx, vy)` (html:755–764): adds the pointer's push within 3 grid cells, weight `(1 − d)² · 0.16`,
     /// each sample clamped to ±260 pt/s.
     public func stir(_ x: Double, _ y: Double, _ vx: Double, _ vy: Double) {
         guard x.isFinite && y.isFinite && vx.isFinite && vy.isFinite, !pfx.isEmpty else { return }
@@ -257,14 +475,14 @@ public final class Breeze {
         }
     }
 
-    /// `wash(x, y, v, rad)` (html:1607–1615): pushes the air out from (x, y), `v` at the centre falling to 0 at
+    /// `wash(x, y, v, rad)` (html:1625–1633): pushes the air out from (x, y), `v` at the centre falling to 0 at
     /// `rad` pt, each sample clamped to ±200 pt/s.
     public func wash(_ x: Double, _ y: Double, _ v: Double, _ radius: Double) {
         guard x.isFinite && y.isFinite && v.isFinite && radius.isFinite && radius > 0, !dwx.isEmpty else { return }
         let lim = MeadowTuning.Stir.washLimit
         let cx: Double = (x - originX) / spacing
         let cy: Double = (y - originY) / spacing
-        let rr: Double = min(radius / spacing, 1e4)
+        let rr: Double = min(radius / spacing, MeadowTuning.Stir.washReach)
         let r0 = Breeze.index(floor(cy - rr), rows), r1 = Breeze.index(ceil(cy + rr), rows)
         let c0 = Breeze.index(floor(cx - rr), columns), c1 = Breeze.index(ceil(cx + rr), columns)
         guard r0 <= r1 && c0 <= c1 else { return }
@@ -283,37 +501,47 @@ public final class Breeze {
         }
     }
 
-    /// A flying butterfly's downstroke (html:1752): at height z under 0.35, while the stroke's `sinθ` is positive,
+    /// A flying butterfly's downstroke (html:1770): at height z under 0.35, while the stroke's `sinθ` is positive,
     /// it washes `520 · S · downwash · (1 − z / 0.35) · sinθ · dt` out within 1.2 of its span (`spanRef`, pt).
-    /// Nothing at z ≥ 0.35 or on the upstroke.
-    public func downstroke(x: Double, y: Double, z: Double, sinStroke s: Double, span: Double, dt: Double) {
+    /// Nothing at z ≥ 0.35 or on the upstroke. `dt` is the tick (`OceanClock.step`); any other is refused.
+    public func downstroke(x: Double, y: Double, z: Double, sinStroke s: Double, span: Double,
+                           dt: Double = OceanClock.step) {
         typealias St = MeadowTuning.Stir
-        guard z.isFinite && s.isFinite && s > 0 && z < St.washBelow && tuning.downwash > 0 else { return }
+        guard dt == OceanClock.step, z.isFinite && s.isFinite && s > 0 && z < St.washBelow && tuning.downwash > 0
+        else { return }
         let v: Double = St.washFlight * unit * tuning.downwash * (1 - max(0, z) / St.washBelow) * s * dt
         wash(x, y, v, St.washFlightRadius * span)
     }
 
-    /// A swallowtail fluttering on a flower (html:1882): `300 · S · downwash · sinθ · dt` within one span.
-    public func flutter(x: Double, y: Double, sinStroke s: Double, span: Double, dt: Double) {
+    /// A swallowtail fluttering on a flower (html:1900): `300 · S · downwash · sinθ · dt` within one span. `dt` is
+    /// the tick; any other is refused.
+    public func flutter(x: Double, y: Double, sinStroke s: Double, span: Double, dt: Double = OceanClock.step) {
         typealias St = MeadowTuning.Stir
-        guard s.isFinite && s > 0 && tuning.downwash > 0 else { return }
+        guard dt == OceanClock.step, s.isFinite && s > 0 && tuning.downwash > 0 else { return }
         wash(x, y, St.washFlutter * unit * tuning.downwash * s * dt, St.washFlutterRadius * span)
     }
 
     // ── sampling ──
 
-    /// `gustAt(x, y, t)` (html:724–729): the gust at a point now, 0…1.
+    /// `gustAt(x, y, t)` (html:732–737): the gust at a point now, 0…1. Coordinates are held to
+    /// ±`Unit.coordinateLimit` so the band arithmetic can't overflow; 0 if it still isn't a number.
     public func gust(_ x: Double, _ y: Double) -> Double {
+        guard x.isFinite && y.isFinite else { return 0 }
         typealias W = MeadowTuning.Wind
-        let along: Double = (x * directionX + y * directionY) / (W.bandAlong * unit)
+        let lim = MeadowTuning.Unit.coordinateLimit
+        let px: Double = clamp(x, -lim, lim)
+        let py: Double = clamp(y, -lim, lim)
+        let along: Double = (px * directionX + py * directionY) / (W.bandAlong * unit)
         let a: Double = along - time * W.bandRoll
-        let b: Double = (-x * directionY + y * directionX) / (W.bandAcross * unit)
+        let b: Double = (-px * directionY + py * directionX) / (W.bandAcross * unit)
         let o1: Double = W.octave1 * MeadowMath.vnoise(a, b, W.octave1Noise)
         let o2: Double = W.octave2 * MeadowMath.vnoise(a * W.octave2Along + W.octave2Shift, b * W.octave2Across, W.octave2Noise)
-        return MeadowMath.smooth(W.gustFrom, W.gustTo, o1 + o2)
+        let g: Double = MeadowMath.smooth(W.gustFrom, W.gustTo, o1 + o2)
+        return g.isFinite ? g : 0
     }
 
-    /// `windAt(x, y, t)` (html:731–745): the air at a point now. Still air at a non-finite point.
+    /// `windAt(x, y, t)` (html:739–753): the air at a point now. Still air at a non-finite point, and wherever the
+    /// sum isn't a number.
     public func sample(_ x: Double, _ y: Double) -> MeadowAir {
         var out = MeadowAir()
         guard x.isFinite && y.isFinite else { return out }
@@ -348,6 +576,7 @@ public final class Breeze {
         out.y = out.landedY + dy
         out.gust = g
         out.speed = (out.x * out.x + out.y * out.y).squareRoot()
+        guard out.x.isFinite && out.y.isFinite && out.speed.isFinite else { return MeadowAir() }
         return out
     }
 

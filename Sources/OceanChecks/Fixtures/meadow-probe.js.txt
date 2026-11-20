@@ -3,11 +3,12 @@
   if (document.body.dataset.ready !== '1' || !window.__meadow) { setTimeout(wait, 50); return; }
   const m = window.__meadow, r6 = v => Math.round(v * 1e6) / 1e6;
   const fl = () => m.flowers.map(f => [f.id, f.kind, r6(f.x), r6(f.y), r6(f.R), r6(f.rot), f.seed, f.n, r6(f.f0), f.leaves.length, f.sub ? f.sub.length : 0, r6(f.ox), r6(f.oy), r6(f.age), f.clicked ? 1 : 0, f.fading ? r6(f.fade) : -1]);
+  const geo = () => m.flowers.map(f => [f.id, f.leaves.map(l => [r6(l.a), r6(l.len), r6(l.wid), l.k]), (f.sub || []).map(u => [r6(u.x), r6(u.y), r6(u.s), u.open ? 1 : 0, r6(u.rot)])]);
   const air = () => { const o = []; for (const [x, y] of [[100, 100], [800, 500], [1500, 900], [400, 700]]) { m.windAt(x, y, m.t); o.push([x, y, r6(m.wind.x), r6(m.wind.y), r6(m.wind.ax), r6(m.wind.ay), r6(m.wind.px), r6(m.wind.py), r6(m.wind.g)]); } return o; };
   m.flies.length = 0;
   // The opening moment nodded and booked flowers for its butterflies: undone, so only the air moves them.
   for (const f of m.flowers) { f.vx = 0; f.vy = 0; f.ox = 0; f.oy = 0; f.busy = 0; f.lift = 0; f.dimT = 0; }
-  const out = { W: m.W, H: m.H, S: m.S, planted: fl() };
+  const out = { W: m.W, H: m.H, S: m.S, planted: fl(), plantedGeometry: geo() };
   for (let i = 0; i < 60; i++) m.step(1 / 60);
   out.t60 = { air: air(), flowers: fl() };
   // pointer stir: set ptr and step, as the input would at 60 Hz
@@ -20,9 +21,16 @@
   m.clickAt(f0.x, f0.y);
   out.clickPoints = [[f0.x, f0.y]];
   for (const [x, y] of [[0.04, 0.07], [0.04, 0.07], [0.75, 0.16], [0.31, 0.9], [0.9, 0.57], [0.16, 0.44], [0.62, 0.11]].map(([u, v]) => [Math.round(u * m.W), Math.round(v * m.H)])) { m.clickAt(x, y); out.clickPoints.push([x, y]); m.step(1 / 60); }
-  out.clicks = { flowers: fl(), dust: m.dust.length };
+  out.clicks = { flowers: fl(), geometry: geo(), dust: m.dust.length };
   for (let i = 0; i < 120; i++) m.step(1 / 60);
   out.t180 = { t: m.t, air: air(), flowers: fl() };
+  // Every kind's geometry: the sketch's own makeFlower (exposed on the scratch copy as __makeFlower), drawing from
+  // a fresh stream mulberry32(777), one of each kind in KINDS order at (100, 100), grown.
+  const kindStream = window.__stream(777);
+  out.kinds = ['daisy', 'coneflower', 'milkweed', 'fennel', 'clover', 'mustard', 'dandelion'].map(k => {
+    const f = window.__makeFlower(k, 100, 100, true, kindStream);
+    return [f.id, f.kind, r6(f.R), r6(f.rot), f.seed, f.n, r6(f.f0), r6(f.reach), f.leaves.map(l => [r6(l.a), r6(l.len), r6(l.wid), l.k]), (f.sub || []).map(u => [r6(u.x), r6(u.y), r6(u.s), u.open ? 1 : 0, r6(u.rot)])];
+  });
   const pre = document.createElement('pre'); pre.id = 'out'; pre.textContent = JSON.stringify(out); document.body.appendChild(pre);
 })();
 </script>
