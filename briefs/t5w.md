@@ -9,8 +9,12 @@ The director, after watching the first films: "it looks like onyl the left wing 
 dissapears on motion towards close", then: "i have a wing beat referene, look properly. also dont take anything
 else from this it doesnt have the life stuff we have. also want the butterflies to like rotatea around when
 moving (idk how much is possible)". The reference is https://www.pocketstudio.design/ascii-animals-app/ (its
-butterfly). Take exactly two things from it, the wingbeat and the turning; keep everything else ours (behaviours,
-flight, flowers, species, colours and markings).
+butterfly). Then: "not replace but learn from it and make a whole new one/ modify ours also their wings have a bit
+more detail and not just one flat color like ours (we dont want full realistic colors but yeah)".
+
+So: **learn from the reference, don't copy it.** Design our own wingbeat, turning and wing shading, better than
+what we have, using what the reference does well. Keep everything else ours (behaviours, flight, flowers, species,
+shapes and markings).
 
 ## What the reference does (read by the manager from its script, 2026-11-20)
 - **Seen from above, and it turns.** The whole butterfly (wings, body, antennae) is drawn in its own body frame,
@@ -27,17 +31,22 @@ flight, flowers, species, colours and markings).
 - Forewing and hindwing are two lobes, each a polar outline (angle range, reach, a peak, a roundness), with darker
   edges and veins; the body is a thin line with two antennae lines.
 
-## What to change in ours
-1. **Rotation:** draw each butterfly rotated to a body heading that follows its direction of travel as above
-   (smooth, rate-limited, full circle, wobble on the beat). A perched or resting butterfly keeps the heading it
-   landed with. Flight itself is not changed.
-2. **Wingbeat:** replace the wing narrowing, the one-sided fold at the top of the beat and the in-flight underside
-   switch with the reference's symmetric `open` scaling, including its curve, its 0.1 floor, the glide hold and the
-   brightness. Keep our species shapes, sizes, colours and markings; they scale with `open` like the reference's
-   lobes.
-3. **Rest:** a butterfly resting with its wings closed shows them narrow (open near its floor) in the underside
+## What to change in ours (our design; the reference is what to learn from)
+1. **Turning:** each butterfly turns to face where it flies, smoothly and at a limited rate, all the way round
+   when it needs to, with a little life on the beat. Perched or resting, it keeps the heading it landed with.
+   Flight itself is not changed. Work out how ours should turn (rates, wobble, how it looks at diagonals in a
+   character grid) by looking at it.
+2. **Wingbeat:** both wings always beat together and never vanish; the beat has a shape (not a plain sine), glides
+   hold the wings open, and closing wings change in light. These are the lessons; the curve, the floor, how the
+   wings move (narrowing toward the body, lifting, a hint of the far side, anything that reads better) are yours to
+   design and tune by watching films. Drop our one-sided fold and in-flight underside switch.
+3. **Wing detail:** our wings are mostly one flat colour per region. Give them shading and detail the way the
+   reference does, adapted to our species: tones that vary across the wing (from the body out to the tips), darker
+   edges and veins, small highlights, the species markings sitting on top. Stylised, not photo-real colours, but no
+   longer flat. It must still read at a glance in both themes and in Calm.
+4. **Rest:** a butterfly resting with its wings closed shows them narrow (open near its floor) in the underside
    colour; basking holds them open. The director judges both in the film.
-4. **Checks:** checks that test the replaced design (for example `foldedSideNeverFlips`, `clapTurnsOverAtEveryBank`,
+5. **Checks:** checks that test the replaced design (for example `foldedSideNeverFlips`, `clapTurnsOverAtEveryBank`,
    `clapReadsAsAButterfly`, `wingsUseSignedWidth`, `edgeOnIsALine`, and any other that asserts the old fold or
    signed widths) are replaced, on the director's decision, by checks of the new rule: in every flight frame both
    wings are drawn and have the same width within a cell; the drawn wing width follows `open`; the butterfly's
@@ -47,7 +56,8 @@ flight, flowers, species, colours and markings).
 ## Output and done when
 Code on `meadow-t5w`; the whole suite passes; a new pose sheet (each species at several `open` values and headings,
 dark and light) and two films at 1440 × 900 (`OceanTool meadow-frames`): 30 s real speed and 10 s quarter speed,
-watched and described in `reports/t5w.md`, side by side in words with the reference's look. No local folder paths in
+watched and described in `reports/t5w.md`, including what was learned from the reference and what was done
+differently, and why. No local folder paths in
 commits or files; film paths only in the final message.
 
 ## Files
