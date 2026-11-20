@@ -78,3 +78,16 @@ MeadowSim's settings hooks, and the app's Presets, SettingsView, StatusMenu, Oce
 may get a guard if finding 7 needs one, without changing Ocean or Web (prove with the digests and stills).
 Each fix comes with the check that would have caught it (the review's probes). Keep the Meadow within Web's CPU.
 Add a "Fix round 1" section to `reports/mp.md`.
+
+## Fix round 2 (from the re-check, 2026-11-21; small)
+Read `git show origin/review-mp:reviews/mp.md` ("Re-review" and "What is missing after fixes"). Fix, each with a
+check that fails without the fix, and stay out of m8's Files:
+1. Finding 2's corner: a zero-length clip at an exact screen corner counts as crossing the gap.
+2. Finding 4: relayout also projects departing flyers that ended up off the surviving screens, and revalidates an
+   approach's route (not only its target) for the new geometry.
+3. Finding 8: an approach or a sitter ends when the pointer leaves the terrain, however small the move.
+4. No allocation while newcomers arrive after a count change: a Meadow-local, allocation-free edge-distance scan
+   instead of `Terrain.signedOutside` (leave `Terrain` unchanged); cover the arrival phase in the allocation check.
+5. Initial butterflies are spread across screens that can't reach each other (a real gap), when the count allows,
+   so no display starts empty.
+Single-screen Meadow, Ocean and Web unchanged; within Web's CPU. Add a "Fix round 2" section to `reports/mp.md`.
