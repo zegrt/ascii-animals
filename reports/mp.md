@@ -288,3 +288,81 @@ Built 3134721 in a separate detached copy and compared, release builds, same com
   screens, so frames stay allocation-free, but it is a trap for later callers (Terrain is not mp's to change).
 
 Pushed and clean: not pushed (the brief says do not push); folder clean after the report commit.
+
+# Fix round 2 (re-check 8a5f261, routed on main da921cc)
+
+Status: done
+Board commit: da921cc (main: Review routing, mp, the re-check; the brief's "Fix round 2"; m8's row)
+Commits: 6471be8 (the fixes and checks), then this report
+Files changed (all in mp's Files; none of m8's: no HabitatKind, Settings, MeadowSim settings hooks or app file
+touched; `Terrain.swift` not touched): `Meadow/{MeadowWorld,MeadowBehaviour,MeadowFlight}.swift`,
+`OceanChecks/{MeadowFix2Checks (new),main}.swift`.
+
+## Each case: the fix and the check that holds it
+
+Each new check was written first and run on 965e8c9 before any fix; each failed there with the message shown.
+
+| # | Fix | Check, and what it said on 965e8c9 |
+|---|---|---|
+| 1 (finding 2, the corner) | `covered`: a piece of no length (a segment that only touches a box, as at an exact corner where the gap is a line) counts as covered only if its point is on a screen (within 1e-9 pt). `MeadowWorld.covered` | `meadowCornerGapIsAGap`: screens at (0, 0) and (1480, 900), 1440 × 900 each: (1460, 900) is in the gap; the re-check's step (1460, 899) → (1459.999, 901.773) and a diagonal through the corner enter it; steps on either screen don't; flight steps from five starts just above the line, up to 600 pt/s, never cross it (the check's own exact line test). On 965e8c9: `the re-check's step through the corner gap is not seen` |
+| 2 (finding 4) | `layout`: a departing flyer that was on an old screen and is now off the screens is put on a surviving screen, then aims at an exit; any approach (bloom, bask spot, pointer) whose way to its target now crosses a gap is given up (`leaveFlower` / `giveUpCursor`), by the same rule that chooses approaches (`segmentEntersGap`) | `meadowRelayoutHoldsDeparturesAndRoutes`: seeds 2–4, one → two → one with a departing flyer at (1441, 450): on the remaining screen; a nectar approach from (1300, 450) to a bloom at (1500, 450) when a 40 pt gap opens: the bloom survives, the approach ends at the relayout. On 965e8c9: `seed 2: after the unplug the departing flyer is at (1441.0, 450.0), off the remaining screen` |
+| 3 (finding 8) | `pointerMoved`: a move off the screens, of any size, while a butterfly is coming to the pointer or on it, does what a move of more than 2.5 pt does (sends the sitter off, ends the approach, restarts the still time) | `meadowPointerOffTheTerrainEndsTheLanding`: seeds 5–7, a pointer held at (1439.6, 430) beside the 40 pt gap and at (1439.1, 450) on one screen; once one approaches, a 1.9 pt move off the screens ends it and nobody perches in the next 10 s; once one perches, the same move sends it off (the check needs at least 2 of the 3 seeds to reach an approach and a perch in each case). On 965e8c9: `seed 5: a move of 1.9 pt into the gap leaves the approach on` |
+| 4 (allocation) | `MeadowWorld.signedOutside(x, y)`: the terrain's signed distance, the same formula and numbers, scanning the edges in a loop instead of `edges.map`; the entering test and the edge steer use it. `Terrain` unchanged | `meadowArrivalsAllocateNothing`: the desk at seed 14 (the re-check's case), warmed 10 s, count 7 → 12: 0 allocations in the 20 s of steps while the five wait, enter and settle (all arrived); then 12 → 7: 0 in the 20 s the leavers take. On 965e8c9: `140 allocations in the 20 s after the count went from 7 to 12` |
+| 5 (empty display) | Screens joined by shared edges form a group (from `Terrain.neighbours`); groups have no way between them. At load, once only as many butterflies are left to make as groups are still empty, each goes to an empty group (the largest first), its spot and first waypoint drawn on that group's screens; the opening moment (nectaring, basking, about to land) keeps each butterfly in its own group. One group (one screen, or touching screens): no change, draw for draw | `meadowNoDisplayStartsEmpty`: every screen has butterflies at the start on the hairline pair (1 pt gap, 2 pt offset) for 400 seeds, the 40 pt pair for 100, three screens 40 pt apart for 100; with count 2 on the three, no screen gets two. On 965e8c9: `hairline pair, seed 38: butterflies per screen [7, 0] of 7` (the re-check's seed) |
+
+## Unchanged: Ocean, Web, the Meadow on one screen, and the desk
+
+Release `OceanTool` built at 965e8c9 (before any change) and at 6471be8, same commands:
+
+- `bench --digest`: `612a0c22c778b40b` before and after; `--separate`: `d4d23789aedfab08` before and after.
+- Ocean and Web stills, seed 4242: 800 × 500 dark and light, 1800 × 900 live Calm at 1.25×, 340 × 150 live light Calm.
+- The Meadow on one screen: `still --live` 1728 × 1117 dark and light, 340 × 150, both sheets (1440 × 900),
+  `frames` 60 s at 5 fps (seed 7) and 20 s light Calm (seed 3); and `meadow-desk` 20 s at 5 fps (seed 7, the
+  owner's two touching screens).
+- **513 of 513 images byte-identical** (8 Ocean/Web stills, 3 Meadow stills, 2 sheets, 400 one-screen frames, 100 desk
+  frames). The changes only act where screens have a gap between them or the pointer leaves the screens.
+
+## Performance (`OceanTool bench --desk`, release, ms of CPU per simulated second)
+
+| | Meadow after | Meadow before (965e8c9) | Web |
+|---|---:|---:|---:|
+| 30 fps thread, quiet run | 13.48 | 13.59 | 16.83 |
+| 15 fps thread, quiet run | 7.02 | 7.21 | 12.93 |
+| 30 fps process, quiet run | 16.29 | 16.37 | 19.86 |
+| 30 fps thread, second run (host busy for all three) | 16.77 | 24.28 | 37.03 |
+| 15 fps thread, second run | 12.14 | 11.70 | 16.04 |
+
+`meadowWithinWebsCPU` (in the suite): 30 fps 10.73 vs Web 15.83 ms/s, 15 fps 5.96 vs 12.53.
+
+## Checks run
+
+- `swift build` (all products, the app included): Build complete.
+- `swift run -c release OceanChecks`: **230 passed, 0 failed** (225 before; 5 new). Unchanged lines include
+  `desk: 188 crossings between the screens in 5 minutes`, `most recordings on one screen: 28, bound 84`, `12 clicks:
+  0 allocations in the clicks, 0 in the 1,800 frames after them`, `in the air 73.2 %`; `meadowLongRunStaysSane`,
+  `meadowNothingInAGap`, `meadowRelayoutPutsTheDisplacedOnAScreen` and `meadowFrameAllocatesNothing` pass.
+- CI's Swift 6.3.3 rule: a separate build of OceanKit and OceanChecks with `-warn-long-expression-type-checking=60`
+  reports nothing in the Meadow files; the new mixed-literal lets are typed.
+
+## Rulings
+
+1. **A group is screens joined by the terrain's shared edges** (`Terrain.neighbours`), so screens touching only at a
+   corner, or a gap apart, are separate groups. Cost if wrong: two screens with a sub-door seam would each be seeded.
+2. **The spread changes only the last placements at load**: area seeding as before until the remaining count equals
+   the number of empty groups; then the largest empty group first. With fewer butterflies than groups, each goes to
+   a different group. Count changes later still come in from real edges by length, as before.
+3. **The pointer rule applies on one screen too**: a move past a real edge, however small, ends an approach or sends
+   off a sitter. The app's input stays on the screens, and the one-screen frames and stills are unchanged.
+4. **A departing flyer is put back on a screen only if its screen went from under it** (it was on an old screen), not
+   one already past a real edge on its way out, which keeps leaving as before.
+5. **Relayout ends approaches whose way crosses a gap** by the rule that chose them (`segmentEntersGap`), not
+   `wayOpen`, so an approach whose straight way leaves the screens without entering a gap (an L-shaped desk) stays.
+
+## Noticed
+
+- With the spread, the butterfly seeded on the other side of a gap stays there (exact ways keep gap crossings rare),
+  so a gapped desk shows two populations that seldom mix; the director may want to see it.
+- The count change still allocates inside `syncFlies` itself (its filters and the new butterflies); only the steps
+  after it are allocation-free. It runs on a settings change, not per frame.
+
+Pushed and clean: not pushed (the brief says do not push); folder clean after the report commit.
