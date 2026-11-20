@@ -67,14 +67,19 @@ Director's profile: none
 
 - 2026-11-20: Reviews and re-checks are done by Codex from now on ("use codex for reviewing", the director).
   t1-2's review and re-check, already done by Claude, stand.
-- 2026-11-20: t5 is briefed ahead (briefs/t5.md); it is assigned only after t1-2 is merged (manager).
+- 2026-11-20: t5 is briefed ahead (briefs/t5.md) (manager).
+
+- 2026-11-20: Nothing merges into main until the whole Meadow is built ("bro fnish the work first / dont merge now",
+  the director). Tasks stack: each task's branch is made from the previous task's branch, starting from
+  `meadow-t1-2`. The director approves the stack at the end; each task still gets its own review and CI run. A later
+  fix to an earlier task's files goes through that task's own branch and is then merged up the stack (manager).
 
 ## Tasks
 
 | Id | Task | Size | Files | Branch | Builder | Reviewer | Rounds | State | Brief |
 |---|---|---|---|---|---|---|---|---|---|
-| t1-2 | Breeze, flowers and butterfly flight (plan T1 + T2), with the director's path fix | Content | Sources/OceanKit/Meadow/{Breeze,Flowers,ButterflySpecies,Butterfly}.swift, Sources/OceanChecks/MeadowChecks.swift, Sources/OceanTool/{Paths,main}.swift | meadow-t1-2 | builder-t1-2 (Claude Opus, T3 child thread; fix round 1) | reviewer-t1-2 (Claude Opus, T3 child thread) | 1 | pending (director's approval): reviewed (review-t1-2 @ 68288c7), CI passed on 1e11a1b (PR #1), merge rehearsed 2026-11-20 (200 passed, app builds) | briefs/t1-2.md |
-| t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered) | Content | Meadow/MeadowPainter.swift (new), OceanTool/{MeadowStill,main}.swift, OceanChecks/MeadowChecks.swift, Render/GlyphAtlas.swift (append only) | meadow-t5 | | Codex | 0 | open (waits on t1-2 merged) | briefs/t5.md |
+| t1-2 | Breeze, flowers and butterfly flight (plan T1 + T2), with the director's path fix | Content | Sources/OceanKit/Meadow/{Breeze,Flowers,ButterflySpecies,Butterfly}.swift, Sources/OceanChecks/MeadowChecks.swift, Sources/OceanTool/{Paths,main}.swift | meadow-t1-2 | builder-t1-2 (Claude Opus, T3 child thread; fix round 1) | reviewer-t1-2 (Claude Opus, T3 child thread) | 1 | reviewed, waits for the end of the stack (director: no merge yet): reviewed (review-t1-2 @ 68288c7), CI passed on 1e11a1b (PR #1), merge rehearsed 2026-11-20 (200 passed, app builds) | briefs/t1-2.md |
+| t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered) | Content | Meadow/MeadowPainter.swift (new), OceanTool/{MeadowStill,main}.swift, OceanChecks/MeadowChecks.swift, Render/GlyphAtlas.swift (append only) | meadow-t5 (from meadow-t1-2) | builder-t5 (Claude Opus, T3 child thread) | Codex | 0 | building | briefs/t5.md |
 | t3 | Meadow world and behaviours (plan T3) | Content | to brief | meadow-t3 | | | 0 | open (waits on t5) | |
 | t4 | Cursor landing, courtship, crossings, monarch life cycle (plan T4) | Content | to brief | meadow-t4 | | | 0 | open (waits on t3) | |
 | t6 | Meadow habitat, settings and tools (plan T6) | Content | to brief | meadow-t6 | | | 0 | open (waits on t4) | |
