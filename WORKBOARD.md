@@ -45,6 +45,9 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-20, on the p1 prototype: "also it doenst move like a butterfly anomore". Applies: new (p1 used a quick
+  stand-in flight; the measured flight's beat-coupled lurch, bob and zig-zag must carry into the top-down view;
+  part of the proposed p2).
 - 2026-11-20, on the p1 top-down prototype: "the wing beat loosk too infreent and slow, the flowers need a lot of
   work and some findelity and quality we are missing". Applies: new (revisits the plan's "slow motion" decision,
   wingbeat = real × 0.28 capped at 3 Hz; proposed: a look-development step p2 before the plan is rewritten).
