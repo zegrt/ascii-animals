@@ -352,6 +352,7 @@ check_power() { # $1 trace, $2 from (UTC), $3 to (UTC), $4 seconds sampled
 # displays drawn = attached, the same set of displays throughout, never on battery or in Low Power Mode), calibrate
 # (one display, built-in, drawn), preview (a built-in display drawn).
 check_readings() { # $1 log, $2 pid, $3 launch id, $4 from, $5 to, $6 kind, $7 fps, $8 habitat, $9 count or ""
+  [ -f "$1" ] || return 0   # no log yet (the test copy writes its first line a moment after launch): nothing, never an exit
   awk -v pid="$2" -v launch="$3" -v from="$4" -v to="$5" -v kind="$6" -v want="$7" -v hab="$8" -v cnt="$9" '
     function t(s) { return (substr(s, 9, 2) + 0) * 86400 + substr(s, 12, 2) * 3600 + substr(s, 15, 2) * 60 + substr(s, 18, 2) }
     function fail(why) { if (bad == "") bad = why; done = 1 }
@@ -441,6 +442,7 @@ readings_ok() { [[ "$(printf '%s' "$1" | tail -1)" =~ ^OK\ [0-9]+\ readings ]] &
 # display alone (one display, built-in, more than 0 fps), else "<count> not-drawn" (paused, still, nothing drawn, an
 # external display). $1 log, $2 pid, $3 launch id.
 calibration_after() {
+  [ -f "$1" ] || return 0   # no log yet (the test copy writes its first line a moment after launch): nothing, never an exit
   awk -v pid="$2" -v launch="$3" -v after="$4" '$2 == "energy:" && $3 == "pid=" pid && $4 == "launch=" launch && $1 > after {
       c = ""; m = ""; dr = ""; ds = ""
       for (i = 5; i <= NF; i++) {
@@ -456,6 +458,7 @@ calibration_after() {
 
 card_shown() { grep -qF "energy-card: pid=$2 launch=$3 shown" "$1" 2>/dev/null; }   # $1 log, $2 pid, $3 launch id
 plan_of() { # this launch's logged plan (pid $2, launch id $3): "greeting=<g> builtInOnly=<0|1>"
+  [ -f "$1" ] || return 0   # no log yet (the test copy writes its first line a moment after launch): nothing, never an exit
   awk -v pid="$2" -v launch="$3" '$2 == "energy-plan:" && $3 == "pid=" pid && $4 == "launch=" launch { print $5, $6 }' "$1" 2>/dev/null | tail -1
 }
 
