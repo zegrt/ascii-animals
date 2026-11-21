@@ -45,6 +45,9 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-21, on mp's films (sketch beside app, dark, light, quarter speed, 15 fps, two screens): "films look good".
+  Applies: new (t7, the film gate, passed; the 15 fps wingbeat accepted as is). Next: t8, energy measured live with
+  the director.
 - 2026-11-20: "can we work on stuff in parallel?". Applies: new (alongside mp, work that shares no files with it:
   d1, the design of the Meadow in the app — presets, Settings, menu, status word, what's-new, welcome — as a
   proposal with pictures for the director, so m8 and t9 build from an approved design).
@@ -258,7 +261,7 @@ Director's profile: none
 | t3 | Meadow world and behaviours (plan T3), with the director's film verdict | Content | Meadow/{MeadowWorld,Behaviour}.swift (new), OceanChecks/MeadowChecks.swift, Meadow/MeadowPainter.swift (convenience paint, breeze trail), Meadow/Breeze.swift (pointer field), Meadow/{Butterfly,ButterflySpecies}.swift (roaming, spacing, stays), OceanTool/{MeadowStill,MeadowFrames,main}.swift | meadow-t3 (from meadow-t5v) | builder-t3 (Claude Opus, T3 child thread) | Codex | 0 | held (2026-11-20: the view may change to top-down); WIP saved at meadow-t3 @ 11394be (does not build yet; checks written, world not started); superseded by the port plan (m1–m8), kept as a reference until the end | briefs/t3.md |
 | t4 | Cursor landing, courtship, crossings, monarch life cycle (plan T4) | Content | to brief | meadow-t4 | | | 0 | open (waits on t3); superseded by the port plan (m1–m8) | |
 | t6 | Meadow habitat, settings and tools (plan T6) | Content | to brief | meadow-t6 | | | 0 | open (waits on t4); superseded by the port plan (m1–m8) | |
-| t7 | Director reviews the prototype films (plan T7, a gate) | Content | none | none | | | 0 | open (waits on t6) | |
+| t7 | Director reviews the prototype films (plan T7, a gate) | Content | none | none | | | 0 | open (waits on t6) | passed: "films look good" (the director, 2026-11-21)
 | t8 | Energy, measured with the director (plan T8) | Content | to brief | meadow-t8 | | | 0 | open (waits on t7) | |
 | t9 | The welcome's Meadow words and chips, and the what's-new card C for upgraders (design d1, approved) | Content | Sources/ASCIIAnimals/{OnboardingController,StatusMenu,WhatsNewCard (new)}.swift and the app's launch file, Sources/OceanKit/Domain/{Arrival,Handover}.swift (as needed), Sources/OceanChecks/AppChecks.swift | meadow-t9 (from meadow-pf) | builder-t9 (Claude Opus, T3 child thread) | Codex | open (waits on t8); the what's-new is not full screen (Corrections, 2026-11-20) | built (meadow-t9 @ 4e6e990, done: card C for upgraders once, waits for an awake unlocked screen, never key; Esc only while the app is active; the Web card first for Sharks arrivals, the Meadow card next launch; welcome words and line-ups; 253 checks; seen only in snapshots); Codex review 5e62a5c in (8 findings, all routed to fix); CI green on 4e6e990 (draft PR #7); fix round 1 done (meadow-t9 @ d2a059d: all eight fixed; 262 checks; an offscreen probe of the real card, 15 of 15); the manager re-ran: 262 passed, and looked at the card snapshot (a whole morpho and a flower, under the fish); CI on PR #7; the live card is seen with the director in t8; the live card needs the director
 | t10 | Words, watch and release 3.1 (plan T10; outward-facing, the director approves the release) | Content | to brief | meadow-t10 | | | 0 | open (waits on t9) | |
