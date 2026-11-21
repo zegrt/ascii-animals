@@ -411,7 +411,9 @@ enum WhatsNewCard {
     /// The card is built as the live one is (the live Meadow in it), placed far off every display (nothing shows),
     /// ordered in, faded in, and after `drawnCheckDelay` its window's own image is measured the way the live preview
     /// measures it (`measureDrawn`) and saved to the PNG. `ASCII_ANIMALS_SNAPSHOT_BLANK=1` hides its content after the
-    /// fade-in, the failure the director saw live, to show the check catches it. Prints the line the preview logs.
+    /// fade-in, the failure the director saw live, to show the check catches it. Prints the line the preview logs. Run it
+    /// with the displays awake and the screen unlocked: the window server draws no window otherwise (it says so).
+    /// `ASCII_ANIMALS_SNAPSHOT_ICON_HIDDEN=1`: the card with no arrow (the icon hidden).
     static func drawnProbe(to url: URL) {
         NSApp.setActivationPolicy(.accessory)
         guard let device = MTLCreateSystemDefaultDevice(), let renderer = try? OceanRenderer(device: device) else {
@@ -421,7 +423,8 @@ enum WhatsNewCard {
         let blank: Bool = ProcessInfo.processInfo.environment["ASCII_ANIMALS_SNAPSHOT_BLANK"] != nil
         // Far from every display: the window server still keeps its image, and nobody sees it.
         let visible = CGRect(x: -30000, y: -30000, width: 1800, height: 1130)
-        let icon = CGRect(x: visible.minX + 1389, y: visible.maxY + 2, width: 30, height: 37)
+        let iconHidden: Bool = ProcessInfo.processInfo.environment["ASCII_ANIMALS_SNAPSHOT_ICON_HIDDEN"] != nil
+        let icon: CGRect? = iconHidden ? nil : CGRect(x: visible.minX + 1389, y: visible.maxY + 2, width: 30, height: 37)
         let host = PreviewHost(over: ProbeHost())
         let session = WhatsNewSession(host: host, renderer: renderer, visible: visible, icon: icon)
         _ = session.orderFront()
@@ -434,8 +437,16 @@ enum WhatsNewCard {
                 FileHandle.standardError.write(Data("what's-new drawn probe: no image of the card\n".utf8))
                 exit(1)
             }
+            // The window server draws no window while the displays sleep or the screen is locked: say so, so a 0
+            // then is not read as the card's fault (the live card waits for a screen that can be seen).
+            let asleep: Bool = NSScreen.screens.contains { (screen: NSScreen) -> Bool in
+                let id: UInt32 = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+                return CGDisplayIsAsleep(id) != 0
+            }
+            let locked: Bool = SystemSignals.sessionTruth().screenLocked
+            let state: String = asleep || locked ? "; NOT MEANINGFUL: the displays are asleep or the screen is locked" : ""
             print("\(EnergyLog.cardDrawn(pid: getpid(), launch: nil, share: d.share, width: d.width, height: d.height)) "
-                  + "(\(d.source)\(blank ? ", content hidden" : ""); wrote \(url.path))")
+                  + "(\(d.source)\(blank ? ", content hidden" : "")\(state); wrote \(url.path))")
             withExtendedLifetime(host) {}
             exit(0)
         }
