@@ -91,10 +91,19 @@ Most of a live wallpaper's cost is WindowServer redrawing everything above it on
 | **Web, 30 fps** | **9.6% CPU** | 22.1% | ~230 MB (311 peak) |
 | Ocean, 15 fps | 10.3% CPU | 15.6% | ~270 MB |
 | **Web, 15 fps** | **8.3% CPU** | 16.2% | ~297 MB |
-| Meadow, 30 fps | *not yet measured* | | |
-| Meadow, 15 fps | *not yet measured* | | |
 
-The Meadow's rows come from a later measurement session with a different set of displays, recorded with that setup.
+**All three habitats, 3.1.** Measured with `Tools/energy.sh` on 21 November 2026 on the same two displays: the built-in Retina plus the same 2560×1440 monitor, which runs at 100 Hz, so it settles at 33.3 fps when 30 is asked and 16.7 when 15 is. Plugged in, Energy Mode on Automatic, 60 s per row after 10 s of settling, 7 butterflies on the Meadow. WindowServer with no wallpaper app running was 8.9% before the runs and 6.9% after, far above the 0.4% of the session above, so compare rows here with each other.
+
+| | App | WindowServer | Memory |
+|---|---|---|---|
+| Ocean, 30 fps | 11.5% CPU | 26.0% | ~243 MB |
+| Web, 30 fps | 13.7% CPU | 26.3% | ~205 MB |
+| **Meadow, 30 fps** | **10.7% CPU** | 29.7% | ~213 MB (215 peak) |
+| Ocean, 15 fps | 8.7% CPU | 18.4% | ~243 MB |
+| Web, 15 fps | 8.7% CPU | 16.8% | ~205 MB |
+| **Meadow, 15 fps** | **6.2% CPU** | 19.0% | ~211 MB (215 peak) |
+
+The Meadow costs the app the least of the three. WindowServer is about 3 points higher for it at 30 fps.
 
 Memory here is the app's footprint as `top` reports it; most of it is the displays' frame buffers. `swift run -c release OceanTool bench --desk --habitat web` measures the CPU work per second offscreen on the same layout.
 

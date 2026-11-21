@@ -126,8 +126,38 @@ enum WhatsNewCard {
             return false
         }
         session.arm(power: app.signals.inputs)
+        if preview { watchPreview(session) }
         return true
     }
+
+    // MARK: The preview's evidence
+
+    /// The preview (`Tools/energy.sh preview`) logs, bound to its launch id, how much of the card is drawn once it has
+    /// faded in (`EnergyLog.cardDrawn`, with the window's image saved as build/energy-test/card-drawn.png) and when and
+    /// why it went (`EnergyLog.cardClosed`), so a card that draws empty, or one a click closed before anyone looked,
+    /// shows in the log rather than only to the director's eye.
+    private static func watchPreview(_ session: WhatsNewSession) {
+        let pid: Int32 = getpid()
+        let launch: String? = Launch.plan.launchID
+        session.onClose = { (reason: WhatsNew.CloseReason, after: Double) in
+            Log.write(EnergyLog.cardClosed(pid: pid, launch: launch, reason: reason, after: after))
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + drawnCheckDelay) { [weak session] in
+            guard let session, current === session, !session.isClosing else { return }
+            let png: URL? = Launch.testFolder.flatMap { (f: URL) -> URL? in
+                Launch.confined(f.appendingPathComponent("card-drawn.png"), to: f)
+            }
+            guard let d = session.measureDrawn(savingTo: png) else {
+                Log.write("energy-card: no image of the card to measure")
+                return
+            }
+            Log.write("card drawn check: \(d.source)\(png == nil ? "" : ", saved card-drawn.png")")
+            Log.write(EnergyLog.cardDrawn(pid: pid, launch: launch, share: d.share, width: d.width, height: d.height))
+        }
+    }
+
+    /// After the fade-in (0.45 s) and the content's (0.4 s), with room to spare.
+    static let drawnCheckDelay: TimeInterval = 1.5
 
     /// The welcome is opening from Help: no more looks, and a card up goes at once (no fade under the welcome).
     /// Returns whether a card was still waiting, so the caller can wait again if the welcome couldn't open (the
@@ -136,7 +166,7 @@ enum WhatsNewCard {
     static func dismiss() -> Bool {
         let waiting: Bool = presenter != nil && current == nil
         stopLooking()
-        current?.close(trying: false, now: true)
+        current?.close(trying: false, now: true, reason: .welcome)
         current = nil
         return waiting
     }
@@ -376,6 +406,41 @@ enum WhatsNewCard {
         try? (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
         print(lines.joined(separator: "\n"))
     }
+
+    /// Debug: the preview's drawn check on the real card, offscreen, and exit (`--snapshot-whatsnew-drawn <png>`).
+    /// The card is built as the live one is (the live Meadow in it), placed far off every display (nothing shows),
+    /// ordered in, faded in, and after `drawnCheckDelay` its window's own image is measured the way the live preview
+    /// measures it (`measureDrawn`) and saved to the PNG. `ASCII_ANIMALS_SNAPSHOT_BLANK=1` hides its content after the
+    /// fade-in, the failure the director saw live, to show the check catches it. Prints the line the preview logs.
+    static func drawnProbe(to url: URL) {
+        NSApp.setActivationPolicy(.accessory)
+        guard let device = MTLCreateSystemDefaultDevice(), let renderer = try? OceanRenderer(device: device) else {
+            FileHandle.standardError.write(Data("what's-new drawn probe: no Metal device\n".utf8))
+            exit(1)
+        }
+        let blank: Bool = ProcessInfo.processInfo.environment["ASCII_ANIMALS_SNAPSHOT_BLANK"] != nil
+        // Far from every display: the window server still keeps its image, and nobody sees it.
+        let visible = CGRect(x: -30000, y: -30000, width: 1800, height: 1130)
+        let icon = CGRect(x: visible.minX + 1389, y: visible.maxY + 2, width: 30, height: 37)
+        let host = PreviewHost(over: ProbeHost())
+        let session = WhatsNewSession(host: host, renderer: renderer, visible: visible, icon: icon)
+        _ = session.orderFront()
+        session.arm(power: PowerInputs())
+        if blank {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { session.hideContentForProbe() }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + drawnCheckDelay + (blank ? 0.5 : 0)) {
+            guard let d = session.measureDrawn(savingTo: url) else {
+                FileHandle.standardError.write(Data("what's-new drawn probe: no image of the card\n".utf8))
+                exit(1)
+            }
+            print("\(EnergyLog.cardDrawn(pid: getpid(), launch: nil, share: d.share, width: d.width, height: d.height)) "
+                  + "(\(d.source)\(blank ? ", content hidden" : ""); wrote \(url.path))")
+            withExtendedLifetime(host) {}
+            exit(0)
+        }
+        NSApp.run()
+    }
 }
 
 /// What a card needs from the app: its settings, the Meadow when tried. The app is one; the probe has a stand-in.
@@ -476,6 +541,9 @@ final class WhatsNewSession {
     private var closing = false
     private var preview: WhatsNew.Preview?
     var onFinish: (() -> Void)?
+    /// Told once when the card starts to go, with why and how many seconds after `arm` (the preview logs it).
+    var onClose: ((WhatsNew.CloseReason, Double) -> Void)?
+    private var armedAt: Date?
 
     /// The Meadow at the person's look and line-up: what the card shows.
     static func meadow(_ s: OceanKit.Settings) -> OceanKit.Settings {
@@ -545,8 +613,8 @@ final class WhatsNewSession {
         view.frame = CGRect(origin: .zero, size: place.frame.size)
         panel.contentView = view
 
-        model.onTry = { [weak self] in self?.close(trying: true) }
-        model.onKeep = { [weak self] in self?.close(trying: false) }
+        model.onTry = { [weak self] in self?.close(trying: true, reason: .tryMeadow) }
+        model.onKeep = { [weak self] in self?.close(trying: false, reason: .keep) }
     }
 
     /// Puts the panel on screen without activating the app. True when it is there: visible, on a display.
@@ -557,6 +625,7 @@ final class WhatsNewSession {
 
     /// The card is up for good: fade in, type, listen for Esc and clicks elsewhere, and set the preview going.
     func arm(power: PowerInputs) {
+        armedAt = Date()
         apply(WhatsNew.preview(power))
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = model.reduceMotion ? 0.2 : 0.45
@@ -572,15 +641,15 @@ final class WhatsNewSession {
         // A click anywhere else: in another app (no permission needed for clicks) or another of this app's windows.
         let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         if let m = NSEvent.addGlobalMonitorForEvents(matching: clicks, handler: { [weak self] _ in
-            self?.close(trying: false)
+            self?.close(trying: false, reason: .click)
         }) { monitors.append(m) }
         if let m = NSEvent.addLocalMonitorForEvents(matching: clicks, handler: { [weak self] e in
-            if let self, e.window !== self.panel { self.close(trying: false) }
+            if let self, e.window !== self.panel { self.close(trying: false, reason: .ownClick) }
             return e
         }) { monitors.append(m) }
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                                 object: nil, queue: .main) { [weak self] _ in
-            self?.close(trying: false)
+            self?.close(trying: false, reason: .screens)
         })
 
         if model.reduceMotion {
@@ -600,14 +669,14 @@ final class WhatsNewSession {
     /// A key typed while the card is up: Esc closes it when ASCII Animals is the active app. The event always goes on
     /// to the window it was meant for (Esc still cancels a sheet or closes Settings).
     func key(_ e: NSEvent, appActive: Bool) -> NSEvent {
-        if e.keyCode == 53, appActive, !closing { close(trying: false) }
+        if e.keyCode == 53, appActive, !closing { close(trying: false, reason: .esc) }
         return e
     }
 
     /// Settings changed elsewhere: on the Meadow the card goes; otherwise the Keep chip names the habitat now.
     func settingsChanged(_ s: OceanKit.Settings) {
         guard !closing else { return }
-        if s.habitat == .meadow { close(trying: false); return }
+        if s.habitat == .meadow { close(trying: false, reason: .meadow); return }
         if model.keep != s.habitat { model.keep = s.habitat }
     }
 
@@ -648,12 +717,13 @@ final class WhatsNewSession {
     /// `trying`: "Try the Meadow". The desktop dissolves to it (the director's habitat change) as the card fades.
     /// From the moment it starts closing, clicks go through it to whatever is under it. `now`: gone at once, no fade
     /// (the welcome opening from Help, or a card that didn't reach the screen).
-    func close(trying: Bool, now: Bool = false) {
+    func close(trying: Bool, now: Bool = false, reason: WhatsNew.CloseReason? = nil) {
         if closing {
             if now { teardown() }
             return
         }
         closing = true
+        if let reason, let armedAt { onClose?(reason, Date().timeIntervalSince(armedAt)) }
         panel.ignoresMouseEvents = true
         if trying { host?.tryMeadow() }
         for m in monitors { NSEvent.removeMonitor(m) }
@@ -672,6 +742,60 @@ final class WhatsNewSession {
         }, completionHandler: { [weak self] in self?.teardown() })
         // Whatever happens to the animation, nothing stays on screen.
         DispatchQueue.main.asyncAfter(deadline: .now() + duration + 1) { [weak self] in self?.teardown() }
+    }
+
+    // MARK: Drawn check
+
+    /// What the card's window holds now: its image as the window server keeps it (what the screen composites; no
+    /// Screen Recording permission is needed for the app's own windows), or, if that can't be had, its content view
+    /// drawn by AppKit. nil when neither gives an image.
+    func drawnImage() -> (image: CGImage, source: String)? {
+        if panel.windowNumber > 0, let image = WhatsNewSession.windowImage(CGWindowID(panel.windowNumber)) {
+            return (image, "the window server's image of the card window")
+        }
+        guard let view = panel.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let image = rep.cgImage else { return nil }
+        return (image, "the content view drawn by AppKit (no window server image)")
+    }
+
+    /// The drawn share of `drawnImage()` (`WhatsNew.drawnShare`), the window's size in points, and where the image came
+    /// from; the image is saved to `png` when one is given.
+    func measureDrawn(savingTo png: URL?) -> (share: Double, width: Int, height: Int, source: String)? {
+        guard let (image, source) = drawnImage() else { return nil }
+        let w: Int = image.width, h: Int = image.height
+        var bytes = [UInt8](repeating: 0, count: w * h * 4)
+        let made: Bool = bytes.withUnsafeMutableBytes { (buf: UnsafeMutableRawBufferPointer) -> Bool in
+            guard let ctx = CGContext(data: buf.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return true
+        }
+        guard made else { return nil }
+        if let png { try? StillRenderer.writePNG(image, to: png) }
+        let size: CGSize = panel.frame.size
+        return (WhatsNew.drawnShare(rgba: bytes), Int(size.width.rounded()), Int(size.height.rounded()), source)
+    }
+
+    /// `CGWindowListCreateImage` for one window, looked up at run time: the SDK marks it unavailable (ScreenCaptureKit
+    /// replaces it, and that asks for Screen Recording even for the app's own windows), but macOS still serves it.
+    private static func windowImage(_ id: CGWindowID) -> CGImage? {
+        typealias Create = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
+        guard let lib = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_NOW) else { return nil }
+        defer { dlclose(lib) }
+        guard let sym = dlsym(lib, "CGWindowListCreateImage") else { return nil }
+        let create: Create = unsafeBitCast(sym, to: Create.self)
+        let includingWindow: UInt32 = 1 << 3          // kCGWindowListOptionIncludingWindow
+        let options: UInt32 = (1 << 0) | (1 << 3)     // kCGWindowImageBoundsIgnoreFraming | kCGWindowImageBestResolution
+        return create(CGRect.null, includingWindow, id, options)?.takeRetainedValue()
+    }
+
+    /// The drawn probe's stand-in for a card that draws empty: its content hidden at once, no animation.
+    func hideContentForProbe() {
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) { model.contentVisible = false }
     }
 
     private var tornDown = false

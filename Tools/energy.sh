@@ -9,7 +9,9 @@
 #                                                                one habitat; count = the Meadow's butterflies
 #                                                                (1-12; default: the app's default)
 #   Tools/energy.sh preview                                      the what's-new card once, on the live desktop;
-#                                                                done when the director types "seen"
+#                                                                fails before asking if the card's drawn check
+#                                                                (its own window's pixels) finds it empty; done
+#                                                                when the director types "seen"
 #   Tools/energy.sh calibrate [count]                            the Meadow on the built-in display alone; done
 #                                                                when the director types the count they chose
 #   Tools/energy.sh status                                       what is running, the lock, leftovers (no change)
@@ -457,6 +459,39 @@ calibration_after() {
 }
 
 card_shown() { grep -qF "energy-card: pid=$2 launch=$3 shown" "$1" 2>/dev/null; }   # $1 log, $2 pid, $3 launch id
+# The card's drawn check (EnergyLog.cardDrawn): this launch's "<share> <w>x<h>", or "" if none (yet). $1 log, $2 pid,
+# $3 launch id. Only the exact shape counts.
+card_drawn() {
+  [ -f "$1" ] || return 0
+  awk -v pid="$2" -v launch="$3" 'NF == 6 && $2 == "energy-card:" && $3 == "pid=" pid && $4 == "launch=" launch \
+      && $5 ~ /^drawn=[01]\.[0-9][0-9][0-9]$/ && $6 ~ /^size=[0-9]+x[0-9]+$/ { print substr($5, 7), substr($6, 6); exit }' "$1"
+}
+# The card going (EnergyLog.cardClosed): this launch's "<reason> <seconds after it was shown>", or "". Same arguments.
+card_closed() {
+  [ -f "$1" ] || return 0
+  awk -v pid="$2" -v launch="$3" 'NF == 6 && $2 == "energy-card:" && $3 == "pid=" pid && $4 == "launch=" launch \
+      && $5 ~ /^closed=[a-z-]+$/ && $6 ~ /^after=[0-9]+s$/ { print substr($5, 8), substr($6, 7, length($6) - 7); exit }' "$1"
+}
+# The least share of the card's window that must be drawn. The card covers about 0.98 of it (the rest is the corners
+# and the room beside its arrow); an empty card is 0.
+DRAWN_MIN=0.5
+# Waits up to $4 s for this launch's drawn check (args as card_drawn). Prints "OK <share> <size>", or "FAIL <why>".
+card_drawn_check() {
+  local i d="" c share size
+  for i in $(seq 1 "$4"); do
+    d="$(card_drawn "$1" "$2" "$3")"; [ -n "$d" ] && break
+    c="$(card_closed "$1" "$2" "$3")"
+    if [ -n "$c" ]; then echo "FAIL the card closed (${c% *}, ${c#* } s after it was shown) before its drawn check"; return 0; fi
+    [ -n "$CONFIRM_FIXTURE" ] || sleep 1
+  done
+  [ -n "$d" ] || { echo "FAIL the card logged no drawn check in $4 s"; return 0; }
+  read -r share size <<<"$d"
+  if awk -v s="$share" -v m="$DRAWN_MIN" 'BEGIN { exit !(s + 0 >= m + 0) }'; then
+    echo "OK $share $size"
+  else
+    echo "FAIL the card drew $share of its window ($size points): empty"
+  fi
+}
 plan_of() { # this launch's logged plan (pid $2, launch id $3): "greeting=<g> builtInOnly=<0|1>"
   [ -f "$1" ] || return 0   # no log yet (the test copy writes its first line a moment after launch): nothing, never an exit
   awk -v pid="$2" -v launch="$3" '$2 == "energy-plan:" && $3 == "pid=" pid && $4 == "launch=" launch { print $5, $6 }' "$1" 2>/dev/null | tail -1
@@ -485,13 +520,28 @@ confirm_count() {
     done
     [ -n "$shown" ] || { echo "the test copy logged no reading after your answer" >&2; return 1; }
     read -r sc sd <<<"$shown"
-    if [ "$sc" = "$a" ] && [ "$sd" = drew ]; then echo "$a"; return 0; fi
+    if [ "$sc" = "$a" ] && [ "$sd" = drew ]; then echo "$since" >"$RUN/answered"; echo "$a"; return 0; fi
     if [ "$sc" = "$a" ]; then
       echo "  the test copy shows $a but did not draw it live on the built-in display alone (paused or covered?): resume it, then type $a again" >&2
       continue
     fi
     echo "  the test copy shows $sc, not $a: set it in Settings (or type $sc)" >&2
   done
+}
+# Calibration's last check: the readings from the director's answer ($4, a UTC stamp) to $6 (default now), at least
+# two, waited for up to $5 s. Only these count: the director was in the test copy's Settings and menus before the
+# answer, and the count they settled on is what must have drawn on the built-in display alone. Prints check_readings'
+# result. $1 log, $2 pid, $3 launch id.
+calibration_final() {
+  local i out n
+  for i in $(seq 1 "$5"); do
+    out="$(check_readings "$1" "$2" "$3" "$4" "${6:-$(utc)}" calibrate 30 meadow "")"
+    n="$(printf '%s' "$out" | tail -1 | sed -n 's/^OK \([0-9]*\) readings.*/\1/p')"
+    readings_ok "$out" && [ "${n:-0}" -ge 2 ] && break
+    [ -n "$CONFIRM_FIXTURE" ] || sleep 1
+  done
+  if readings_ok "$out" && [ "${n:-0}" -lt 2 ]; then echo "INVALID only ${n:-0} reading(s) after the answer in $5 s"; return 0; fi
+  printf '%s\n' "$out"
 }
 # Preview: the director types "seen" (or "no"). Anything else asks again.
 confirm_seen() {
@@ -705,6 +755,34 @@ if [ "$MODE" = selftest ]; then
   card_shown "$L" 501 $LID; expect "an old, unbound or other launch's card line does not count" "$?" "1"
   printf '2026-11-21T10:00:05Z energy-card: pid=501 launch=%s shown\n' "$LID" >>"$L"
   card_shown "$L" 501 $LID; expect "this launch's card line counts" "$?" "0"
+  # The card's drawn check (EnergyLog.cardDrawn, cardClosed; OceanChecks pins the shapes).
+  printf '2026-11-21T10:00:05Z energy-card: pid=501 launch=%s shown\n2026-11-21T10:00:07Z energy-card: pid=501 launch=%s drawn=0.977 size=460x333\n' "$LID" "$LID" >"$L"
+  expect "card: drawn" "$(card_drawn_check "$L" 501 $LID 2)" "OK 0.977 460x333"
+  printf '2026-11-21T10:00:05Z energy-card: pid=501 launch=%s shown\n2026-11-21T10:00:07Z energy-card: pid=501 launch=%s drawn=0.000 size=460x333\n' "$LID" "$LID" >"$L"
+  expect "card: a drawn share of zero fails the preview" "$(card_drawn_check "$L" 501 $LID 2)" "FAIL the card drew 0.000 of its window*empty"
+  printf '2026-11-21T10:00:07Z energy-card: pid=501 launch=%s drawn=0.012 size=460x333\n' "$LID" >"$L"
+  expect "card: a drawn share near zero fails the preview" "$(card_drawn_check "$L" 501 $LID 2)" "FAIL the card drew 0.012*"
+  printf '2026-11-21T10:00:05Z energy-card: pid=501 launch=%s shown\n' "$LID" >"$L"
+  expect "card: no drawn line fails the preview" "$(card_drawn_check "$L" 501 $LID 2)" "FAIL the card logged no drawn check in 2 s"
+  printf '2026-11-21T10:00:07Z energy-card: pid=501 launch=ffffffffffffffff drawn=0.977 size=460x333\n2026-11-21T10:00:07Z energy-card: pid=501 launch=none drawn=0.977 size=460x333\n' >"$L"
+  expect "card: another launch's or a probe's drawn line does not count" "$(card_drawn_check "$L" 501 $LID 2)" "FAIL the card logged no drawn check*"
+  printf '2026-11-21T10:00:07Z energy-card: pid=501 launch=%s drawn=0.98 size=460x333\n2026-11-21T10:00:07Z energy-card: pid=501 launch=%s drawn=0.977\n' "$LID" "$LID" >"$L"
+  expect "card: a malformed drawn line does not count" "$(card_drawn_check "$L" 501 $LID 2)" "FAIL the card logged no drawn check*"
+  printf '2026-11-21T10:00:05Z energy-card: pid=501 launch=%s shown\n2026-11-21T10:00:06Z energy-card: pid=501 launch=%s closed=click after=1s\n' "$LID" "$LID" >"$L"
+  expect "card: closed before its drawn check fails the preview" "$(card_drawn_check "$L" 501 $LID 2)" "FAIL the card closed (click, 1 s after it was shown)*"
+  expect "card: the close line" "$(card_closed "$L" 501 $LID)" "click 1"
+  expect "card: another launch's close line does not count" "$(card_closed "$L" 501 ffffffffffffffff)" ""
+  # Calibration's last check covers the readings from the director's answer on (a menu was open before it).
+  { for s in 00 05 10 15 20 34 39 44 49; do rd "2026-11-21T10:00:${s}Z" attached=1 drawn=1 displays=1:b:29.9; done; } >"$L"
+  expect "calibrate: a 14 s gap before the answer passes" "$(calibration_final "$L" 501 $LID 2026-11-21T10:00:36Z 2 2026-11-21T10:00:50Z)" "*OK 3 readings, 1 displays, count=7"
+  expect "calibrate: the same gap after the answer fails" "$(calibration_final "$L" 501 $LID 2026-11-21T10:00:12Z 2 2026-11-21T10:00:50Z)" "INVALID no reading for 14 s*"
+  { for s in 00 05 10 15 20 25; do rd "2026-11-21T10:00:${s}Z" attached=1 drawn=1 displays=1:b:29.9; done; rd 2026-11-21T10:00:30Z attached=2 drawn=1 displays=2:e:29.9; } >"$L"
+  expect "calibrate: after the answer, an external display drawn fails" "$(calibration_final "$L" 501 $LID 2026-11-21T10:00:22Z 2 2026-11-21T10:00:40Z)" "INVALID not the built-in display alone*"
+  rd 2026-11-21T10:00:40Z attached=1 drawn=1 displays=1:b:29.9 >"$L"
+  expect "calibrate: one reading after the answer is too few" "$(calibration_final "$L" 501 $LID 2026-11-21T10:00:36Z 2 2026-11-21T10:00:50Z)" "INVALID only 1 reading(s) after the answer*"
+  rd 2026-11-21T10:00:40Z attached=1 drawn=1 displays=1:b:29.9 count=9 >"$L"
+  out="$(printf '9\n' | { exec 3<&0; confirm_count "$L" 501 $LID 2 2>/dev/null; })"
+  expect "calibrate: a confirmed answer records its time" "$(cat "$RUN/answered" 2>/dev/null)" "20[0-9][0-9]-*Z"
   sampled_ok "11.00 25.00 60.8 120.0"; expect "a sample line passes" "$?" "0"
   sampled_ok ""; expect "an empty sample (a parser failure) does not" "$?" "1"
   sampled_ok "INVALID 3 of 4 samples"; expect "an invalid sample does not" "$?" "1"
@@ -853,7 +931,9 @@ find_launched() { # sets TEST_PID and TEST_START when exactly one of this checko
   TEST_PID="$1"; TEST_START="$(proc_start "$1")"
   [ -n "$TEST_START" ]
 }
-launch_test() { # $1 quiet, $2 preview, $3 built-in only (each 1 or 0); $4 the greeting the plan must show
+launch_test() { # $1 quiet, $2 preview, $3 built-in only (each 1 or 0); $4 the greeting the plan must show; $5 "bg":
+                # opened in the background (open -g), so the director's app keeps the keyboard and they type their
+                # answer without a click (a click anywhere closes the card)
   local want plan i
   preflight_processes refuse
   LAUNCH_ID="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
@@ -862,7 +942,7 @@ launch_test() { # $1 quiet, $2 preview, $3 built-in only (each 1 or 0); $4 the g
   LAUNCH_AT="$(utc)"
   # open runs with Ctrl-C ignored, so a launch is never half done; the trap runs once it returns.
   ( trap '' INT TERM
-    exec open --env ASCII_ANIMALS_NO_HANDOVER=1 --env "ASCII_ANIMALS_ENERGY_LAUNCH=$LAUNCH_ID" --env "ASCII_ANIMALS_QUIET_LAUNCH=$1" \
+    exec open ${5:+-g} --env ASCII_ANIMALS_NO_HANDOVER=1 --env "ASCII_ANIMALS_ENERGY_LAUNCH=$LAUNCH_ID" --env "ASCII_ANIMALS_QUIET_LAUNCH=$1" \
       --env "ASCII_ANIMALS_PREVIEW_WHATSNEW=$2" --env "ASCII_ANIMALS_BUILTIN_DISPLAY_ONLY=$3" "$APP" ) \
     || die "could not open the test copy"
   for i in $(seq 1 20); do find_launched && break; sleep 1; done
@@ -1002,14 +1082,23 @@ case "$MODE" in
     record "$HABITAT $FPS ${SECS}s $(printf '%s' "$R" | tail -1 | cut -d' ' -f2-): app ${APPCPU}%, WindowServer ${WSCPU}%, memory ${MEM}/${MEMPK} MB; $(printf '%s' "$R" | grep '^  display' | tr -s ' ' | tr '\n' ';')"
     ;;
   preview)
-    launch_test 0 1 0 preview
-    echo "the card appears under the test copy's menu bar icon in a second or two. Its buttons and Esc only close it;"
-    echo "a click outside closes it AND reaches whatever was clicked."
+    launch_test 0 1 0 preview bg
+    echo "the card appears under the test copy's menu bar icon in a second or two (later if the screen is locked or"
+    echo "asleep). DON'T CLICK ANYWHERE until you have looked: any click closes the card. Its buttons and Esc only close it."
     for i in $(seq 1 30); do card_shown "$APPLOG" "$TEST_PID" "$LAUNCH_ID" && break; sleep 1; done
     card_shown "$APPLOG" "$TEST_PID" "$LAUNCH_ID" || die "the test copy logged no card on screen in 30 s -- preview failed"
     echo "the test copy put the card on screen"
+    D="$(card_drawn_check "$APPLOG" "$TEST_PID" "$LAUNCH_ID" 10)"
+    case "$D" in
+      OK*) read -r _ share size <<<"$D"; echo "the card's drawn check: $share of its window drawn ($size points); its image: build/energy-test/card-drawn.png" ;;
+      *) die "${D#FAIL } -- preview failed before asking (its image, if any: build/energy-test/card-drawn.png)" ;;
+    esac
+    echo "look at the top right of the laptop screen, under the fish icon, without clicking"
     exec 3</dev/tty
-    confirm_seen || die "the card was not confirmed seen -- preview failed"
+    SEEN=0; confirm_seen && SEEN=1
+    C="$(card_closed "$APPLOG" "$TEST_PID" "$LAUNCH_ID")"
+    if [ -n "$C" ]; then echo "the card closed: ${C% *}, ${C#* } s after it was shown"; else echo "the card was still up at the answer"; fi
+    [ "$SEEN" = 1 ] || die "the card was not confirmed seen -- preview failed"
     still_ours
     wait_for_reading preview || die "no built-in display drew a frame -- preview failed"
     domain_absent || die "the preview wrote to $DOMAIN"
@@ -1023,8 +1112,11 @@ case "$MODE" in
     echo "with \"$TEST_NAME: energy test copy\") and move the butterfly count until it looks right."
     exec 3</dev/tty
     N="$(confirm_count "$APPLOG" "$TEST_PID" "$LAUNCH_ID" 8)" || die "the count was not confirmed -- calibration failed"
+    ANSWERED="$(cat "$RUN/answered" 2>/dev/null || true)"
+    [ -n "$ANSWERED" ] || die "calibration: the answer's time was not recorded -- failed"
     still_ours
-    R="$(check_readings "$APPLOG" "$TEST_PID" "$LAUNCH_ID" "$LAUNCH_AT" "$(utc)" calibrate 30 meadow "")"
+    # From the answer on only: before it, the director was in the test copy's Settings and menus.
+    R="$(calibration_final "$APPLOG" "$TEST_PID" "$LAUNCH_ID" "$ANSWERED" 15)"
     readings_ok "$R" || die "calibration: $(printf '%s' "$R" | tail -1) -- failed"
     echo "count used: $N (the test copy drew $N live on the built-in display alone; it is not saved anywhere else)"
     echo "  next: Tools/energy.sh meadow 30 60 $N   and   Tools/energy.sh meadow 15 60 $N"

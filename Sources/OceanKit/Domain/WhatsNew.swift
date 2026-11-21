@@ -129,6 +129,39 @@ public enum WhatsNew {
         public func cancel() { finished = true }
     }
 
+    /// Why a card went (the preview logs it: `EnergyLog.cardClosed`).
+    public enum CloseReason: String, Sendable, CaseIterable {
+        /// A click in another app (any click anywhere closes the card).
+        case click
+        /// A click in another of this app's windows or its menu bar icon.
+        case ownClick = "own-click"
+        case esc
+        /// "Try the Meadow".
+        case tryMeadow = "try"
+        /// "Keep the …" or the "esc close" hint.
+        case keep
+        /// The displays changed.
+        case screens
+        /// The Meadow was picked elsewhere (the menu, Settings).
+        case meadow
+        /// The welcome opened from Help.
+        case welcome
+    }
+
+    /// The share of pixels drawn in an 8-bit RGBA bitmap (alpha last, `bytesPerRow` = width × 4): those whose alpha
+    /// is above `threshold`, over all pixels. 0 for an empty bitmap. The preview's live check (`EnergyLog.cardDrawn`).
+    public static func drawnShare(rgba: [UInt8], threshold: UInt8 = 8) -> Double {
+        let pixels: Int = rgba.count / 4
+        guard pixels > 0 else { return 0 }
+        var drawn: Int = 0
+        var i: Int = 3
+        while i < rgba.count {
+            if rgba[i] > threshold { drawn += 1 }
+            i += 4
+        }
+        return Double(drawn) / Double(pixels)
+    }
+
     // MARK: Where
 
     /// The card's width in the design; narrower only where the screen is.

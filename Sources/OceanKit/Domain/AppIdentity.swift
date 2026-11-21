@@ -207,4 +207,19 @@ public enum EnergyLog {
     public static func cardShown(pid: Int32, launch: String?) -> String {
         "energy-card: pid=\(pid) launch=\(launchWord(launch)) shown"
     }
+
+    /// `energy-card: pid=<pid> launch=<id> drawn=<share> size=<w>x<h>`: after the fade-in, the share of the card
+    /// window's pixels that are not transparent (0.000 to 1.000, three places; `WhatsNew.drawnShare`), read from the
+    /// window's own image inside the app (no Screen Recording needed), and the window's size in points.
+    public static func cardDrawn(pid: Int32, launch: String?, share: Double, width: Int, height: Int) -> String {
+        let s: Double = min(1, max(0, share.isFinite ? share : 0))
+        return "energy-card: pid=\(pid) launch=\(launchWord(launch)) drawn=" + String(format: "%.3f", s) + " size=\(width)x\(height)"
+    }
+
+    /// `energy-card: pid=<pid> launch=<id> closed=<reason> after=<s>s`: the preview card went, why, and how long after
+    /// it was shown (whole seconds).
+    public static func cardClosed(pid: Int32, launch: String?, reason: WhatsNew.CloseReason, after: Double) -> String {
+        let secs: Int = after.isFinite ? max(0, Int(after.rounded())) : 0
+        return "energy-card: pid=\(pid) launch=\(launchWord(launch)) closed=\(reason.rawValue) after=\(secs)s"
+    }
 }

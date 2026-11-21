@@ -307,6 +307,7 @@ func handoverChecks() {
     }
     check("meadowCardForAnUpgraderWhoNeverFinishedTheTour", meadowCardForAnUpgraderWhoNeverFinishedTheTour)
     whatsNewCardChecks()
+    cardDrawnChecks()
     check("handoverLoginItemOnlyFromAnInstalledCopy") {
         try expect(Handover.canAddLoginItem(bundlePath: "/Applications/ASCII Animals.app", onReadOnlyVolume: false), "Applications")
         try expect(Handover.canAddLoginItem(bundlePath: "/Users/x/Applications/ASCII Animals.app", onReadOnlyVolume: false), "~/Applications")
@@ -539,4 +540,88 @@ func whatsNewCardChecks() {
         print("    three line-ups framed in \(String(format: "%.2f", took)) s")
     }
     check("whatsNewStillFramesAButterflyAndABloom", whatsNewStillFramesAButterflyAndABloom)
+}
+
+/// t11: the live preview's evidence (the card's drawn check and why it went, `EnergyLog.cardDrawn`, `cardClosed`) and
+/// the test copy's readings in the run loop's common modes (`CommonTimer`), so an open menu no longer pauses them.
+func cardDrawnChecks() {
+    let root: URL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    func source(_ path: String) -> String {
+        (try? String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)) ?? ""
+    }
+
+    func cardDrawnLogShapes() throws {
+        // energy.sh's selftest parses these exact lines; a change here must change it too.
+        let drawn: String = EnergyLog.cardDrawn(pid: 501, launch: "0a1b2c3d4e5f6789", share: 0.97666, width: 460, height: 333)
+        try expect(drawn == "energy-card: pid=501 launch=0a1b2c3d4e5f6789 drawn=0.977 size=460x333", drawn)
+        let empty: String = EnergyLog.cardDrawn(pid: 501, launch: nil, share: 0, width: 460, height: 333)
+        try expect(empty == "energy-card: pid=501 launch=none drawn=0.000 size=460x333", empty)
+        let wild: String = EnergyLog.cardDrawn(pid: 501, launch: nil, share: Double.nan, width: 1, height: 1)
+        try expect(wild.contains(" drawn=0.000 "), "a share that is not a number logs as 0: \(wild)")
+        let over: String = EnergyLog.cardDrawn(pid: 501, launch: nil, share: 1.5, width: 1, height: 1)
+        try expect(over.contains(" drawn=1.000 "), "a share over 1 logs as 1: \(over)")
+        let closed: String = EnergyLog.cardClosed(pid: 501, launch: "0a1b2c3d4e5f6789", reason: .click, after: 41.4)
+        try expect(closed == "energy-card: pid=501 launch=0a1b2c3d4e5f6789 closed=click after=41s", closed)
+        let reasons: [String] = WhatsNew.CloseReason.allCases.map { (r: WhatsNew.CloseReason) -> String in r.rawValue }
+        let wordy: Bool = reasons.allSatisfy { (r: String) -> Bool in
+            !r.isEmpty && r.unicodeScalars.allSatisfy { (c: Unicode.Scalar) -> Bool in (c >= "a" && c <= "z") || c == "-" }
+        }
+        try expect(wordy && Set(reasons).count == reasons.count, "close reasons are distinct lowercase words: \(reasons)")
+        let energy: String = source("Tools/energy.sh")
+        try expect(energy.contains("drawn=0.977 size=460x333") && energy.contains("closed=click after=1s"),
+                   "energy.sh's selftest uses the same drawn and closed shapes")
+    }
+    check("cardDrawnLogShapes", cardDrawnLogShapes)
+
+    func cardDrawnShare() throws {
+        let clear: [UInt8] = [UInt8](repeating: 0, count: 4 * 100)
+        try expect(WhatsNew.drawnShare(rgba: clear) == 0, "a transparent bitmap: nothing drawn")
+        try expect(WhatsNew.drawnShare(rgba: []) == 0, "an empty bitmap: nothing drawn")
+        var quarter: [UInt8] = clear
+        for i in 0..<25 { quarter[i * 4 + 3] = 255 }
+        try expect(WhatsNew.drawnShare(rgba: quarter) == 0.25, "a quarter opaque: \(WhatsNew.drawnShare(rgba: quarter))")
+        var faint: [UInt8] = clear
+        for i in 0..<100 { faint[i * 4 + 3] = 8 }
+        try expect(WhatsNew.drawnShare(rgba: faint) == 0, "alpha at the threshold (8 of 255) does not count")
+        var colourOnly: [UInt8] = clear
+        for i in 0..<100 { colourOnly[i * 4] = 255; colourOnly[i * 4 + 1] = 255 }
+        try expect(WhatsNew.drawnShare(rgba: colourOnly) == 0, "colour with no alpha is not drawn")
+    }
+    check("cardDrawnShare", cardDrawnShare)
+
+    func cardPreviewWiring() throws {
+        let card: String = source("Sources/ASCIIAnimals/WhatsNewCard.swift")
+        try expect(card.contains("if preview { watchPreview(session) }"), "the live preview measures and watches the card it opened")
+        try expect(card.contains("EnergyLog.cardDrawn(pid: pid, launch: launch"), "the preview logs the drawn line with its launch id")
+        try expect(card.contains("EnergyLog.cardClosed(pid: pid, launch: launch"), "the preview logs why the card went")
+        // Every way the card goes names its reason (the probe's and a failed opening's teardown need none).
+        let reasons: [String] = ["reason: .click", "reason: .ownClick", "reason: .screens", "reason: .esc", "reason: .meadow",
+                                 "reason: .tryMeadow", "reason: .keep", "reason: .welcome"]
+        for r in reasons { try expect(card.contains(r), "a close with \(r)") }
+        let energy: String = source("Tools/energy.sh")
+        try expect(energy.contains("launch_test 0 1 0 preview bg") && energy.contains("exec open ${5:+-g} "),
+                   "the preview opens the test copy in the background (the director answers without a click)")
+        try expect(energy.contains("card_drawn_check \"$APPLOG\" \"$TEST_PID\" \"$LAUNCH_ID\""), "the preview checks the drawn line before asking")
+    }
+    check("cardPreviewWiring", cardPreviewWiring)
+
+    func readingTimerCommonModes() throws {
+        // A stand-in for AppKit's event-tracking mode (a menu open): a mode of its own, made common.
+        let loop: RunLoop = RunLoop.current
+        let tracking = RunLoop.Mode("OceanChecks.tracking")
+        CFRunLoopAddCommonMode(loop.getCFRunLoop(), CFRunLoopMode(tracking.rawValue as CFString))
+        var common = 0, plain = 0
+        let a: Timer = CommonTimer.repeating(every: 0.01, on: loop) { (_: Timer) in common += 1 }
+        let b = Timer(timeInterval: 0.01, repeats: true) { (_: Timer) in plain += 1 }
+        loop.add(b, forMode: .default)
+        let until: Date = Date().addingTimeInterval(0.2)
+        while Date() < until { _ = loop.run(mode: tracking, before: until) }
+        a.invalidate()
+        b.invalidate()
+        try expect(common >= 3, "a common-mode timer fires while the loop tracks (\(common) times)")
+        try expect(plain == 0, "a default-mode timer waits while the loop tracks (\(plain) times): the old gap")
+        let app: String = source("Sources/ASCIIAnimals/main.swift")
+        try expect(app.contains("frameMeter = CommonTimer.repeating(every: 5)"), "the test copy's readings use the common modes")
+    }
+    check("readingTimerCommonModes", readingTimerCommonModes)
 }

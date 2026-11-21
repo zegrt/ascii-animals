@@ -93,7 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// The energy-test copy logs, every 5 seconds, the power state and the frames actually drawn per second on each
+    /// The energy-test copy logs, every 5 seconds (menus open or not), the power state and the frames actually drawn per second on each
     /// display (`EnergyLog.reading`), so Tools/energy.sh can check what was measured: the mode, every display at the
     /// asked rate, the displays drawn against those attached, never on battery or in Low Power Mode.
     private func startFrameMeter() {
@@ -101,7 +101,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var lastTime: TimeInterval = ProcessInfo.processInfo.systemUptime
         let pid: Int32 = getpid()
         let launch: String? = Launch.plan.launchID
-        frameMeter = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+        // In the run loop's common modes: a reading never stalls while one of the test copy's menus is open.
+        frameMeter = CommonTimer.repeating(every: 5) { [weak self] _ in
             guard let self, let d = self.director else { return }
             let now: TimeInterval = ProcessInfo.processInfo.systemUptime
             let elapsed: Double = max(0.001, now - lastTime)
@@ -259,6 +260,7 @@ if CommandLine.arguments.contains("--uninstall") {
 let snapshots: [(String, (URL) -> Void)] = [("--snapshot-onboarding", OnboardingController.snapshot(to:)),
                                             ("--snapshot-whatsnew", WhatsNewCard.snapshot(to:)),
                                             ("--snapshot-whatsnew-probe", WhatsNewCard.probe(to:)),
+                                            ("--snapshot-whatsnew-drawn", WhatsNewCard.drawnProbe(to:)),
                                             ("--snapshot-identity", IdentityProbe.run(to:)),
                                             ("--snapshot-about", AboutWindow.snapshot(to:)),
                                             ("--snapshot-menu", StatusMenu.snapshot(to:))]
