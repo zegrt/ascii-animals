@@ -22,6 +22,8 @@ final class OceanDirector {
     /// Called after the first frame on every screen, and after looks change.
     var onLooksSettled: (() -> Void)?
     private(set) var lastError: String?
+    /// Frames committed on all screens since launch (the energy-test copy's frame-rate log reads it).
+    private(set) var framesDrawn: Int = 0
 
     init(renderer: OceanRenderer, store: SettingsStore, signals: SystemSignals) {
         self.renderer = renderer
@@ -122,6 +124,7 @@ final class OceanDirector {
             if first { DispatchQueue.main.async { self?.firstFrame(s) } }
         }
         cb.commit()
+        framesDrawn += 1
         if s.stillPending {
             s.stillPending = false
             s.setRunning(false)
@@ -140,8 +143,10 @@ final class OceanDirector {
     /// unchanged keeps its sim (laid out to any new geometry); `fresh` forces
     /// new sims, e.g. when switching between shared and separate oceans.
     func screensChanged(fresh: Bool = false) {
-        let current = NSScreen.screens
-        guard let primary = current.first else { return }
+        // Flipped against the menu-bar screen even when the energy-test copy keeps to the built-in display alone.
+        guard let primary = NSScreen.screens.first else { return }
+        let current: [NSScreen] = OceanDirector.drawnScreens(NSScreen.screens, builtInOnly: Launch.plan.builtInDisplayOnly)
+        if current.isEmpty { Log.write("no built-in display to draw on (built-in display only)") }
         let infos = current.map {
             ScreenInfo(id: Int($0.displayID), frame: ScreenGeometry.flip($0.frame, primaryHeight: primary.frame.height),
                        scale: $0.backingScaleFactor)
@@ -181,6 +186,13 @@ final class OceanDirector {
             }
         }
         apply(next)
+    }
+
+    /// The screens to draw on: all of them, or (the energy-test copy calibrating the Meadow's count) the built-in
+    /// display alone, so the laptop's density is what is seen. None when the built-in is closed or absent.
+    static func drawnScreens(_ screens: [NSScreen], builtInOnly: Bool) -> [NSScreen] {
+        guard builtInOnly else { return screens }
+        return screens.filter { CGDisplayIsBuiltin($0.displayID) != 0 }
     }
 
     private func report(_ error: Error) {

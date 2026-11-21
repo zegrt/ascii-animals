@@ -24,7 +24,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         } else {
             item.button?.title = "≈"
         }
-        item.button?.toolTip = "ASCII Animals"
+        item.button?.toolTip = Launch.identity.isEnergyTest ? "\(AppIdentity.energyTestName) (energy test)" : "ASCII Animals"
         let menu = NSMenu()
         menu.delegate = self
         item.menu = menu
@@ -42,6 +42,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     /// a line, submenus indented: `--snapshot-menu <txt>`. A menu can't be drawn off screen, so this is its outline:
     /// titles, checkmarks, badges, subtitles, key equivalents and what's disabled.
     static func snapshot(to url: URL) {
+        let lines: [String] = outline()
+        try? (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+        print("wrote \(url.path)")
+    }
+
+    /// The menu's outline for the snapshot settings, one item a line (`snapshot(to:)`, the identity probe).
+    static func outline() -> [String] {
         let app = AppDelegate()
         app.store = SettingsStore.snapshot()
         app.arrival = SettingsStore.snapshotArrival()
@@ -67,8 +74,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             }
         }
         walk(menu, 0)
-        try? (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
-        print("wrote \(url.path)")
+        return lines
     }
 
     /// The icon's frame on screen, for the welcome's "Settings live up here"; nil when hidden.
@@ -132,6 +138,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let s = app.store.settings
+
+        // The energy-test copy says so first, so it is never taken for the app people install.
+        if Launch.identity.isEnergyTest {
+            menu.addItem(header("\(AppIdentity.energyTestName): energy test copy"))
+        }
 
         // Things that want attention come first.
         var notices = false
@@ -246,25 +257,36 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
         add(menu, "Settings…", #selector(openSettings), symbol: "gearshape", key: ",")
-        add(menu, "Restore Original Wallpaper", #selector(restoreWallpaper), symbol: "photo.on.rectangle")
-            .toolTip = "Put your own wallpaper back and stop matching the lock screen."
-        add(menu, "Open at Login", #selector(toggleLogin), state: LoginItem.isEnabled)
+        let plan: LaunchPlan = Launch.plan
+        if plan.matchesSystemWallpaper {
+            add(menu, "Restore Original Wallpaper", #selector(restoreWallpaper), symbol: "photo.on.rectangle")
+                .toolTip = "Put your own wallpaper back and stop matching the lock screen."
+        }
+        if plan.changesLoginItem {
+            add(menu, "Open at Login", #selector(toggleLogin), state: LoginItem.isEnabled)
+        }
         menu.addItem(.separator())
 
         add(menu, "About ASCII Animals", #selector(openAbout), symbol: "info.circle")
-        add(menu, app.updates.state == .checking ? "Checking for Updates…" : "Check for Updates…",
-            app.updates.state == .checking ? nil : #selector(checkUpdates), symbol: "arrow.triangle.2.circlepath")
+        if plan.startsUpdates {
+            add(menu, app.updates.state == .checking ? "Checking for Updates…" : "Check for Updates…",
+                app.updates.state == .checking ? nil : #selector(checkUpdates), symbol: "arrow.triangle.2.circlepath")
+        }
         let help = NSMenu()
-        add(help, "Welcome Tour", #selector(welcomeTour), symbol: "sparkles")
-            .toolTip = "The first-launch welcome, again."
-        help.addItem(.separator())
+        if plan.greeting == .asSaved {   // the energy-test copy shows no welcome (`AppDelegate.showWelcome`)
+            add(help, "Welcome Tour", #selector(welcomeTour), symbol: "sparkles")
+                .toolTip = "The first-launch welcome, again."
+            help.addItem(.separator())
+        }
         add(help, "Report a Problem…", #selector(reportProblem), symbol: "exclamationmark.bubble")
             .toolTip = "Opens a GitHub issue with diagnostics filled in. You see it before anything is sent."
         add(help, "Copy Diagnostics", #selector(copyDiagnostics), symbol: "doc.on.clipboard")
             .toolTip = "Version, macOS, displays and settings, for pasting into a message."
-        help.addItem(.separator())
-        add(help, "Uninstall ASCII Animals…", #selector(uninstall), symbol: "trash")
-            .toolTip = "Puts your wallpaper back and removes the app and everything it saved."
+        if plan.offersUninstall {
+            help.addItem(.separator())
+            add(help, "Uninstall ASCII Animals…", #selector(uninstall), symbol: "trash")
+                .toolTip = "Puts your wallpaper back and removes the app and everything it saved."
+        }
         submenu(menu, "Help", symbol: "questionmark.circle", help)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit ASCII Animals", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")

@@ -21,11 +21,12 @@ enum WhatsNewCard {
     private static var presenter: WhatsNew.Presenter?
     private static var looker: Timer?
 
-    /// Developer flag `ASCII_ANIMALS_PREVIEW_WHATSNEW=1`: the card on the real desktop once, as an upgrader sees it,
-    /// whatever has been saved. The once-only flag and `arrival.v1` are neither read nor written (the launch skips the
-    /// arrival and the hand-over too: `main.swift`), the card saves nothing, and "Try the Meadow", Keep and Esc only
-    /// close it (`PreviewHost`). The welcome from Help is off for the run.
-    static let preview: Bool = ProcessInfo.processInfo.environment["ASCII_ANIMALS_PREVIEW_WHATSNEW"] == "1"
+    /// The energy-test copy launched with `ASCII_ANIMALS_PREVIEW_WHATSNEW=1` (`LaunchPlan.Greeting.whatsNewPreview`;
+    /// the app people install ignores the flag): the card on the real desktop once, as an upgrader sees it. Its
+    /// settings are the defaults held in memory (`LaunchPlan.transientSettings`), the once-only flag and `arrival.v1`
+    /// are neither read nor written, the card saves nothing, and "Try the Meadow", Keep and Esc only close it
+    /// (`PreviewHost`). The welcome from Help is off for the run.
+    static let preview: Bool = Launch.plan.greeting == .whatsNewPreview
     /// The preview's once-only flag: this run's memory only.
     private static var previewShown = false
 
@@ -375,8 +376,8 @@ extension AppDelegate: WhatsNewHost {
     func tryMeadow() { store.update { $0.habitat = .meadow } }
 }
 
-/// The live preview's host (`WhatsNewCard.preview`): the card reads the app's settings and changes nothing. On the
-/// Meadow it is shown as to someone on the Ocean (an upgrader is never shown it on the Meadow), in memory only.
+/// The live preview's host (`WhatsNewCard.preview`): the card reads the app's settings (held in memory in the preview)
+/// and changes nothing. On the Meadow it is shown as to someone on the Ocean (an upgrader is never shown it on the Meadow), in memory only.
 final class PreviewHost: WhatsNewHost {
     private weak var base: WhatsNewHost?
     init(over base: WhatsNewHost) { self.base = base }

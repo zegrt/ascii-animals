@@ -20,7 +20,10 @@ final class SystemWallpaper {
     private var generation = 0
     private let work = DispatchQueue(label: "ascii-animals.stills", qos: .utility)
 
-    init(renderer: OceanRenderer) {
+    /// Nil in the energy-test copy (`LaunchPlan.matchesSystemWallpaper`), before anything is read or made: no
+    /// stills, no `wallpaperMemory.v1`, the system wallpaper never touched.
+    init?(renderer: OceanRenderer) {
+        guard Launch.plan.matchesSystemWallpaper else { return nil }
         self.renderer = renderer
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         stillsFolder = support.appendingPathComponent("ASCII Animals/Stills", isDirectory: true)

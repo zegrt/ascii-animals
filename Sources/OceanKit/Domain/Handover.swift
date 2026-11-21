@@ -61,9 +61,10 @@ public enum Handover {
     public static let sharksUninstallArguments = ["--uninstall", "--yes"]
 
     /// Whether ASCII Animals acts on ASCII Sharks at all: only the real app, never a bare dev binary
-    /// (no bundle ID, its own defaults) nor a run with ASCII_ANIMALS_NO_HANDOVER set.
+    /// (no bundle ID, its own defaults), the energy-test copy (`AppIdentity`) nor a run with
+    /// ASCII_ANIMALS_NO_HANDOVER set (`LaunchPlan.runsHandover`).
     public static func enabled(bundleID: String?, environment: [String: String]) -> Bool {
-        bundleID == animalsBundleID && environment["ASCII_ANIMALS_NO_HANDOVER"] == nil
+        LaunchPlan(bundleID: bundleID, environment: environment).runsHandover
     }
 
     /// Apps that appeared in the running list while ASCII Animals runs (KVO on `runningApplications`:

@@ -3,7 +3,9 @@ import AppKit
 /// Removes ASCII Animals completely: puts the user's wallpaper back first,
 /// then the login item, files, preferences and the app itself.
 enum Uninstaller {
+    /// The energy-test copy has no uninstaller (`LaunchPlan.offersUninstall`): no question, no answer but no.
     static func confirm() -> Bool {
+        guard Launch.plan.offersUninstall else { return false }
         NSApp.activate(ignoringOtherApps: true)
         let a = NSAlert()
         a.messageText = "Uninstall ASCII Animals?"
@@ -17,6 +19,7 @@ enum Uninstaller {
     /// Returns what it couldn't do (empty when everything went).
     @discardableResult
     static func run(app: AppDelegate?) -> [String] {
+        guard Launch.plan.offersUninstall else { return ["the energy-test copy has no uninstaller"] }
         var problems: [String] = []
         app?.isUninstalling = true
         app?.wallpaper?.restoreAll()

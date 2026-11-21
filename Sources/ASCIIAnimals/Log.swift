@@ -2,10 +2,11 @@ import Foundation
 
 /// A small rolling log at ~/Library/Logs/ASCII Animals/ascii-animals.log
 /// (512 KB, one backup). It stays on this Mac; Report a Problem includes
-/// its last lines only when the user asks.
+/// its last lines only when the user asks. The energy-test copy keeps its own folder (`AppIdentity.folderName`).
 enum Log {
     static let folder = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("Logs/ASCII Animals", isDirectory: true)
+        .appendingPathComponent("Logs", isDirectory: true)
+        .appendingPathComponent(Launch.identity.folderName, isDirectory: true)
     static let file = folder.appendingPathComponent("ascii-animals.log")
     private static let queue = DispatchQueue(label: "ascii-animals.log")
     private static let limit = 512 * 1024
@@ -44,10 +45,10 @@ enum Log {
     }
 }
 
-/// Knows whether the last session ended without a clean quit.
+/// Knows whether the last session ended without a clean quit. The energy-test copy keeps its own marker.
 enum CrashMarker {
     static let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("ASCII Animals", isDirectory: true)
+        .appendingPathComponent(Launch.identity.folderName, isDirectory: true)
     static let file = folder.appendingPathComponent("running")
 
     /// Call at launch: true if the previous run didn't quit cleanly.

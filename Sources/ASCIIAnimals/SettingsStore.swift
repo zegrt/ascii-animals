@@ -8,8 +8,8 @@ final class SettingsStore {
     var onChange: ((_ old: Settings, _ new: Settings) -> Void)?
 
     private(set) var settings: Settings
-    /// False for the snapshots: changes stay in memory.
-    private let persists: Bool
+    /// False for the snapshots and the what's-new preview: changes stay in memory.
+    let persists: Bool
 
     init() {
         settings = SettingsCodec.decode(defaults.data(forKey: SettingsStore.key))
