@@ -160,6 +160,7 @@ struct AboutView: View {
                     VStack(spacing: 1) {
                         Text(.init("The Ocean comes from [ascii-sharks](\(AppInfo.sharksURL.absoluteString)),"))
                         Text(.init("the Web from [ascii-spiders](\(AppInfo.spidersURL.absoluteString)), both by [@stackedlol](https://github.com/stackedlol)."))
+                        Text("The Meadow is XERO WORKS' own.")
                     }
                     Text("Set in Geist Mono, under the SIL Open Font License.")
                 }

@@ -18,7 +18,7 @@ Push a tag like `v3.1` that matches `Info.plist` and a `CHANGELOG.md` section, a
 
 ```sh
 swift run -c release OceanChecks                       # domain checks + headless Metal renders
-swift run -c release OceanTool still out.png 1440x900  # --habitat web --light --calm --sharks mako,tiger --seed 3
+swift run -c release OceanTool still out.png 1440x900  # --habitat web|meadow --light --calm --sharks mako,tiger --seed 3
 swift run -c release OceanTool frames out/ 1080x675    # a continuous run as PNG frames (--habitat web --interact: with the pointer)
 swift run -c release OceanTool bench                   # simulation cost
 swift run -c release OceanTool bench --desk --habitat web  # CPU per second on a two-screen desk, 30 and 15 fps
@@ -28,13 +28,14 @@ OCEAN_DEBUG=1 .build/release/ASCIIAnimals             # log power-mode decisions
 
 ## How it works
 
-Each **habitat** is a `HabitatSim`: the **Ocean** (`OceanSim`, sharks and boids) or the **Web** (`WebSim`, the port of ascii-spiders). The host drives whichever one is chosen the same way: a fixed 60 Hz step, the pointer and clicks, a layout across your displays, and a settled still for the system wallpaper. Switching habitats dissolves one into the other.
+Each **habitat** is a `HabitatSim`: the **Ocean** (`OceanSim`, sharks and boids), the **Web** (`WebSim`, the port of ascii-spiders) or the **Meadow** (`MeadowSim`, butterflies and flowers, our own). The host drives whichever one is chosen the same way: a fixed 60 Hz step, the pointer and clicks, a layout across your displays, and a settled still for the system wallpaper. Switching habitats dissolves one into the other.
 
 ```mermaid
 flowchart LR
   subgraph CPU["CPU · Swift"]
     O["OceanSim<br/>boids + sharks<br/>fixed 60 Hz step"] --> P["FramePacker<br/>uniforms + fish grid"]
     W["WebSim<br/>spiders, webs, flies<br/>fixed 60 Hz step"] --> C["WebPainter<br/>CellCanvas"]
+    M["MeadowSim<br/>butterflies, flowers, air<br/>fixed 60 Hz step"] --> MP["MeadowPainter<br/>CellCanvas"]
   end
   subgraph GPU["GPU · Metal (one frame)"]
     A["wake<br/>cols × rows<br/>ripples + eat flashes"] --> B["cells<br/>which shark part<br/>or fish per cell"]
@@ -44,6 +45,7 @@ flowchart LR
   P --> A
   P --> B
   C --> E
+  MP --> E
   D --> F["desktop-level window<br/>below your icons"]
   E --> F
 ```
@@ -52,6 +54,7 @@ flowchart LR
 |---|---|---|
 | **Domain** | `Sources/OceanKit/Domain` | The habitats' shared protocol (`HabitatSim`), the Ocean's simulation, settings, power policy, pointer routing, frame packing, the hand-over from ASCII Sharks, wallpaper bookkeeping and update rules. Pure Swift with no AppKit, and fully checked. |
 | **Web** | `Sources/OceanKit/Web` | A faithful port of [ascii-spiders](https://github.com/stackedlol/ascii-spiders) (MIT, commit 89a7721): orb webs, weavers, the jumper, flies, and the painter that draws them into a `CellCanvas`. Checked against the original's numbers. |
+| **Meadow** | `Sources/OceanKit/Meadow` | The Meadow, XERO WORKS' own: the air, the flowers, the butterflies' flight and choices, and the painter that draws them into a `CellCanvas`. Ported from our sketch and checked against its numbers. |
 | **Render** | `Sources/OceanKit/Render` | The MSL shaders (compiled at runtime), `CellCanvas`, the Geist Mono glyph atlas and offscreen stills. |
 | **Host** | `Sources/ASCIIAnimals` | AppKit: windows, display links, system signals, the menu, settings, the system wallpaper and self-updating. |
 
@@ -61,6 +64,8 @@ The **Ocean** is rendered on a grid of ASCII cells. Each frame:
 3. The **compose** pass draws the grid, wake dots, eat flashes and the glyphs from a font atlas.
 
 The **Web** is drawn on the CPU, as the original draws its 2D canvas: `WebPainter` fills a `CellCanvas` (a block colour, up to two glyphs and their ink per cell), and one GPU pass, `canvas_main`, composes it at full resolution with the same glyph atlas.
+
+The **Meadow** is drawn the same way as the Web. It was designed first as a sketch: a single web page with a slider for every number, tuned by eye ([`Tools/meadow-sketch/meadow.html`](https://github.com/zegrt/ascii-animals/blob/4e1b869/Tools/meadow-sketch/meadow.html) on the `meadow-sketch` branch, at 4e1b869). The sketch is the Meadow's original, as ascii-spiders is the Web's: `MeadowSim` and `MeadowPainter` port it with its own random stream, so a seed grows the same meadow, and every tuned number lives in `MeadowTuning`, each with the sketch line it comes from. `OceanChecks` compares the air and the flowers against numbers the sketch itself produced (`Sources/OceanChecks/Fixtures`), and holds the rest to safety rules: finite and sane, nothing allocated per frame, the same meadow for a seed, several screens and never more than 12 butterflies across them. The look and the flight are judged by eye, on films beside the sketch.
 
 **Web reference tooling.** [`Tools/web-reference/`](../Tools/web-reference) runs the original ascii-spiders under node with the port's seeded random stream, producing the reference numbers `OceanChecks` compares the port against, plus a side-by-side parity page for Chrome. Its README has the steps.
 
@@ -86,6 +91,10 @@ Most of a live wallpaper's cost is WindowServer redrawing everything above it on
 | **Web, 30 fps** | **9.6% CPU** | 22.1% | ~230 MB (311 peak) |
 | Ocean, 15 fps | 10.3% CPU | 15.6% | ~270 MB |
 | **Web, 15 fps** | **8.3% CPU** | 16.2% | ~297 MB |
+| Meadow, 30 fps | *not yet measured* | | |
+| Meadow, 15 fps | *not yet measured* | | |
+
+The Meadow's rows come from a later measurement session with a different set of displays, recorded with that setup.
 
 Memory here is the app's footprint as `top` reports it; most of it is the displays' frame buffers. `swift run -c release OceanTool bench --desk --habitat web` measures the CPU work per second offscreen on the same layout.
 
