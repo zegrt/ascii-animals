@@ -704,7 +704,7 @@ quit_our_test_copies() { # every test copy of this checkout, verified one by one
 cleanup() {
   local rc=$? ok=1 i
   [ "$CLEANING" = 1 ] && return; CLEANING=1
-  trap '' INT TERM
+  trap '' INT TERM HUP
   set +e
   exec 3<&- 2>/dev/null
   if [ "$DRY" != 1 ] && { [ "$LAUNCHED" = 1 ] || [ "$MODE" = recover ]; }; then
@@ -728,6 +728,10 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'echo "interrupted; cleaning up (Ctrl-C again is ignored until done)" >&2; exit 130' INT TERM
+# The Terminal closed (HUP) or the reader of its output went away (PIPE): those kill a shell without its EXIT trap,
+# so they become an ordinary exit too, and the cleanup above runs.
+trap 'exit 129' HUP
+trap '' PIPE
 
 # ---- recover: a killed run's leftovers (never the director's apps) ----
 
