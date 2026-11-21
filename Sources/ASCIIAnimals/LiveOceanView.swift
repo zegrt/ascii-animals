@@ -101,8 +101,11 @@ final class LiveOceanView: NSView {
 
     /// A new line-up: when `Habitats.needsRebuild` says so, a new sim, warmed,
     /// with a soft fade so the swap doesn't pop. Other changes are ignored.
-    func rebuild(_ newSettings: OceanKit.Settings) {
-        guard Habitats.needsRebuild(old: settings, new: newSettings) else { return }
+    /// `reopening` (the About banner shown again): also a new Meadow line-up (`Habitats.needsFreshLook`).
+    func rebuild(_ newSettings: OceanKit.Settings, reopening: Bool = false) {
+        let fresh: Bool = reopening ? Habitats.needsFreshLook(old: settings, new: newSettings)
+                                    : Habitats.needsRebuild(old: settings, new: newSettings)
+        guard fresh else { return }
         settings = newSettings
         sim = Habitats.make(newSettings, seed: seed &+ 1)
         laidOut = false

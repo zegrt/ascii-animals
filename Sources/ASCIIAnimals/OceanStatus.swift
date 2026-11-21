@@ -62,6 +62,7 @@ struct OceanStatus: Equatable {
         switch h {
         case .ocean: return "Swimming"
         case .web: return "Weaving"
+        case .meadow: return "Fluttering"
         }
     }
 
