@@ -52,12 +52,21 @@ public final class OceanRenderer {
     }
 }
 
-/// Mirrors `CanvasUniforms` in Shaders.swift.
+/// Mirrors `CanvasUniforms` in Shaders.swift. `canvas_main`'s inputs:
+/// buffer 0 these uniforms.
+/// Per-cell textures, `cols x rows`, one texel per cell, row-major as the
+/// `CellCanvas` arrays: 0 block (rgba8), 1 ink (rgba8), 2 glyph (r8 uint),
+/// 4 overlay ink (rgba8), 5 overlay glyph (r8 uint), 6 ground (rgba8, a == 0:
+/// plain background), read only when misc.y is 1. A frame whose paint wrote no
+/// ground (`CellCanvas.hasGround`) uploads none: misc.y is 0 and the block
+/// texture stands in at index 6, unread.
+/// Texture 3 is not per cell: the glyph atlas (r8Unorm, one glyph tile per
+/// `GlyphAtlas` index, sized from the cell size and scale; `GlyphAtlas.make`).
 struct CanvasUniforms {
     var grid: SIMD4<Float>       // cols, rows, cell w, cell h (points)
     var background: SIMD4<Float> // rgb, scale
     var gridColor: SIMD4<Float>
-    var misc: SIMD4<Float>       // reveal, 0, 0, 0
+    var misc: SIMD4<Float>       // reveal, ground (1: read texture 6, 0: none), 0, 0
 }
 
 /// Per-screen GPU state: wake ping-pong, cell classification, glyph atlas,
@@ -88,6 +97,13 @@ public final class ViewportRenderer {
     /// Canvas habitats: the CPU grid and, per ring slot, its upload (block, ink, glyph, overlay ink and glyph).
     private var canvas: CellCanvas?
     private var canvasTextures: [(block: MTLTexture, ink: MTLTexture, glyph: MTLTexture, overInk: MTLTexture, overGlyph: MTLTexture)] = []
+    /// Per ring slot, the canvas's ground; made the first time a canvas here has one (grow-only: kept until the grid
+    /// changes), so a habitat without a ground allocates and uploads nothing more. If making them fails, that is
+    /// logged once and frames draw without a ground until the next resize.
+    private var groundTextures: [MTLTexture] = []
+    private var groundTexturesFailed = false
+    /// Ground uploads since this viewport was made: one per frame whose paint wrote a ground and whose ground textures exist, none otherwise.
+    public private(set) var groundUploads = 0
     /// What this viewport has already drawn of its world: steps run through
     /// the wake, and events stamped. A world shared by several screens is
     /// drawn by each at its own pace.
@@ -144,6 +160,8 @@ public final class ViewportRenderer {
         needsClear = true
         canvas = nil
         canvasTextures = []
+        groundTextures = []
+        groundTexturesFailed = false
     }
 
     private func pass(_ cb: MTLCommandBuffer, _ target: MTLTexture, _ pipe: MTLRenderPipelineState, _ label: String,
@@ -219,12 +237,32 @@ public final class ViewportRenderer {
         c.glyph.withUnsafeBytes { t.glyph.replace(region: region, mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: grid.cols) }
         c.overInk.withUnsafeBytes { t.overInk.replace(region: region, mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: grid.cols * 4) }
         c.overGlyph.withUnsafeBytes { t.overGlyph.replace(region: region, mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: grid.cols) }
+        var groundTexture: MTLTexture? = nil
+        if c.hasGround {
+            if groundTextures.isEmpty && !groundTexturesFailed {
+                do {
+                    groundTextures = try (0..<ViewportRenderer.inFlight).map { i in
+                        try texture(.rgba8Unorm, grid.cols, grid.rows, .shaderRead, "canvas ground \(i)")
+                    }
+                } catch {
+                    groundTexturesFailed = true
+                    renderLog.error("canvas ground textures failed (\(String(describing: error), privacy: .public)); drawing without a ground")
+                }
+            }
+            if !groundTextures.isEmpty {
+                let g = groundTextures[ring]
+                c.ground.withUnsafeBytes { g.replace(region: region, mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: grid.cols * 4) }
+                groundTexture = g
+                groundUploads += 1
+            }
+        }
 
+        let hasGround: Float = groundTexture == nil ? 0 : 1
         var u = CanvasUniforms(
-            grid: SIMD4(Float(grid.cols), Float(grid.rows), Float(grid.cell.width), Float(grid.cell.height)),
-            background: SIMD4(c.background, Float(scale)),
+            grid: SIMD4<Float>(Float(grid.cols), Float(grid.rows), Float(grid.cell.width), Float(grid.cell.height)),
+            background: SIMD4<Float>(c.background, Float(scale)),
             gridColor: c.gridColor,
-            misc: SIMD4(reveal, 0, 0, 0))
+            misc: SIMD4<Float>(reveal, hasGround, 0, 0))
         if canvasAtlas == nil && !canvasAtlasFailed {
             do {
                 canvasAtlas = try GlyphAtlas.make(device: r.device, cell: grid.cell, scale: scale, middle: .canvas)
@@ -242,6 +280,7 @@ public final class ViewportRenderer {
             enc.setFragmentTexture(atlas, index: 3)
             enc.setFragmentTexture(t.overInk, index: 4)
             enc.setFragmentTexture(t.overGlyph, index: 5)
+            enc.setFragmentTexture(groundTexture ?? t.block, index: 6)
         }
     }
 

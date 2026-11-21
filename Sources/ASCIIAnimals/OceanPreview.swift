@@ -107,6 +107,8 @@ final class OceanPreview: ObservableObject {
         l.webSpiders = s.webSpiders
         l.webFlies = s.webFlies
         l.webJumper = s.webJumper
+        l.meadowButterflies = s.meadowButterflies
+        l.meadowCount = s.meadowCount
         return l
     }
 

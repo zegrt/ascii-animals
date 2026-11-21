@@ -3,8 +3,11 @@ import OceanKit
 
 /// The menu bar item: a status line, quick choices, and the way to Settings.
 final class StatusMenu: NSObject, NSMenuDelegate {
-    private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    /// Made on first use, so the menu snapshot never puts an icon in the menu bar.
+    private lazy var item: NSStatusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private unowned let app: AppDelegate
+    /// The snapshot's status line (no director runs there).
+    private var statusOverride: OceanStatus?
 
     private static let appearances: [(Appearance, String, String)] = [
         (.dark, "Dark", "moon"),
@@ -27,6 +30,45 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         item.menu = menu
         app.updates.onChange = { [weak self] in self?.refreshIcon() }
         refreshIcon()
+    }
+
+    /// The menu's contents only: no menu bar item, no update watching.
+    private init(snapshotOf app: AppDelegate) {
+        self.app = app
+        super.init()
+    }
+
+    /// Debug: write the menu as built for the snapshot settings (`SettingsStore.snapshot()`) to a text file, one item
+    /// a line, submenus indented: `--snapshot-menu <txt>`. A menu can't be drawn off screen, so this is its outline:
+    /// titles, checkmarks, badges, subtitles, key equivalents and what's disabled.
+    static func snapshot(to url: URL) {
+        let app = AppDelegate()
+        app.store = SettingsStore.snapshot()
+        app.arrival = SettingsStore.snapshotArrival()
+        let s = app.store.settings
+        let m = StatusMenu(snapshotOf: app)
+        m.statusOverride = OceanStatus(title: OceanStatus.running(s.habitat), detail: "\(s.fps) fps", tone: .live)
+        let menu = NSMenu()
+        m.menuNeedsUpdate(menu)
+        var lines: [String] = []
+        func walk(_ menu: NSMenu, _ depth: Int) {
+            let pad = String(repeating: "    ", count: depth)
+            for it in menu.items {
+                if it.isSeparatorItem { lines.append(pad + "  ---"); continue }
+                if it.isSectionHeader { lines.append(pad + "  [\(it.title)]"); continue }
+                var line = pad + (it.state == .on ? "✓ " : "  ") + it.title
+                if let b = it.badge?.stringValue { line += "  (\(b))" }
+                if !it.keyEquivalent.isEmpty { line += "  ⌘\(it.keyEquivalent.uppercased())" }
+                if it.submenu != nil { line += "  ▸" }
+                if !it.isEnabled && it.submenu == nil { line += "  (disabled)" }
+                if #available(macOS 14.4, *), let sub = it.subtitle, !sub.isEmpty { line += "\n" + pad + "      " + sub }
+                lines.append(line)
+                if let sub = it.submenu { walk(sub, depth + 1) }
+            }
+        }
+        walk(menu, 0)
+        try? (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+        print("wrote \(url.path)")
     }
 
     /// The icon's frame on screen, for the welcome's "Settings live up here"; nil when hidden.
@@ -103,8 +145,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         }
         if notices { menu.addItem(.separator()) }
 
-        let status = OceanStatus.make(settings: s, mode: app.director?.mode, inputs: app.signals.inputs,
-                                      error: app.startupError ?? app.director?.lastError)
+        let status = statusOverride ?? OceanStatus.make(settings: s, mode: app.director?.mode, inputs: app.signals.inputs,
+                                                        error: app.startupError ?? app.director?.lastError)
         menu.addItem(statusItem(status))
         menu.addItem(.separator())
 
@@ -115,8 +157,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
 
         menu.addItem(header("Habitat"))
-        for (i, h) in HabitatKind.allCases.enumerated() {
-            add(menu, h.title, #selector(pickHabitat(_:)), state: s.habitat == h, tag: i)
+        for (i, h) in HabitatKind.offered.enumerated() {
+            let it = add(menu, h.title, #selector(pickHabitat(_:)), state: s.habitat == h, tag: i)
+            // macOS's own menu badge, for someone upgrading from before 3.1 until the Meadow has been picked once.
+            if h == .meadow && app.arrival.meadowIsNew(s) { it.badge = NSMenuItemBadge(string: "New") }
         }
 
         menu.addItem(.separator())
@@ -153,6 +197,22 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             add(spiders, "Flies", #selector(toggleFlies), state: s.webFlies)
             add(spiders, "Jumping Spider", #selector(toggleJumper), state: s.webJumper)
             submenu(menu, "Spiders", symbol: "ant", spiders)
+        case .meadow:
+            let butterflies = NSMenu()
+            butterflies.addItem(header("Line-Ups"))
+            let matched = MeadowLineUp.matching(s)
+            for (i, p) in Presets.meadowPresets.enumerated() {
+                let it = add(butterflies, p.title, #selector(pickButterflies(_:)), state: p == matched, tag: i)
+                if i < 9 { it.keyEquivalent = "\(i + 1)" }
+                subtitle(it, Presets.summary(p))
+            }
+            if matched == nil {
+                let custom = add(butterflies, "Your Line-Up", nil, state: true)
+                subtitle(custom, Presets.meadowSummary(s))
+            }
+            butterflies.addItem(.separator())
+            add(butterflies, "Edit Line-Up…", #selector(openSettings), symbol: "slider.horizontal.3")
+            submenu(menu, "Butterflies", symbol: "camera.macro", butterflies)
         }
 
         let look = NSMenu()
@@ -309,8 +369,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func toggleCalm() { app.store.update { $0.calm.toggle() } }
     @objc private func toggleGrid() { app.store.update { $0.grid.toggle() } }
     @objc private func toggleSharedOcean() { app.store.update { $0.sharedOcean.toggle() } }
-    @objc private func pickHabitat(_ i: NSMenuItem) { app.store.update { $0.habitat = HabitatKind.allCases[i.tag] } }
+    @objc private func pickHabitat(_ i: NSMenuItem) { app.store.update { $0.habitat = HabitatKind.offered[i.tag] } }
     @objc private func pickPreset(_ i: NSMenuItem) { app.store.update { $0.sharks = Presets.all[i.tag].sharks } }
+    @objc private func pickButterflies(_ i: NSMenuItem) {
+        guard Presets.meadowPresets.indices.contains(i.tag) else { return }
+        app.store.update { Presets.meadowPresets[i.tag].apply(to: &$0) }
+    }
     @objc private func pickSpiders(_ i: NSMenuItem) { app.store.update { $0.webSpiders = Presets.spiderPresets[i.tag].spiders } }
     @objc private func toggleFlies() { app.store.update { $0.webFlies.toggle() } }
     @objc private func toggleJumper() { app.store.update { $0.webJumper.toggle() } }
