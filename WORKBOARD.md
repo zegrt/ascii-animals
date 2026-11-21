@@ -45,6 +45,9 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-21: "ok what now?". Applies: new (r3's and r2's briefs trimmed to what a user would hit, like t11's; what
+  was dropped from them and from t11 (a2 parts included: the reminder checkpoint write, r2's stale-job stage checks)
+  moves to 3.1.1, nothing is lost; order unchanged: t11 (running) -> r1 right-size -> r3 -> r2).
 - 2026-11-21: the live pointer trace with the director (unchanged test copy 971a216, then r1's 3a5a7a8; plugged in).
   Applies: new (the popup is FOUND: while any notification banner shows, Notification Center puts a window over the
   whole built-in screen (layer 21, alpha 1, 1800 x 1169); 971a216 reads it as covering the desktop, so the fish keep
