@@ -806,6 +806,10 @@ record() { echo "$(utc) $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || e
 if [ "$DRY" = 1 ]; then
   echo "dry run ($MODE): the lock, the test domain and read-only checks; nothing launched, quit or sampled"
   preflight_processes report
+  # The test copy's own domain is shared by every checkout: a dry run never deletes it under a running test copy.
+  if [ "$DOMAIN" = "$TEST_ID" ] && [ -n "$(test_candidates)" ]; then
+    die "a test copy is running, and it uses $DOMAIN; a dry run leaves it alone (use ENERGY_TEST_DOMAIN=$TEST_ID.<word>)"
+  fi
   TOUCHED=1
   delete_domain || die "could not clear $DOMAIN"
   if [ "$MODE" = measure ] || [ "$MODE" = calibrate ]; then write_settings; fi
