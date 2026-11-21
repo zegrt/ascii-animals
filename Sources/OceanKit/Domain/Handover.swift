@@ -97,10 +97,11 @@ public enum Handover {
     /// The same, with 3.1's Meadow card: someone who used an earlier version (`Arrival.before31`) gets it once, on
     /// this launch or a later one, unless they found the Meadow already. The Web card for someone just come from ASCII
     /// Sharks goes first, as it always has; the Meadow card waits for the next launch, so only one card shows at a time.
-    /// A new user meets the Meadow in the tour and never gets the card.
+    /// A new user meets the Meadow in the tour and never gets the card. Someone upgrading whose 3.0 tour was never
+    /// marked seen (it was left early, or never reached the screen) has used the app already: the card, not the tour.
     public static func launchWelcome(onboarded: Bool, handedOver: Bool, webCardShown: Bool, habitat: HabitatKind,
                                      arrival: Arrival, meadowCardShown: Bool, meadowTried: Bool) -> LaunchWelcome {
-        if !onboarded { return .tour }
+        if !onboarded && arrival != .before31 { return .tour }
         if handedOver && !webCardShown && habitat == .ocean { return .webCard }
         let due: Bool = whatsNewDue(.meadow, arrival: arrival, shown: meadowCardShown, tried: meadowTried, habitat: habitat)
         return due ? .meadowCard : .nothing

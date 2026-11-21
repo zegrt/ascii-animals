@@ -43,7 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let wp = SystemWallpaper(renderer: renderer)
             wallpaper = wp
             d.onLooksSettled = { [weak self] in self?.refreshSystemWallpaper(delay: 1) }
-            signals.onChange = { [weak d] inputs in d?.apply(PowerPolicy.mode(inputs)) }
+            signals.onChange = { [weak d] inputs in
+                d?.apply(PowerPolicy.mode(inputs))
+                WhatsNewCard.powerChanged(inputs)
+            }
             store.onChange = { [weak self] old, new in self?.settingsChanged(old, new) }
             let nc = NotificationCenter.default
             observers.append(nc.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
@@ -186,6 +189,7 @@ if CommandLine.arguments.contains("--uninstall") {
 // Debug: render the welcome, the what's-new card or About to a PNG, or write the menu's outline, and exit.
 let snapshots: [(String, (URL) -> Void)] = [("--snapshot-onboarding", OnboardingController.snapshot(to:)),
                                             ("--snapshot-whatsnew", WhatsNewCard.snapshot(to:)),
+                                            ("--snapshot-whatsnew-probe", WhatsNewCard.probe(to:)),
                                             ("--snapshot-about", AboutWindow.snapshot(to:)),
                                             ("--snapshot-menu", StatusMenu.snapshot(to:))]
 for (flag, render) in snapshots {

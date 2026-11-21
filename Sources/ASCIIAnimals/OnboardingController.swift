@@ -31,9 +31,12 @@ enum OnboardingController {
         }
     }
 
+    /// The welcome from Help. The Meadow card goes first, at once, and stops waiting; if the welcome couldn't open,
+    /// a card that was still waiting waits again (it reads the saved flag at every look).
     static func show(app: AppDelegate) {
-        WhatsNewCard.dismiss()
+        let cardWaiting: Bool = WhatsNewCard.dismiss()
         present(app: app, card: false)
+        if cardWaiting && !isShowing { WhatsNewCard.showWhenSeen(app: app) }
     }
 
     private static func present(app: AppDelegate, card: Bool) {

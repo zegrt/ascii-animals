@@ -77,6 +77,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         return w.frame
     }
 
+    /// The icon's frame for the what's-new card to hang under: as above, and actually showing (`isVisible` can stay
+    /// true while the app menu covers the item). The card checks it lies in a menu bar (`WhatsNew.anchor`).
+    var iconAnchorFrame: NSRect? {
+        guard let f = iconScreenFrame, let w = item.button?.window, w.occlusionState.contains(.visible) else { return nil }
+        return f
+    }
+
     /// The crash notice goes once it's been acted on.
     private var crashNoticeDismissed = false
 

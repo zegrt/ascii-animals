@@ -18,88 +18,118 @@ enum WhatsNewCard {
     static func keepTitle(_ h: HabitatKind) -> String { "Keep the \(h.title)" }
 
     private static var current: WhatsNewSession?
-    private static var waiter: Timer?
+    private static var presenter: WhatsNew.Presenter?
+    private static var looker: Timer?
 
     /// About a second after launch, and only once the screen can be seen: after an automatic update at night the
-    /// card waits for the screen to wake and unlock rather than be marked shown on a locked screen.
+    /// card waits for the screen to wake and unlock rather than be marked shown on a locked screen. It looks once a
+    /// second (`WhatsNew.Presenter`); every look reads the session, lock and displays live.
     static func showWhenSeen(app: AppDelegate) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            if canBeSeen(app) { present(app: app); return }
-            waiter?.invalidate()
-            waiter = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { t in
-                guard canBeSeen(app) else { return }
-                t.invalidate()
-                waiter = nil
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { present(app: app) }
-            }
+        stopLooking()
+        let p = WhatsNew.Presenter(moment: { moment(app) }, open: { open(app) },
+                                   mark: { UserDefaults.standard.set(true, forKey: Handover.meadowCardKey) })
+        presenter = p
+        looker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+            if p.look() != .keepWaiting { stopLooking() }
         }
     }
 
-    private static func canBeSeen(_ app: AppDelegate) -> Bool {
-        let i: PowerInputs = app.signals.inputs
-        return !i.screenLocked && !i.displaysAsleep && i.sessionActive && !i.screensaverRunning && !NSScreen.screens.isEmpty
+    private static func stopLooking() {
+        looker?.invalidate()
+        looker = nil
+        presenter?.cancel()
+        presenter = nil
     }
 
-    private static func present(app: AppDelegate) {
-        guard current == nil, !OnboardingController.isShowing else { return }
-        // Found the Meadow meanwhile (the menu, Settings): nothing to tell.
+    private static func moment(_ app: AppDelegate) -> WhatsNew.Moment {
         let s = app.store.settings
-        guard s.habitat != .meadow, !s.meadowTried else { return }
-        // No renderer, no Meadow to show: the card waits for a launch that can show it.
-        guard let renderer = app.director?.renderer else { return }
-        let session = WhatsNewSession(app: app, renderer: renderer)
+        let seen: Bool = target(app).map { seeable(app, $0.screen) } ?? false
+        return WhatsNew.Moment(seeable: seen, screens: NSScreen.screens.count,
+                               shown: UserDefaults.standard.bool(forKey: Handover.meadowCardKey) || current != nil,
+                               habitat: s.habitat, tried: s.meadowTried, welcomeUp: OnboardingController.isShowing,
+                               canDraw: app.director?.renderer != nil)
+    }
+
+    /// Unlocked, on the console, no screensaver, and this screen's display awake, as macOS says right now (an
+    /// already-asleep display at launch sends no notification).
+    static func seeable(_ app: AppDelegate, _ screen: NSScreen) -> Bool {
+        let i: PowerInputs = PowerPolicy.reconcile(app.signals.inputs, session: SystemSignals.sessionTruth())
+        guard !i.screenLocked, i.sessionActive, !i.screensaverRunning, !i.displaysAsleep else { return false }
+        let key = NSDeviceDescriptionKey("NSScreenNumber")
+        guard let id = (screen.deviceDescription[key] as? NSNumber)?.uint32Value else { return false }
+        return CGDisplayIsAsleep(id) == 0
+    }
+
+    /// The screen the card goes on and the icon it hangs under: the icon's screen when the icon is a usable anchor
+    /// (`WhatsNew.anchor`), else the main display's top right with no arrow. nil with no screens.
+    static func target(_ app: AppDelegate) -> (screen: NSScreen, icon: CGRect?)? {
+        let screens: [NSScreen] = NSScreen.screens
+        guard let primary = screens.first else { return nil }
+        let frames: [(frame: CGRect, visible: CGRect)] = screens.map { ($0.frame, $0.visibleFrame) }
+        let icon: CGRect? = app.store.settings.showMenuBarIcon ? app.menu?.iconAnchorFrame : nil
+        guard let a = WhatsNew.anchor(icon: icon, screens: frames),
+              let screen = screens.first(where: { $0.visibleFrame == a.visible }) else { return (primary, nil) }
+        return (screen, a.icon)
+    }
+
+    /// Builds the card and orders it forward. True only when it reached a usable display that can still be seen;
+    /// otherwise it goes again at once, unmarked, and the presenter waits.
+    private static func open(_ app: AppDelegate) -> Bool {
+        guard current == nil, let renderer = app.director?.renderer, let t = target(app) else { return false }
+        let session = WhatsNewSession(host: app, renderer: renderer, visible: t.screen.visibleFrame, icon: t.icon)
         current = session
-        session.onFinish = { current = nil }
-        session.start()
-        UserDefaults.standard.set(true, forKey: Handover.meadowCardKey)
+        session.onFinish = { [weak session] in if current === session { current = nil } }
+        guard session.orderFront(), seeable(app, t.screen) else {
+            session.close(trying: false, now: true)
+            current = nil
+            return false
+        }
+        session.arm(power: app.signals.inputs)
+        return true
     }
 
-    /// Something else took over (the welcome tour opened from Help): the card goes, keeping the habitat.
-    static func dismiss() {
-        waiter?.invalidate()
-        waiter = nil
-        current?.close(trying: false)
+    /// The welcome is opening from Help: no more looks, and a card up goes at once (no fade under the welcome).
+    /// Returns whether a card was still waiting, so the caller can wait again if the welcome couldn't open (the
+    /// flag, saved by a welcome that reached the screen, decides).
+    @discardableResult
+    static func dismiss() -> Bool {
+        let waiting: Bool = presenter != nil && current == nil
+        stopLooking()
+        current?.close(trying: false, now: true)
+        current = nil
+        return waiting
     }
 
-    /// The Meadow was picked some other way while the card was up (the menu, Settings): it has done its job.
+    /// Settings changed elsewhere (the menu, Settings, the keyboard): on the Meadow, the card has done its job; on
+    /// another habitat, its Keep chip names that one.
     static func settingsChanged(_ s: OceanKit.Settings) {
-        if s.habitat == .meadow { current?.close(trying: false) }
+        current?.settingsChanged(s)
+    }
+
+    /// The machine's state changed: the live preview holds a still in Low Power Mode and stops when it can't be seen.
+    static func powerChanged(_ i: PowerInputs) {
+        current?.apply(WhatsNew.preview(i))
     }
 
     // MARK: Placement
 
-    static let width: CGFloat = 460
+    static var width: CGFloat { WhatsNew.width }
     static let arrowHeight: CGFloat = 8
-
-    /// Where the card goes, in screen coordinates (bottom-left origin): its frame, and the arrow's x in the card when
-    /// it points at the icon. Under the icon, the arrow toward the card's right, kept on the screen; with the icon
-    /// hidden, the top right of the screen.
-    static func placement(size: CGSize, icon: CGRect?, visible: CGRect) -> (frame: CGRect, arrowX: CGFloat?) {
-        let margin: CGFloat = 8
-        guard let icon else {
-            let origin = CGPoint(x: visible.maxX - size.width - 12, y: visible.maxY - 10 - size.height)
-            return (CGRect(origin: origin, size: size), nil)
-        }
-        let preferred: CGFloat = icon.midX - size.width * 0.8
-        let lo: CGFloat = visible.minX + margin
-        let hi: CGFloat = visible.maxX - margin - size.width
-        let x: CGFloat = min(max(preferred, lo), max(lo, hi))
-        let top: CGFloat = icon.minY - 2
-        let frame = CGRect(x: x, y: top - size.height, width: size.width, height: size.height)
-        let arrow: CGFloat = min(max(icon.midX - x, 24), size.width - 24)
-        return (frame, arrow)
-    }
 
     // MARK: Snapshot
 
     /// Debug: render the card as it sits under the menu bar, over the current habitat, to a PNG and exit (no Screen
     /// Recording needed). `--snapshot-whatsnew <png>`; `ASCII_ANIMALS_SNAPSHOT_LIGHT=1` the light look;
     /// `ASCII_ANIMALS_SNAPSHOT_HABITAT=web` someone on the Web ("Keep the Web"; default the Ocean);
-    /// `ASCII_ANIMALS_SNAPSHOT_ICON_HIDDEN=1` the menu bar icon hidden (top right, no arrow). The Meadow in the card is
-    /// its still, as in Low Power Mode.
+    /// `ASCII_ANIMALS_SNAPSHOT_ICON_HIDDEN=1` the menu bar icon hidden (top right, no arrow);
+    /// `ASCII_ANIMALS_SNAPSHOT_SCREEN=<w>x<h>` another screen size (a narrow one fits the card to it). The Meadow in the
+    /// card is its still, as in Low Power Mode.
     static func snapshot(to url: URL) {
         let env = ProcessInfo.processInfo.environment
-        let size = CGSize(width: 1512, height: 982)
+        var size = CGSize(width: 1512, height: 982)
+        if let wh = env["ASCII_ANIMALS_SNAPSHOT_SCREEN"]?.split(separator: "x").compactMap({ Double($0) }), wh.count == 2 {
+            size = CGSize(width: wh[0], height: wh[1])
+        }
         let scale: CGFloat = 2
         let light = env["ASCII_ANIMALS_SNAPSHOT_LIGHT"] != nil
         let iconHidden = env["ASCII_ANIMALS_SNAPSHOT_ICON_HIDDEN"] != nil
@@ -112,23 +142,18 @@ enum WhatsNewCard {
             let accent = SIMD3<Float>(0.2, 0.5, 1)
             let desk = try StillRenderer.render(settings: s, size: size, scale: scale, warmup: 6, systemIsDark: !light,
                                                 accent: accent, seed: 11, renderer: renderer)
-            let model = WhatsNewModel(light: light, keep: s.habitat, reduceMotion: true)
-            model.still = try WhatsNewSession.still(settings: s, light: light, renderer: renderer)
-            model.finishTyping()
-            model.contentVisible = true
-
             let menuBar: CGFloat = 33
             // Where a menu-bar icon would sit (as the welcome's snapshot has it), in bottom-left coordinates.
             let icon = CGRect(x: size.width - 214, y: size.height - menuBar, width: 30, height: menuBar)
             let visible = CGRect(x: 0, y: 0, width: size.width, height: size.height - menuBar)
-            // The arrow's room counts in the card's height: probe with one if it hangs under the icon.
-            model.arrowX = iconHidden ? nil : 0
-            let probe = NSHostingView(rootView: WhatsNewView(model: model, live: nil))
-            let cardSize = CGSize(width: width, height: probe.fittingSize.height)
-            let place = placement(size: cardSize, icon: iconHidden ? nil : icon, visible: visible)
-            model.arrowX = place.arrowX
+            let model = WhatsNewModel(light: light, keep: s.habitat, reduceMotion: true, width: WhatsNew.width(visible: visible))
+            model.still = try WhatsNewSession.still(settings: s, light: light, preview: model.previewSize, renderer: renderer)
+            model.cover = true
+            model.finishTyping()
+            model.contentVisible = true
+            let place = WhatsNewSession.layout(model, icon: iconHidden ? nil : icon, visible: visible)
             let host = NSHostingView(rootView: WhatsNewView(model: model, live: nil))
-            host.frame = CGRect(origin: .zero, size: cardSize)
+            host.frame = CGRect(origin: .zero, size: place.frame.size)
             let window = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
             window.isOpaque = false
             window.backgroundColor = .clear
@@ -173,38 +198,152 @@ enum WhatsNewCard {
             guard let image = ctx.makeImage() else { throw RenderError(description: "no image") }
             try StillRenderer.writePNG(image, to: url)
             let where_: String = place.arrowX == nil ? "top right, icon hidden" : "under the icon"
-            print("wrote \(url.path) (\(light ? "light" : "dark"), \(where_)): \(title) / \(line) / [\(tryTitle)] [\(keepTitle(s.habitat))]")
+            let frame: String = "card \(Int(place.frame.minX)),\(Int(place.frame.minY)) \(Int(place.frame.width))x\(Int(place.frame.height))"
+            let pv: CGSize = model.previewSize
+            let pick = WhatsNew.stillFrame(WhatsNewSession.meadow(s), preview: pv, cell: GridSpec.cell(forWidth: WhatsNew.stillArea(pv).width))
+            let still: String = pick.map { p in
+                "still: seed \(p.seed), a whole \(p.frame.kind.name), \(p.frame.flowersInside) whole blooms, "
+                    + "cut \(p.frame.cut) butterflies and \(p.frame.cutBlooms) blooms, covered \(String(format: "%.2f", p.frame.covered))"
+            } ?? "still: no frame"
+            print("wrote \(url.path) (\(light ? "light" : "dark"), \(where_), \(frame) on \(Int(size.width))x\(Int(size.height)); \(still)): "
+                  + "\(title) / \(line) / [\(tryTitle)] [\(keepTitle(s.habitat))]")
         } catch {
             FileHandle.standardError.write(Data("what's-new snapshot failed: \(error)\n".utf8))
         }
     }
+
+    /// Debug: drive a card offscreen and write what it did, one line per probe, to a text file, and exit
+    /// (`--snapshot-whatsnew-probe <txt>`). The panel is built but never ordered onto a screen, and nothing is saved:
+    /// its host is a stand-in. Probes what needs AppKit: Esc closes and still reaches the window it was meant for; a
+    /// closing card lets clicks through; the Keep chip follows the habitat; the preview follows the machine's state.
+    static func probe(to url: URL) {
+        var lines: [String] = []
+        var failed = 0
+        func expect(_ ok: Bool, _ what: String) {
+            if !ok { failed += 1 }
+            lines.append((ok ? "ok    " : "FAIL  ") + what)
+        }
+        guard let device = MTLCreateSystemDefaultDevice(), let renderer = try? OceanRenderer(device: device) else {
+            FileHandle.standardError.write(Data("what's-new probe: no Metal device\n".utf8))
+            return
+        }
+        let visible = CGRect(x: 0, y: 0, width: 1512, height: 949)
+        let icon = CGRect(x: 1298, y: 949, width: 30, height: 33)
+        func make(_ host: ProbeHost) -> WhatsNewSession {
+            WhatsNewSession(host: host, renderer: renderer, visible: visible, icon: icon)
+        }
+        let esc: NSEvent? = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+                                             context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}",
+                                             isARepeat: false, keyCode: 53)
+        let a: NSEvent? = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+                                           context: nil, characters: "a", charactersIgnoringModifiers: "a",
+                                           isARepeat: false, keyCode: 0)
+        if let esc, let a {
+            let host = ProbeHost()
+            let card = make(host)
+            expect(card.key(esc, appActive: false) === esc && !card.isClosing, "Esc with another app active: passed on, card stays")
+            expect(card.key(a, appActive: true) === a && !card.isClosing, "another key: passed on, card stays")
+            let back = card.key(esc, appActive: true)
+            expect(back === esc, "Esc while ASCII Animals is active: still delivered (Settings, a sheet)")
+            expect(card.isClosing, "Esc while ASCII Animals is active: closes the card")
+            expect(card.ignoresClicks, "a closing card lets clicks through at once")
+            expect(host.tried == 0, "Esc keeps the habitat")
+            card.close(trying: false, now: true)
+        } else {
+            expect(false, "made the key events")
+        }
+
+        let host = ProbeHost()
+        let card = make(host)
+        expect(!card.ignoresClicks, "an open card takes clicks")
+        expect(card.keepLabel == "Keep the Ocean", "Keep chip on the Ocean: \(card.keepLabel)")
+        var web = host.settings
+        web.habitat = .web
+        card.settingsChanged(web)
+        expect(card.keepLabel == "Keep the Web" && !card.isClosing, "switched to the Web elsewhere: \(card.keepLabel), card stays")
+        var lowPower = PowerInputs()
+        lowPower.lowPowerMode = true
+        card.apply(WhatsNew.preview(PowerInputs()))
+        expect(card.previewState == "live", "the preview is live: \(card.previewState)")
+        card.apply(WhatsNew.preview(lowPower))
+        expect(card.previewState == "still", "Low Power Mode turned on: holds a still (\(card.previewState))")
+        var locked = PowerInputs()
+        locked.screenLocked = true
+        card.apply(WhatsNew.preview(locked))
+        expect(card.previewState == "stopped", "screen locked: stops drawing (\(card.previewState))")
+        card.apply(WhatsNew.preview(PowerInputs()))
+        expect(card.previewState == "live", "unlocked: live again (\(card.previewState))")
+        var meadow = web
+        meadow.habitat = .meadow
+        card.settingsChanged(meadow)
+        expect(card.isClosing && host.tried == 0, "the Meadow picked elsewhere: the card goes, nothing more to set")
+        card.close(trying: false, now: true)
+
+        let tryHost = ProbeHost()
+        let tryCard = make(tryHost)
+        tryCard.close(trying: true)
+        expect(tryHost.tried == 1 && tryCard.ignoresClicks, "Try the Meadow: the habitat changes once, the fading card lets clicks through")
+        tryCard.close(trying: false, now: true)
+
+        lines.append("\(lines.count) probes, \(failed) failed")
+        try? (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+        print(lines.joined(separator: "\n"))
+    }
+}
+
+/// What a card needs from the app: its settings, the Meadow when tried. The app is one; the probe has a stand-in.
+protocol WhatsNewHost: AnyObject {
+    var cardSettings: OceanKit.Settings { get }
+    func tryMeadow()
+}
+
+extension AppDelegate: WhatsNewHost {
+    var cardSettings: OceanKit.Settings { store.settings }
+    func tryMeadow() { store.update { $0.habitat = .meadow } }
+}
+
+/// The probe's host: settings in memory, nothing saved.
+private final class ProbeHost: WhatsNewHost {
+    var settings: OceanKit.Settings = .defaults
+    var tried = 0
+    var cardSettings: OceanKit.Settings { settings }
+    func tryMeadow() { tried += 1 }
 }
 
 // MARK: - Model
 
 final class WhatsNewModel: ObservableObject {
     let light: Bool
-    /// The habitat that stays: "Keep the Ocean" or "Keep the Web".
-    let keep: HabitatKind
+    /// The habitat that stays: "Keep the Ocean" or "Keep the Web". Follows a change made elsewhere.
+    @Published var keep: HabitatKind
     let reduceMotion: Bool
+    /// The card's width: the design's, or narrower on a narrow screen (`WhatsNew.width(visible:)`).
+    let width: CGFloat
     @Published var typedTitle = 0
     @Published var cursorOn = true
     @Published var contentVisible = false
     /// The arrow's x in the card, when it hangs under the icon.
     @Published var arrowX: CGFloat?
-    /// The Meadow as a still (Low Power Mode, and the snapshot) instead of live.
+    /// The Meadow as a still (Low Power Mode, and the snapshot).
     @Published var still: CGImage?
+    /// The live view is in the card (it joins the first time the preview goes live, and then stays, its drawing
+    /// started and stopped by the session).
+    @Published var liveAttached = false
+    /// The live view is covered: by the still, or by a plain plate while nothing is drawn.
+    @Published var cover = false
     /// The chip under the pointer (SwiftUI's own state needs macros this package can't load).
     @Published var hovered: String?
     var onTry: () -> Void = {}
     var onKeep: () -> Void = {}
 
-    init(light: Bool, keep: HabitatKind, reduceMotion: Bool) {
+    init(light: Bool, keep: HabitatKind, reduceMotion: Bool, width: CGFloat) {
         self.light = light
         self.keep = keep
         self.reduceMotion = reduceMotion
+        self.width = width
     }
 
+    var previewSize: CGSize { CGSize(width: max(1, width - 32), height: 150) }
     var isTyping: Bool { typedTitle < WhatsNewCard.title.count }
     func finishTyping() { typedTitle = WhatsNewCard.title.count }
 }
@@ -224,18 +363,18 @@ private final class FirstClickHostingView<V: View>: NSHostingView<V> {
 
 /// One showing of the card: its panel, timers and event monitors. `close` removes all of it.
 final class WhatsNewSession {
-    private unowned let app: AppDelegate
+    private weak var host: WhatsNewHost?
     private let model: WhatsNewModel
     private let panel: NSPanel
-    private let live: LiveOceanView?
+    private let live: LiveOceanView
+    private let renderer: OceanRenderer
     private var monitors: [Any] = []
     private var observers: [NSObjectProtocol] = []
     private var typer: Timer?
     private var blinker: Timer?
     private var closing = false
+    private var preview: WhatsNew.Preview?
     var onFinish: (() -> Void)?
-
-    static let previewSize = CGSize(width: WhatsNewCard.width - 32, height: 150)
 
     /// The Meadow at the person's look and line-up: what the card shows.
     static func meadow(_ s: OceanKit.Settings) -> OceanKit.Settings {
@@ -244,38 +383,50 @@ final class WhatsNewSession {
         return m
     }
 
-    /// The card's Meadow as one frame, for Low Power Mode and the snapshot.
-    static func still(settings s: OceanKit.Settings, light: Bool, renderer: OceanRenderer) throws -> CGImage {
+    /// The card's Meadow as one frame, for Low Power Mode and the snapshot: cut from a bigger meadow around a whole
+    /// butterfly beside a whole bloom (`WhatsNew.stillFrame`), at the live preview's cell size.
+    static func still(settings s: OceanKit.Settings, light: Bool, preview: CGSize, renderer: OceanRenderer) throws -> CGImage {
         let accent = SIMD3<Float>(0.2, 0.5, 1)
-        return try StillRenderer.render(settings: meadow(s), size: previewSize, scale: 2, warmup: 6, systemIsDark: !light,
-                                        accent: accent, seed: 7, renderer: renderer)
+        let m = meadow(s)
+        let area: CGSize = WhatsNew.stillArea(preview)
+        let cell: CGSize = GridSpec.cell(forWidth: area.width)
+        guard let pick = WhatsNew.stillFrame(m, preview: preview, cell: cell) else {
+            return try StillRenderer.render(settings: m, size: preview, scale: 2, warmup: 6, systemIsDark: !light,
+                                            accent: accent, seed: 7, renderer: renderer)
+        }
+        let scale: CGFloat = 2
+        let full = try StillRenderer.render(settings: m, size: area, scale: scale, warmup: 6, systemIsDark: !light,
+                                            accent: accent, seed: pick.seed, renderer: renderer)
+        let c: CGRect = pick.frame.crop
+        let px = CGRect(x: (c.minX * scale).rounded(), y: (c.minY * scale).rounded(),
+                        width: (c.width * scale).rounded(), height: (c.height * scale).rounded())
+        guard let cut = full.cropping(to: px) else { throw RenderError(description: "the still's crop") }
+        return cut
     }
 
-    init(app: AppDelegate, renderer: OceanRenderer) {
-        self.app = app
-        let s = app.store.settings
+    /// Sizes the card for its arrow (the arrow's room counts in its height) and places it.
+    static func layout(_ model: WhatsNewModel, icon: CGRect?, visible: CGRect) -> (frame: CGRect, arrowX: CGFloat?) {
+        model.arrowX = icon == nil ? nil : 0
+        let probe = NSHostingView(rootView: WhatsNewView(model: model, live: nil))
+        let size = CGSize(width: model.width, height: probe.fittingSize.height)
+        let place = WhatsNew.placement(size: size, icon: icon, visible: visible)
+        model.arrowX = place.arrowX
+        return place
+    }
+
+    init(host: WhatsNewHost, renderer: OceanRenderer, visible: CGRect, icon: CGRect?) {
+        self.host = host
+        self.renderer = renderer
+        let s = host.cardSettings
         let meadow = WhatsNewSession.meadow(s)
         let theme = OceanDirector.currentTheme(meadow)
         model = WhatsNewModel(light: theme.light, keep: s.habitat,
-                              reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
-        // Live only while the card is up; a still in Low Power Mode.
-        if app.signals.inputs.lowPowerMode {
-            model.still = try? WhatsNewSession.still(settings: s, light: theme.light, renderer: renderer)
-            live = nil
-        } else {
-            live = LiveOceanView(renderer: renderer, settings: meadow, theme: theme, zoom: 1, seed: 7)
-        }
+                              reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+                              width: WhatsNew.width(visible: visible))
+        // Drawn only while the preview is live (`apply`).
+        live = LiveOceanView(renderer: renderer, settings: meadow, theme: theme, zoom: 1, seed: 7)
 
-        let iconFrame: CGRect? = s.showMenuBarIcon ? app.menu?.iconScreenFrame : nil
-        // The arrow's room counts in the card's height: probe with one if it hangs under the icon.
-        model.arrowX = iconFrame == nil ? nil : 0
-        let probe = NSHostingView(rootView: WhatsNewView(model: model, live: nil))
-        let size = CGSize(width: WhatsNewCard.width, height: probe.fittingSize.height)
-        let screen: NSScreen = NSScreen.screens.first { sc in iconFrame.map { sc.frame.intersects($0) } ?? false }
-            ?? NSScreen.screens[0]
-        let place = WhatsNewCard.placement(size: size, icon: iconFrame, visible: screen.visibleFrame)
-        model.arrowX = place.arrowX
-
+        let place = WhatsNewSession.layout(model, icon: icon, visible: visible)
         panel = WhatsNewPanel(contentRect: place.frame, styleMask: [.borderless, .nonactivatingPanel],
                               backing: .buffered, defer: false)
         panel.setFrame(place.frame, display: false)
@@ -289,16 +440,23 @@ final class WhatsNewSession {
         panel.animationBehavior = .none
         panel.acceptsMouseMovedEvents = true
         panel.alphaValue = 0
-        let host = FirstClickHostingView(rootView: WhatsNewView(model: model, live: live))
-        host.frame = CGRect(origin: .zero, size: size)
-        panel.contentView = host
+        let view = FirstClickHostingView(rootView: WhatsNewView(model: model, live: live))
+        view.frame = CGRect(origin: .zero, size: place.frame.size)
+        panel.contentView = view
 
         model.onTry = { [weak self] in self?.close(trying: true) }
         model.onKeep = { [weak self] in self?.close(trying: false) }
     }
 
-    func start() {
+    /// Puts the panel on screen without activating the app. True when it is there: visible, on a display.
+    func orderFront() -> Bool {
         panel.orderFrontRegardless()
+        return panel.isVisible && panel.screen != nil
+    }
+
+    /// The card is up for good: fade in, type, listen for Esc and clicks elsewhere, and set the preview going.
+    func arm(power: PowerInputs) {
+        apply(WhatsNew.preview(power))
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = model.reduceMotion ? 0.2 : 0.45
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -308,9 +466,7 @@ final class WhatsNewSession {
 
         // Esc, only while ASCII Animals is the active app (a local monitor sees nothing typed elsewhere).
         if let m = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] e in
-            guard e.keyCode == 53, let self, !self.closing else { return e }
-            self.close(trying: false)
-            return nil
+            self?.key(e, appActive: NSApp.isActive) ?? e
         }) { monitors.append(m) }
         // A click anywhere else: in another app (no permission needed for clicks) or another of this app's windows.
         let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
@@ -340,17 +496,73 @@ final class WhatsNewSession {
         blinker = Timer.scheduledTimer(withTimeInterval: 0.53, repeats: true) { [weak self] _ in self?.model.cursorOn.toggle() }
     }
 
-    /// `trying`: "Try the Meadow". The desktop dissolves to it (the director's habitat change) as the card fades.
-    func close(trying: Bool) {
+    /// A key typed while the card is up: Esc closes it when ASCII Animals is the active app. The event always goes on
+    /// to the window it was meant for (Esc still cancels a sheet or closes Settings).
+    func key(_ e: NSEvent, appActive: Bool) -> NSEvent {
+        if e.keyCode == 53, appActive, !closing { close(trying: false) }
+        return e
+    }
+
+    /// Settings changed elsewhere: on the Meadow the card goes; otherwise the Keep chip names the habitat now.
+    func settingsChanged(_ s: OceanKit.Settings) {
         guard !closing else { return }
+        if s.habitat == .meadow { close(trying: false); return }
+        if model.keep != s.habitat { model.keep = s.habitat }
+    }
+
+    /// The preview for the machine's state: live, a held still (rendered once, when first needed), or nothing drawn.
+    func apply(_ p: WhatsNew.Preview) {
+        guard p != preview, !closing else { return }
+        preview = p
+        switch p {
+        case .live:
+            model.liveAttached = true
+            model.cover = false
+            live.start()
+        case .still:
+            live.stop()
+            if model.still == nil {
+                model.still = try? WhatsNewSession.still(settings: host?.cardSettings ?? .defaults, light: model.light,
+                                                         preview: model.previewSize, renderer: renderer)
+            }
+            model.cover = true
+        case .stopped:
+            live.stop()
+            model.cover = true
+        }
+    }
+
+    var isClosing: Bool { closing }
+    var ignoresClicks: Bool { panel.ignoresMouseEvents }
+    var keepLabel: String { WhatsNewCard.keepTitle(model.keep) }
+    var previewState: String {
+        switch preview {
+        case .live?: return model.cover ? "live, covered" : "live"
+        case .still?: return model.cover && model.still != nil ? "still" : "still, missing"
+        case .stopped?: return model.cover ? "stopped" : "stopped, uncovered"
+        case nil: return "none"
+        }
+    }
+
+    /// `trying`: "Try the Meadow". The desktop dissolves to it (the director's habitat change) as the card fades.
+    /// From the moment it starts closing, clicks go through it to whatever is under it. `now`: gone at once, no fade
+    /// (the welcome opening from Help, or a card that didn't reach the screen).
+    func close(trying: Bool, now: Bool = false) {
+        if closing {
+            if now { teardown() }
+            return
+        }
         closing = true
-        if trying { app.store.update { $0.habitat = .meadow } }
+        panel.ignoresMouseEvents = true
+        if trying { host?.tryMeadow() }
         for m in monitors { NSEvent.removeMonitor(m) }
         monitors = []
         for o in observers { NotificationCenter.default.removeObserver(o) }
         observers = []
         typer?.invalidate()
         blinker?.invalidate()
+        live.stop()
+        if now { teardown(); return }
         let duration: Double = trying && !model.reduceMotion ? 0.6 : 0.25
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = duration
@@ -366,7 +578,7 @@ final class WhatsNewSession {
     private func teardown() {
         guard !tornDown else { return }
         tornDown = true
-        live?.stop()
+        live.stop()
         panel.orderOut(nil)
         panel.close()
         onFinish?()
@@ -419,7 +631,7 @@ struct WhatsNewView: View {
         let shape = CardShape(arrowX: model.arrowX, radius: 14, arrow: WhatsNewCard.arrowHeight)
         VStack(alignment: .leading, spacing: 0) {
             preview
-                .frame(width: WhatsNewSession.previewSize.width, height: WhatsNewSession.previewSize.height)
+                .frame(width: model.previewSize.width, height: model.previewSize.height)
                 .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(ink.opacity(0.14), lineWidth: 1))
                 .accessibilityLabel("The Meadow: butterflies over a field of flowers")
 
@@ -436,13 +648,34 @@ struct WhatsNewView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 10)
 
-            HStack(spacing: 10) {
-                CardChip(title: WhatsNewCard.tryTitle, filled: true, model: model, action: model.onTry)
-                CardChip(title: WhatsNewCard.keepTitle(model.keep), filled: false, model: model, action: model.onKeep)
-                Spacer(minLength: 8)
+            // On a narrow screen the chips keep their words and the "esc close" hint gives way (Esc still closes).
+            ViewThatFits(in: .horizontal) {
+                chips(escHint: true)
+                chips(escHint: false)
+            }
+            .padding(.top, 18)
+        }
+        .foregroundStyle(ink)
+        .padding(16)
+        .padding(.top, model.arrowX == nil ? 0 : WhatsNewCard.arrowHeight)
+        .frame(width: model.width, alignment: .leading)
+        .background(shape.fill(plate))
+        .overlay(shape.stroke(ink.opacity(light ? 0.12 : 0.17), lineWidth: 1))
+        .opacity(model.contentVisible ? 1 : 0)
+    }
+
+    private func chips(escHint: Bool) -> some View {
+        let ink: Color = Ink.text(model.light)
+        return HStack(spacing: 10) {
+            CardChip(title: WhatsNewCard.tryTitle, filled: true, model: model, action: model.onTry)
+                .fixedSize()
+            CardChip(title: WhatsNewCard.keepTitle(model.keep), filled: false, model: model, action: model.onKeep)
+                .fixedSize()
+            Spacer(minLength: 8)
+            if escHint {
                 Button(action: model.onKeep) {
                     HStack(spacing: 7) {
-                        Keycap(text: "esc", light: light, unit: 1)
+                        Keycap(text: "esc", light: model.light, unit: 1)
                         Text("close").font(UIFonts.swiftUI(12))
                     }
                     .foregroundStyle(ink.opacity(0.5))
@@ -450,27 +683,29 @@ struct WhatsNewView: View {
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityLabel(WhatsNewCard.keepTitle(model.keep))
+                .fixedSize()
             }
-            .padding(.top, 18)
         }
-        .foregroundStyle(ink)
-        .padding(16)
-        .padding(.top, model.arrowX == nil ? 0 : WhatsNewCard.arrowHeight)
-        .frame(width: WhatsNewCard.width, alignment: .leading)
-        .background(shape.fill(plate))
-        .overlay(shape.stroke(ink.opacity(light ? 0.12 : 0.17), lineWidth: 1))
-        .opacity(model.contentVisible ? 1 : 0)
     }
 
-    @ViewBuilder private var preview: some View {
-        if let still = model.still {
-            Image(decorative: still, scale: 2)
-                .resizable()
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        } else if let live {
-            LiveMeadow(view: live)
-        } else {
-            RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Ink.plate(model.light))
+    /// The live view stays put once it has joined (moving an AppKit view in and out of SwiftUI's tree is fragile);
+    /// a still or a plain plate covers it whenever it isn't drawing.
+    private var preview: some View {
+        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+        return ZStack {
+            shape.fill(Ink.plate(model.light))
+            if model.liveAttached, let live {
+                LiveMeadow(view: live)
+            }
+            if model.cover || live == nil {
+                if let still = model.still {
+                    Image(decorative: still, scale: 2)
+                        .resizable()
+                        .clipShape(shape)
+                } else {
+                    shape.fill(Ink.plate(model.light))
+                }
+            }
         }
     }
 }
