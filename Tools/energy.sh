@@ -1,12 +1,15 @@
 #!/bin/bash
 # Energy measurement: mean CPU% of the wallpaper app and WindowServer, and the app's memory.
-#   Tools/energy.sh <ocean|web> <15|30|60> [seconds=60]   measure ASCII Animals
-#   Tools/energy.sh baseline [seconds=60]                 WindowServer with no wallpaper app running
+#   Tools/energy.sh <ocean|web|meadow> <15|30|60> [seconds=60]   measure ASCII Animals
+#   Tools/energy.sh baseline [seconds=60]                        WindowServer with no wallpaper app running
 # "WindowServer added" = (with the app) - (baseline).
 # Run it with the desktop UNCOVERED (a covered desktop pauses the wallpaper and reads ~0%).
 # Settings (defaults key settings.v2) are saved byte-for-byte, backed up to build/ before anything
 # changes, and restored on exit, Ctrl-C or error. 15 fps is a plain setting (the same rate as
-# PowerPolicy.economyFPS), so nothing needs forcing on AC.
+# PowerPolicy.economyFPS), so nothing needs forcing on AC. Only habitat, fps and paused change: the
+# Meadow's own fields (line-up, count) stay as saved. The app is launched with ASCII_ANIMALS_NO_HANDOVER=1
+# and ASCII_ANIMALS_QUIET_LAUNCH=1: no welcome or what's-new card over the measurement, and the once-only
+# flags and arrival.v1 left as they are.
 # Test hooks (never needed for a real run): ENERGY_DOMAIN=<throwaway defaults domain>,
 # ENERGY_DRY=1 (save/modify/restore only: no app launch, no Sharks handling, no sampling),
 # ENERGY_DRY_SLEEP=<s> (how long a dry run idles with settings modified, for a Ctrl-C test).
@@ -31,7 +34,7 @@ for tool in jq xxd plutil base64 defaults top osascript; do
   command -v "$tool" >/dev/null 2>&1 || { echo "energy.sh needs '$tool' on the PATH" >&2; exit 1; }
 done
 
-usage() { echo "usage: $0 <ocean|web> <15|30|60> [seconds]  |  $0 baseline [seconds]" >&2; exit 2; }
+usage() { echo "usage: $0 <ocean|web|meadow> <15|30|60> [seconds]  |  $0 baseline [seconds]" >&2; exit 2; }
 [ $# -ge 1 ] || usage
 MODE="$1"; HABITAT=""; FPS=""
 if [ "$MODE" = baseline ]; then
@@ -39,7 +42,7 @@ if [ "$MODE" = baseline ]; then
 else
   [ $# -ge 2 ] || usage
   HABITAT="$MODE"; FPS="$2"; SECS="${3:-60}"
-  case "$HABITAT" in ocean|web) ;; *) usage ;; esac
+  case "$HABITAT" in ocean|web|meadow) ;; *) usage ;; esac
   case "$FPS" in 15|30|60) ;; *) usage ;; esac
 fi
 case "$SECS" in ''|*[!0-9]*|0) usage ;; esac
@@ -177,7 +180,7 @@ if [ "$DRY" = 1 ]; then
 fi
 
 echo "launching ASCII Animals: habitat=$HABITAT fps=$FPS"
-open --env ASCII_ANIMALS_NO_HANDOVER=1 "$APP"
+open --env ASCII_ANIMALS_NO_HANDOVER=1 --env ASCII_ANIMALS_QUIET_LAUNCH=1 "$APP"
 for i in $(seq 1 20); do [ -n "$(app_pids)" ] && break; sleep 1; done
 [ -n "$(app_pids)" ] || { echo "app did not start" >&2; exit 1; }
 echo "settling ${SETTLE}s, then sampling ${SECS}s"

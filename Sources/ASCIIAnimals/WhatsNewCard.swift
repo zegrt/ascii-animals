@@ -21,13 +21,32 @@ enum WhatsNewCard {
     private static var presenter: WhatsNew.Presenter?
     private static var looker: Timer?
 
+    /// Developer flag `ASCII_ANIMALS_PREVIEW_WHATSNEW=1`: the card on the real desktop once, as an upgrader sees it,
+    /// whatever has been saved. The once-only flag and `arrival.v1` are neither read nor written (the launch skips the
+    /// arrival and the hand-over too: `main.swift`), the card saves nothing, and "Try the Meadow", Keep and Esc only
+    /// close it (`PreviewHost`). The welcome from Help is off for the run.
+    static let preview: Bool = ProcessInfo.processInfo.environment["ASCII_ANIMALS_PREVIEW_WHATSNEW"] == "1"
+    /// The preview's once-only flag: this run's memory only.
+    private static var previewShown = false
+
+    /// Whether the card has been shown: the saved flag, or (previewing) this run only, the flag left unread.
+    static func shownBefore(preview: Bool) -> Bool {
+        preview ? previewShown : UserDefaults.standard.bool(forKey: Handover.meadowCardKey)
+    }
+
+    /// Marks the card shown once it reached the screen: the saved flag, or (previewing) this run only.
+    static func markShown(preview: Bool) {
+        if preview { previewShown = true } else { UserDefaults.standard.set(true, forKey: Handover.meadowCardKey) }
+    }
+
     /// About a second after launch, and only once the screen can be seen: after an automatic update at night the
     /// card waits for the screen to wake and unlock rather than be marked shown on a locked screen. It looks once a
     /// second (`WhatsNew.Presenter`); every look reads the session, lock and displays live.
     static func showWhenSeen(app: AppDelegate) {
         stopLooking()
+        let previewing: Bool = preview
         let p = WhatsNew.Presenter(moment: { moment(app) }, open: { open(app) },
-                                   mark: { UserDefaults.standard.set(true, forKey: Handover.meadowCardKey) })
+                                   mark: { markShown(preview: previewing) })
         presenter = p
         looker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             if p.look() != .keepWaiting { stopLooking() }
@@ -42,12 +61,24 @@ enum WhatsNewCard {
     }
 
     private static func moment(_ app: AppDelegate) -> WhatsNew.Moment {
-        let s = app.store.settings
+        let host: WhatsNewHost = cardHost(app)
+        let s: OceanKit.Settings = host.cardSettings
         let seen: Bool = target(app).map { seeable(app, $0.screen) } ?? false
-        return WhatsNew.Moment(seeable: seen, screens: NSScreen.screens.count,
-                               shown: UserDefaults.standard.bool(forKey: Handover.meadowCardKey) || current != nil,
-                               habitat: s.habitat, tried: s.meadowTried, welcomeUp: OnboardingController.isShowing,
+        let shown: Bool = shownBefore(preview: preview) || current != nil
+        let tried: Bool = preview ? false : s.meadowTried
+        return WhatsNew.Moment(seeable: seen, screens: NSScreen.screens.count, shown: shown,
+                               habitat: s.habitat, tried: tried, welcomeUp: OnboardingController.isShowing,
                                canDraw: app.director?.renderer != nil)
+    }
+
+    /// Who the card answers to: the app, or (previewing) a stand-in over it that changes nothing.
+    private static var previewHost: PreviewHost?
+    private static func cardHost(_ app: AppDelegate) -> WhatsNewHost {
+        guard preview else { return app }
+        if let previewHost { return previewHost }
+        let h = PreviewHost(over: app)
+        previewHost = h
+        return h
     }
 
     /// Unlocked, on the console, no screensaver, and this screen's display awake, as macOS says right now (an
@@ -76,7 +107,7 @@ enum WhatsNewCard {
     /// otherwise it goes again at once, unmarked, and the presenter waits.
     private static func open(_ app: AppDelegate) -> Bool {
         guard current == nil, let renderer = app.director?.renderer, let t = target(app) else { return false }
-        let session = WhatsNewSession(host: app, renderer: renderer, visible: t.screen.visibleFrame, icon: t.icon)
+        let session = WhatsNewSession(host: cardHost(app), renderer: renderer, visible: t.screen.visibleFrame, icon: t.icon)
         current = session
         session.onFinish = { [weak session] in if current === session { current = nil } }
         guard session.orderFront(), seeable(app, t.screen) else {
@@ -229,7 +260,7 @@ enum WhatsNewCard {
         }
         let visible = CGRect(x: 0, y: 0, width: 1512, height: 949)
         let icon = CGRect(x: 1298, y: 949, width: 30, height: 33)
-        func make(_ host: ProbeHost) -> WhatsNewSession {
+        func make(_ host: WhatsNewHost) -> WhatsNewSession {
             WhatsNewSession(host: host, renderer: renderer, visible: visible, icon: icon)
         }
         let esc: NSEvent? = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
@@ -285,6 +316,48 @@ enum WhatsNewCard {
         expect(tryHost.tried == 1 && tryCard.ignoresClicks, "Try the Meadow: the habitat changes once, the fading card lets clicks through")
         tryCard.close(trying: false, now: true)
 
+        // The live preview (ASCII_ANIMALS_PREVIEW_WHATSNEW=1): the same card over a stand-in that changes nothing.
+        // The session holds its host weakly, as it holds the app: each stand-in is kept here while its card is up.
+        let under = ProbeHost()
+        let tryStandIn = PreviewHost(over: under)
+        let previewTry = make(tryStandIn)
+        expect(previewTry.keepLabel == "Keep the Ocean", "preview: Keep chip on the Ocean: \(previewTry.keepLabel)")
+        previewTry.close(trying: true)
+        expect(under.tried == 0 && previewTry.isClosing && previewTry.ignoresClicks,
+               "preview: Try the Meadow only closes the card (the habitat stays)")
+        previewTry.close(trying: false, now: true)
+        tryStandIn.tryMeadow()
+        expect(under.tried == 0, "preview: its host passes nothing on to the app")
+        let keepStandIn = PreviewHost(over: under)
+        let previewKeep = make(keepStandIn)
+        previewKeep.close(trying: false)
+        expect(under.tried == 0 && previewKeep.isClosing, "preview: Keep only closes the card")
+        previewKeep.close(trying: false, now: true)
+        if let esc {
+            let escStandIn = PreviewHost(over: under)
+            let previewEsc = make(escStandIn)
+            _ = previewEsc.key(esc, appActive: true)
+            expect(under.tried == 0 && previewEsc.isClosing, "preview: Esc only closes the card")
+            previewEsc.close(trying: false, now: true)
+            withExtendedLifetime(escStandIn) {}
+        }
+        withExtendedLifetime((tryStandIn, keepStandIn)) {}
+        var onMeadow = under.settings
+        onMeadow.habitat = .meadow
+        under.settings = onMeadow
+        let meadowHost = PreviewHost(over: under)
+        let meadowCard = make(meadowHost)
+        expect(meadowHost.cardSettings.habitat == .ocean && meadowCard.keepLabel == "Keep the Ocean" && !meadowCard.isClosing,
+               "preview on the Meadow: shown as to someone on the Ocean (\(meadowCard.keepLabel))")
+        meadowCard.close(trying: false, now: true)
+        let flag: Any? = UserDefaults.standard.object(forKey: Handover.meadowCardKey)
+        let wasShown: Bool = shownBefore(preview: true)
+        markShown(preview: true)
+        let flagAfter: Any? = UserDefaults.standard.object(forKey: Handover.meadowCardKey)
+        let flagSame: Bool = (flag == nil) == (flagAfter == nil) && (flag as? Bool) == (flagAfter as? Bool)
+        expect(!wasShown && shownBefore(preview: true) && flagSame,
+               "preview: shown once, kept in memory only (the saved flag untouched: \(flagAfter.map { "\($0)" } ?? "absent"))")
+
         lines.append("\(lines.count) probes, \(failed) failed")
         try? (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
         print(lines.joined(separator: "\n"))
@@ -300,6 +373,20 @@ protocol WhatsNewHost: AnyObject {
 extension AppDelegate: WhatsNewHost {
     var cardSettings: OceanKit.Settings { store.settings }
     func tryMeadow() { store.update { $0.habitat = .meadow } }
+}
+
+/// The live preview's host (`WhatsNewCard.preview`): the card reads the app's settings and changes nothing. On the
+/// Meadow it is shown as to someone on the Ocean (an upgrader is never shown it on the Meadow), in memory only.
+final class PreviewHost: WhatsNewHost {
+    private weak var base: WhatsNewHost?
+    init(over base: WhatsNewHost) { self.base = base }
+    var cardSettings: OceanKit.Settings {
+        var s: OceanKit.Settings = base?.cardSettings ?? .defaults
+        if s.habitat == .meadow { s.habitat = .ocean }
+        return s
+    }
+    /// "Try the Meadow" in the preview: the card closes and nothing else happens.
+    func tryMeadow() {}
 }
 
 /// The probe's host: settings in memory, nothing saved.

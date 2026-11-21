@@ -30,9 +30,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
-        SharksHandover.run(app: self)
-        arrival = SettingsStore.decideArrival()
-        SharksHandover.watch()
+        // The what's-new preview (`WhatsNewCard.preview`) and Tools/energy.sh's runs (`quietLaunch`) leave the welcome,
+        // the cards and `arrival.v1` alone: the arrival is taken as an upgrade in memory, nothing read or saved. The
+        // preview skips the hand-over as well (energy.sh's runs set ASCII_ANIMALS_NO_HANDOVER=1 already).
+        let previewing: Bool = WhatsNewCard.preview
+        if !previewing { SharksHandover.run(app: self) }
+        arrival = previewing || AppDelegate.quietLaunch ? .before31 : SettingsStore.decideArrival()
+        if !previewing { SharksHandover.watch() }
         crashedLastTime = CrashMarker.launch()
         Log.write("launch \(AppInfo.version) (\(AppInfo.build))\(crashedLastTime ? " after an unclean exit" : "")")
         do {
@@ -71,8 +75,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotKey.setEnabled(store.settings.pauseShortcut)
         updates.start(enabled: { [weak self] in self?.store.settings.checkForUpdates ?? false },
                       autoInstall: { [weak self] in self?.store.settings.autoInstallUpdates ?? false })
-        OnboardingController.showIfNeeded(app: self)
+        if previewing {
+            Log.write("what's-new preview: the card once, nothing saved")
+            WhatsNewCard.showWhenSeen(app: self)
+        } else if !AppDelegate.quietLaunch {
+            OnboardingController.showIfNeeded(app: self)
+        }
     }
+
+    /// Developer flag `ASCII_ANIMALS_QUIET_LAUNCH=1`, set by Tools/energy.sh: no welcome and no what's-new card (they
+    /// would draw over a measurement and spend the once-only flags), and `arrival.v1` neither read nor saved.
+    static let quietLaunch: Bool = ProcessInfo.processInfo.environment["ASCII_ANIMALS_QUIET_LAUNCH"] == "1"
 
     /// Opening the app again (Finder, Spotlight, Launchpad) shows Settings —
     /// the way back when the menu-bar icon is hidden or behind the notch.
@@ -82,7 +95,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func showAbout() { AboutWindow.show(app: self) }
-    func showWelcome() { OnboardingController.show(app: self) }
+    /// The welcome from Help. Off in the what's-new preview and energy.sh's runs: it saves the welcome's flags.
+    func showWelcome() {
+        if WhatsNewCard.preview || AppDelegate.quietLaunch {
+            Log.write("welcome from Help: off in this developer run")
+            return
+        }
+        OnboardingController.show(app: self)
+    }
     /// Opens a prefilled GitHub issue in the browser (nothing is sent until the user submits it).
     func reportProblem() {
         NSWorkspace.shared.open(IssueReport.url(base: AppInfo.issuesURL, title: "Problem: ", body: Diagnostics.body(app: self)))
