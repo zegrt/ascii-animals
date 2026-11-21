@@ -45,6 +45,9 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-21: "stop jsut before the test session". Applies: new (the t8 prep rewrite, its Codex re-check and any
+  fixes finish, and t10w's CI; then all work stops before the live session; the session starts only when the
+  director says).
 - 2026-11-21, on t10w's drafts (LICENSE, README, About, CHANGELOG): "ok on the words". Applies: new (the words are
   approved; t10w's small round fixes the three noticed items: About's accessibility label on the Meadow; the
   sketch kept in the repo at Tools/meadow-sketch/ (from 4e1b869) so DEVELOPING links to a lasting path, not a
