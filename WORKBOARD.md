@@ -45,6 +45,10 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-21: "ok" to the manager's step back on r1. Applies: new (first a short live trace with the director of the
+  unchanged test copy (971a216) to see which cause the popup is, then the same popups on r1's first build (a4f4ec7);
+  r1 then fixes what was seen, plainly, keeping review only for what a user would hit; t11 round 2, r3 and r2 briefs
+  trimmed the same way before they resume).
 - 2026-11-21: "take a step back" (during r1's restart). Applies: new (r1's restart held at once; the manager reviews
   the approach before any more building: what the director asked, what is known live, what the review rounds added).
 - 2026-11-21: "run one at a time". Applies: new (one builder at a time, in this order: r1 (the popup, a user hit it),
