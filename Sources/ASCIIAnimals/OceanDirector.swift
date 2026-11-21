@@ -235,9 +235,10 @@ final class OceanDirector {
         showChangeIfHeld()
     }
 
-    /// Fresh sims for every scene, from the current settings.
+    /// Fresh sims for every scene, from the current settings; they are told the pointer again at the next step.
     private func rebuildScenes() {
         for s in scenes { s.rebuild(store.settings) }
+        pointer.retell()
     }
 
     /// A switch cut short by a still or a pause: swap now if it hadn't, and

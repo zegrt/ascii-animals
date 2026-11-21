@@ -75,6 +75,8 @@ public enum PointerReason: String, Sendable, CaseIterable {
     case receiver
     /// The window server named the window under the point (the event's hit field), and the list agrees.
     case eventHit = "event-hit"
+    /// The hit named the desktop, but an own window the app knows holds the point.
+    case ownWindow = "own-window"
     /// A hit an earlier move gave at this very point, still in its life.
     case retainedHint = "retained-hint"
     /// The window list's rectangles, front to back.
@@ -150,19 +152,37 @@ public enum PointerRouter {
         return v
     }
 
-    /// What `p` is. `windows` front to back (nil: the list could not be read). `hit`: the window the window server
-    /// handed the event to, when the event says (`mouseEventWindowUnderMousePointerThatCanHandleThisEvent`); it
-    /// overrules the rectangles, which know no shape or click-through.
-    public static func judge(_ p: CGPoint, windows: [PointerWindow]?, viewports: [Viewport], hit: Int? = nil) -> PointerVerdict {
-        guard let v = viewport(at: p, in: viewports) else { return .offDesktop }
-        guard let list = windows else { return .unknown }
+    /// What `p` is (see `assess`).
+    public static func judge(_ p: CGPoint, windows: [PointerWindow]?, viewports: [Viewport], hit: Int? = nil,
+                             receiver: PointerReceiver? = nil) -> PointerVerdict {
+        assess(p, windows: windows, viewports: viewports, hit: hit, receiver: receiver).verdict
+    }
+
+    /// What `p` is, and why. `windows` front to back (nil: the list could not be read). In order of trust:
+    /// - `receiver`, the own window AppKit dispatched the event to: when it takes the mouse and its frame holds `p`,
+    ///   it blocks, listed or not (a window just opened may not be in the list yet);
+    /// - `hit`, the window the window server named under the pointer
+    ///   (`mouseEventWindowUnderMousePointerThatCanHandleThisEvent`): supporting evidence only, taken when the list
+    ///   has that window and its bounds hold `p`, and never against an own window the app knows holds `p`;
+    /// - else the rectangles, front to back (they know no shape or click-through: conservative).
+    public static func assess(_ p: CGPoint, windows: [PointerWindow]?, viewports: [Viewport], hit: Int? = nil,
+                              receiver: PointerReceiver? = nil) -> (verdict: PointerVerdict, reason: PointerReason) {
+        guard let v = viewport(at: p, in: viewports) else { return (.offDesktop, .offScreen) }
+        if let r = receiver, r.takesMouse, r.frame.contains(p) {
+            let listed: PointerWindow? = windows?.first(where: { $0.number == r.number })
+            let w: PointerWindow = listed ?? PointerWindow(number: r.number, pid: 0, own: true, layer: 0, bounds: r.frame)
+            return (.blocked(w), .receiver)
+        }
+        guard let list = windows else { return (.unknown, .noList) }
         let local = CGPoint(x: p.x - v.rect.minX, y: p.y - v.rect.minY)
         let target = PointerTarget(viewportID: v.id, local: local)
-        if let hit, hit > 0, let w = list.first(where: { $0.number == hit }) {
-            return w.letsPointerThrough ? .desktop(target) : .blocked(w)
+        if let hit, hit > 0, let w = list.first(where: { $0.number == hit }), w.bounds.contains(p) {
+            if !w.letsPointerThrough { return (.blocked(w), .eventHit) }
+            if let own = list.first(where: { $0.own && blocks($0, at: p) }) { return (.blocked(own), .ownWindow) }
+            return (.desktop(target), .eventHit)
         }
-        for w in list where blocks(w, at: p) { return .blocked(w) }
-        return .desktop(target)
+        for w in list where blocks(w, at: p) { return (.blocked(w), .rectangles) }
+        return (.desktop(target), .rectangles)
     }
 
     /// The window numbers whose rectangles cover `p` and could block it, front to back.
@@ -186,15 +206,19 @@ public enum PointerRouter {
 /// The desktop's pointer input: every reading of the pointer, from whichever source, goes through here and comes out
 /// as moves, leaves and clicks for the habitats. Pure: the host feeds it events, samples and the window list.
 ///
-/// The contract. Sources: the global and the local monitor (never consuming an event), and a sample of the cursor once
-/// a simulation step from the display link (common modes, so modal and tracking loops too). A move or drag is
-/// coalesced: the newest waits for the next step, at the event's own location. A click is judged at once, at its own
-/// location, against a fresh window list. Every reading is judged against the windows front to back, the app's own
-/// windows blocking like any other. A step with no move judges the sampled cursor when it moved, when the windows,
-/// Spaces, screens or delivery changed (`invalidate`), and once a second at the least, so hover clears and comes back
-/// without a move. The window list is read only for a point on an exposed screen, at most every `moveLife` while
-/// the pointer moves, every `stillLife` while it rests and every `minRefetch` after an invalidation; a click reads it.
-/// Only changes are told: one `left`, not one per move.
+/// The contract. Sources: the global and the local monitor (never consuming an event), and a sample of the cursor and
+/// the left button from the display link (common modes, so modal and tracking loops too), at most once per simulation
+/// step whichever display ticks (`tick`). A move or drag is coalesced: the newest waits for the next step, at the
+/// event's own location. A click is judged at once, on its own event alone (its location, its hit, its receiver) and
+/// a list read for it; a click with no location of its own is not a click. A step judges when there is something new:
+/// a move, a new event at the same point, a gesture's button going up, a habitat to tell again (`retell`), or a read
+/// that falls due. Freshness: `invalidate` (start, a Space or display change) is a boundary: the list is dropped,
+/// read at the next step and once more `minRefetch` later; `windowsChanged` (an ordinary window change) marks it
+/// stale: it is read at the next step if no read came within `minRefetch`, else hover waits for that read and is
+/// never judged on the stale list. Otherwise the list is read at most every `moveLife` while the pointer moves and
+/// every `stillLife` while it rests, so hover clears and comes back without a move. A hit a move gave is kept for the
+/// samples at that very point for `hintLife`, while the same windows cover it; never for a click. Only changes are
+/// told: one `left`, not one per move.
 public final class DesktopPointer {
     public enum Kind: String, Sendable { case move, drag, down }
 
@@ -245,10 +269,9 @@ public final class DesktopPointer {
     public static let moveLife: Double = 0.25
     /// How often a resting pointer is judged again (a window opening or closing under it).
     public static let stillLife: Double = 1.0
-    /// The shortest time between two reads after an invalidation (a window dragged sends many).
+    /// The shortest time between two reads for an ordinary window change (a window dragged sends many), and the
+    /// settle read after a boundary.
     public static let minRefetch: Double = 0.1
-    /// Several screens tick each step: one sample a step.
-    public static let sampleGap: Double = OceanClock.step * 0.5
     /// How long a hit a move gave is kept for samples at that point.
     public static let hintLife: Double = 1.0
 
@@ -258,25 +281,32 @@ public final class DesktopPointer {
     private var windows: [PointerWindow]? = nil
     private var haveWindows: Bool = false
     private var windowsAt: Double = -Double.infinity
-    private var dirty: Bool = true
+    /// An ordinary window change since the last read.
+    private var stale: Bool = false
+    /// Reads still owed to a boundary (the one at the next step, and the settle read).
+    private var settleReads: Int = 0
     private var pending: Event? = nil
     private var judgedPoint: CGPoint? = nil
-    private var lastSampleAt: Double = -Double.infinity
+    /// Something new to judge at the next step even at an unchanged point.
+    private var rejudge: Bool = false
+    /// The simulation step last sampled (one sample a step, whichever display ticks).
+    private var lastStep: Int? = nil
     private var told: Bool = false
     private var current: PointerTarget? = nil
     /// A left-button gesture that began off the desktop (on a window): its drags are that window's.
     private var gestureOwned: Bool = false
-    /// The window server's answer for a point, kept for the samples there while the same windows cover it.
-    private var hint: (point: CGPoint, covering: [Int], verdict: PointerVerdict)? = nil
+    /// The window server's answer a move gave for a point, for the samples there while the same windows cover it.
+    private var hint: (point: CGPoint, covering: [Int], verdict: PointerVerdict, at: Double)? = nil
+    private var sequence: Int = 0
 
     /// Times the window list was read.
     public private(set) var fetches: Int = 0
     /// Times the screens were read.
     public private(set) var viewportReads: Int = 0
-    public private(set) var running: Bool = false
-    public private(set) var last: Decision? = nil
     /// Steps that sampled the pointer.
     public private(set) var samples: Int = 0
+    public private(set) var running: Bool = false
+    public private(set) var last: Decision? = nil
     /// Every judged reading (the energy-test copy's trace).
     public var onDecision: ((Decision) -> Void)? = nil
     /// Every event received (the trace's callback lines).
@@ -299,24 +329,41 @@ public final class DesktopPointer {
         return [.left]
     }
 
-    /// Windows, Spaces, screens or the app receiving events changed: the screens are read again, the window list at
-    /// the next step (within `minRefetch`), and the pointer judged and told again there (a new scene learns it; the
-    /// habitats take a repeat as a no-op).
+    /// A boundary: Spaces, screens or what the desktop shows changed. The screens are read again, the list is dropped
+    /// and read at the next step (and once more `minRefetch` later, for a transition still settling); the pointer is
+    /// judged and told again there (a new scene learns it; the habitats take a repeat as a no-op).
     public func invalidate() {
         screens = nil
-        dirty = true
+        windows = nil
+        haveWindows = false
+        stale = false
+        settleReads = 2
         hint = nil
         told = false
+        rejudge = true
     }
 
-    /// An ordinary window change (an own window moved, resized, keyed, closed; a menu; the active app).
-    public func windowsChanged() { invalidate() }
+    /// An ordinary window change (an own window moved, resized, keyed, closed; a menu; the active app): the list is
+    /// stale. It is read at the next step unless one came within `minRefetch`; until then hover waits.
+    public func windowsChanged() {
+        stale = true
+        hint = nil
+        rejudge = true
+    }
 
-    /// A habitat was replaced: tell its new scene the pointer again.
-    public func retell() {}
+    /// A habitat was replaced: tell its new scene the pointer at the next step (a move or a leave; never a click).
+    public func retell() {
+        guard running else { return }
+        told = false
+        rejudge = true
+    }
 
     public func receive(_ e: Event) -> [Output] {
         guard running else { return [] }
+        var e = e
+        sequence += 1
+        e.seq = sequence
+        onReceive?(e)
         switch e.kind {
         case .move, .drag:
             if e.kind == .move { gestureOwned = false }
@@ -324,52 +371,72 @@ public final class DesktopPointer {
             return []
         case .down:
             pending = nil
-            let p: CGPoint = e.location ?? e.cursor
+            guard let p = e.location else {
+                record(Decision(seq: e.seq, reason: .noLocation, source: e.source, kind: e.kind, point: e.cursor,
+                                hitWindow: e.hitWindow, verdict: .unknown, fetched: false, outputs: [], time: e.time))
+                return []
+            }
             let fetched: Bool = readWindows(now: e.time, at: p)
-            let verdict: PointerVerdict = decide(p, hit: e.hitWindow)
-            gestureOwned = verdict.target == nil
-            var out: [Output] = tell(verdict.target)
-            if let t = verdict.target { out.append(.down(t)) }
-            record(Decision(source: e.source, kind: e.kind, point: p, hitWindow: e.hitWindow, verdict: verdict,
-                            fetched: fetched, outputs: out, time: e.time))
+            let a = PointerRouter.assess(p, windows: list, viewports: viewports(), hit: e.hitWindow, receiver: e.receiver)
+            gestureOwned = a.verdict.target == nil
+            judgedPoint = p
+            var out: [Output] = tell(a.verdict.target)
+            if let t = a.verdict.target { out.append(.down(t)) }
+            record(Decision(seq: e.seq, reason: a.reason, source: e.source, kind: e.kind, point: p, hitWindow: e.hitWindow,
+                            verdict: a.verdict, fetched: fetched, outputs: out, time: e.time))
             return out
         }
     }
 
     /// One simulation step: the newest move since the last step, or else the cursor (`buttonDown`: the left button
-    /// is held now).
+    /// is held now). Only the first call for a step samples; the others (more displays ticking) return at once.
     public func tick(cursor: CGPoint, buttonDown: Bool = false, now: Double) -> [Output] {
-        guard running, now - lastSampleAt >= DesktopPointer.sampleGap else { return [] }
-        lastSampleAt = now
+        guard running else { return [] }
+        let step: Int = Int((now / OceanClock.step).rounded())
+        if let l = lastStep, l == step { return [] }
+        lastStep = step
         samples += 1
-        if !buttonDown && pending?.kind != .drag { gestureOwned = false }
-        var source: PointerSource = .sample
-        var kind: Kind? = nil
-        var p: CGPoint = cursor
-        var hit: Int? = nil
-        if let e = pending {
-            pending = nil
-            source = e.source
-            kind = e.kind
-            p = e.location ?? e.cursor
-            hit = e.hitWindow
+        if !buttonDown && pending?.kind != .drag {
+            if gestureOwned { rejudge = true }
+            gestureOwned = false
         }
-        if gestureOwned && (buttonDown || kind == .drag) {
-            return finish(source: source, kind: kind, point: p, hit: hit, verdict: .gesture, fetched: false, now: now)
-        }
+        let e: Event? = pending
+        pending = nil
+        let source: PointerSource = e?.source ?? .sample
+        let kind: Kind? = e?.kind
+        let p: CGPoint = e.map { $0.location ?? $0.cursor } ?? cursor
+        let hit: Int? = e?.hitWindow
         let moved: Bool = judgedPoint != p
-        let onScreen: Bool = PointerRouter.viewport(at: p, in: viewports()) != nil
-        if !onScreen {
-            if !moved && told && current == nil { return [] }
-            return finish(source: source, kind: kind, point: p, hit: hit, verdict: .offDesktop, fetched: false, now: now)
+        let news: Bool = e != nil || moved || rejudge
+        if gestureOwned && (buttonDown || kind == .drag) {
+            if !news { return [] }
+            return finish(e, source: source, kind: kind, point: p, verdict: .gesture, reason: .gesture, fetched: false,
+                          now: now)
+        }
+        if PointerRouter.viewport(at: p, in: viewports()) == nil {
+            if !news && told && current == nil { return [] }
+            return finish(e, source: source, kind: kind, point: p, verdict: .offDesktop, reason: .offScreen,
+                          fetched: false, now: now)
         }
         let age: Double = now - windowsAt
-        let due: Bool = !haveWindows || (dirty && age >= DesktopPointer.minRefetch)
+        let mayRead: Bool = age >= DesktopPointer.minRefetch
+        let due: Bool = !haveWindows || ((stale || settleReads > 0) && mayRead)
             || (moved && age >= DesktopPointer.moveLife) || age >= DesktopPointer.stillLife
-        if !moved && !due { return [] }
+        if stale && !due {
+            // An ordinary window change inside the throttle: hover waits for the read, never judged on the old list.
+            if let e { pending = e }
+            if news {
+                rejudge = true
+                record(Decision(seq: e?.seq ?? nextSeq(), reason: .deferred, source: source, kind: kind, point: p,
+                                hitWindow: hit, verdict: .unknown, fetched: false, outputs: [], time: now))
+            }
+            return []
+        }
+        if !due && !news { return [] }
         let fetched: Bool = due ? readWindows(now: now, at: p) : false
-        let verdict: PointerVerdict = decide(p, hit: hit)
-        return finish(source: source, kind: kind, point: p, hit: hit, verdict: verdict, fetched: fetched, now: now)
+        let a = decide(p, event: e, now: now)
+        return finish(e, source: source, kind: kind, point: p, verdict: a.verdict, reason: a.reason, fetched: fetched,
+                      now: now)
     }
 
     // MARK: Inside
@@ -379,14 +446,23 @@ public final class DesktopPointer {
         windows = nil
         haveWindows = false
         windowsAt = -Double.infinity
-        dirty = true
+        stale = false
+        settleReads = 0
         pending = nil
         judgedPoint = nil
-        lastSampleAt = -Double.infinity
+        rejudge = false
+        lastStep = nil
         told = false
         current = nil
         gestureOwned = false
         hint = nil
+    }
+
+    private var list: [PointerWindow]? { haveWindows ? windows : nil }
+
+    private func nextSeq() -> Int {
+        sequence += 1
+        return sequence
     }
 
     private func viewports() -> [Viewport] {
@@ -404,30 +480,34 @@ public final class DesktopPointer {
         fetches += 1
         haveWindows = true
         windowsAt = now
-        dirty = false
+        stale = false
+        if settleReads > 0 { settleReads -= 1 }
         return true
     }
 
-    /// The verdict at `p`; the window server's word (`hit`) is kept for later samples at that very point while the
-    /// same windows cover it.
-    private func decide(_ p: CGPoint, hit: Int?) -> PointerVerdict {
-        let list: [PointerWindow]? = haveWindows ? windows : nil
-        let v: PointerVerdict = PointerRouter.judge(p, windows: list, viewports: viewports(), hit: hit)
-        let cover: [Int] = PointerRouter.covering(p, windows: list)
-        if let hit, hit > 0, list != nil {
-            hint = (p, cover, v)
-            return v
+    /// Hover's verdict at `p`: a move's hit is kept as a hint; a sample at that very point takes the hint while it
+    /// lives and the same windows cover the point.
+    private func decide(_ p: CGPoint, event e: Event?, now: Double) -> (verdict: PointerVerdict, reason: PointerReason) {
+        let l: [PointerWindow]? = list
+        let a = PointerRouter.assess(p, windows: l, viewports: viewports(), hit: e?.hitWindow, receiver: e?.receiver)
+        if a.reason == .eventHit, e != nil {
+            hint = (p, PointerRouter.covering(p, windows: l), a.verdict, now)
+            return a
         }
-        if let h = hint, h.point == p, h.covering == cover, list != nil { return h.verdict }
-        return v
+        if e == nil, a.reason == .rectangles, let h = hint, h.point == p, now - h.at < DesktopPointer.hintLife,
+           h.covering == PointerRouter.covering(p, windows: l) {
+            return (h.verdict, .retainedHint)
+        }
+        return a
     }
 
-    private func finish(source: PointerSource, kind: Kind?, point: CGPoint, hit: Int?, verdict: PointerVerdict,
-                        fetched: Bool, now: Double) -> [Output] {
+    private func finish(_ e: Event?, source: PointerSource, kind: Kind?, point: CGPoint, verdict: PointerVerdict,
+                        reason: PointerReason, fetched: Bool, now: Double) -> [Output] {
         judgedPoint = point
+        rejudge = false
         let out: [Output] = tell(verdict.target)
-        record(Decision(source: source, kind: kind, point: point, hitWindow: hit, verdict: verdict, fetched: fetched,
-                        outputs: out, time: now))
+        record(Decision(seq: e?.seq ?? nextSeq(), reason: reason, source: source, kind: kind, point: point,
+                        hitWindow: e?.hitWindow, verdict: verdict, fetched: fetched, outputs: out, time: now))
         return out
     }
 
@@ -446,7 +526,8 @@ public final class DesktopPointer {
     }
 }
 
-/// What the AppKit host installs and how it reads an event, as data the checks hold it to.
+/// What the AppKit host installs and how it reads an event, as data the checks hold it to (`PointerMonitor` installs
+/// exactly these monitors with this mask, and reads every event through `kind` and `location`).
 public enum PointerHost {
     /// The monitors the host installs (the sample comes from the display link).
     public static let monitors: [PointerSource] = [.global, .local]
@@ -460,11 +541,13 @@ public enum PointerHost {
         return m
     }
 
+    /// The pointer reading an event type is; nil for any other.
     public static func kind(eventType: UInt) -> DesktopPointer.Kind? {
         switch eventType {
         case 1: return .down
+        case 5: return .move
         case 6: return .drag
-        default: return .move
+        default: return nil
         }
     }
 
@@ -483,27 +566,37 @@ public enum PointerHost {
     }
 }
 
-/// The energy-test copy's pointer trace, as lines (the host writes them to a file).
+/// The energy-test copy's pointer trace as lines, for a supervised session: every callback (`cb #n`) and every
+/// judgement (`judge #n`), the judgement of a coalesced move sharing the number of the callback it judged; each with
+/// its time (seconds since boot), source, kind, exact point, run-loop mode, and for a judgement the route's reason,
+/// the verdict, whether it read the list and what the habitats were told. Bounded: past `capacity` bytes one line
+/// says the trace is full, and no more are kept.
 public final class PointerTraceLog {
     public let capacity: Int
     public private(set) var written: Int = 0
     public private(set) var full: Bool = false
+    /// Lines not kept once full.
+    public private(set) var dropped: Int = 0
     private var lines: [String] = []
-    private var lastKey: String = ""
 
     public init(capacity: Int = 16 << 20) { self.capacity = capacity }
 
-    public func callback(_ e: DesktopPointer.Event, mode: String) {}
+    public func callback(_ e: DesktopPointer.Event, mode: String) {
+        let at: String = e.location.map(PointerTraceLog.point) ?? "none"
+        let hit: String = e.hitWindow.map { "\($0)" } ?? "-"
+        let recv: String = e.receiver.map { r -> String in
+            "\(r.number)\(r.takesMouse ? "" : " (no mouse)") \(PointerTraceLog.rect(r.frame))"
+        } ?? "-"
+        add("cb #\(e.seq) t=\(PointerTraceLog.time(e.time)) \(e.source.rawValue) \(e.kind.rawValue) at \(at) cursor "
+            + "\(PointerTraceLog.point(e.cursor)) hit \(hit) receiver \(recv) mode \(mode)")
+    }
 
     public func judgement(_ d: DesktopPointer.Decision, mode: String, frames: Int) {
-        let key: String = PointerTraceLog.verdictKey(d.verdict)
-        guard d.kind == .down || key != lastKey else { return }
-        lastKey = key
-        let point: String = String(format: "(%.0f, %.0f)", Double(d.point.x), Double(d.point.y))
         let hit: String = d.hitWindow.map { "\($0)" } ?? "-"
         let told: String = d.outputs.map(PointerTraceLog.output).joined(separator: ",")
-        lines.append("pointer \(d.source.rawValue) \(d.kind?.rawValue ?? "sample") at \(point) mode \(mode) hit \(hit) -> "
-                     + "\(PointerTraceLog.verdict(d.verdict)) read \(d.fetched ? "yes" : "no") told [\(told)] frames \(frames)")
+        add("judge #\(d.seq) t=\(PointerTraceLog.time(d.time)) \(d.source.rawValue) \(d.kind?.rawValue ?? "sample") at "
+            + "\(PointerTraceLog.point(d.point)) mode \(mode) reason \(d.reason.rawValue) hit \(hit) -> "
+            + "\(PointerTraceLog.verdict(d.verdict)) read \(d.fetched ? "yes" : "no") told [\(told)] frames \(frames)")
     }
 
     /// The lines since the last take.
@@ -513,14 +606,25 @@ public final class PointerTraceLog {
         return out
     }
 
-    public static func verdictKey(_ v: PointerVerdict) -> String {
-        switch v {
-        case .desktop(let t): return "desktop \(t.viewportID)"
-        case .blocked(let w): return "blocked \(w.number)"
-        case .gesture: return "gesture"
-        case .offDesktop: return "off"
-        case .unknown: return "unknown"
+    private func add(_ line: String) {
+        guard !full else { dropped += 1; return }
+        let n: Int = line.utf8.count + 1
+        if written + n > capacity {
+            full = true
+            dropped += 1
+            let note: String = "pointer trace full at \(written) bytes: no more callback or judgement lines this run"
+            lines.append(note)
+            written += note.utf8.count + 1
+            return
         }
+        lines.append(line)
+        written += n
+    }
+
+    static func time(_ t: Double) -> String { String(format: "%.6f", t) }
+    static func point(_ p: CGPoint) -> String { String(format: "(%.2f, %.2f)", Double(p.x), Double(p.y)) }
+    static func rect(_ r: CGRect) -> String {
+        String(format: "%.0f,%.0f %.0fx%.0f", Double(r.minX), Double(r.minY), Double(r.width), Double(r.height))
     }
 
     public static func verdict(_ v: PointerVerdict) -> String {
@@ -528,13 +632,11 @@ public final class PointerTraceLog {
         case .desktop(let t):
             return "desktop display \(t.viewportID) " + String(format: "(%.0f, %.0f)", Double(t.local.x), Double(t.local.y))
         case .blocked(let w):
-            let r: String = String(format: "%.0f,%.0f %.0fx%.0f", Double(w.bounds.minX), Double(w.bounds.minY),
-                                   Double(w.bounds.width), Double(w.bounds.height))
             return "blocked by window \(w.number) pid \(w.pid)\(w.own ? " (own)" : "") layer \(w.layer) alpha "
-                + String(format: "%.2f", w.alpha) + " rect \(r)"
+                + String(format: "%.2f", w.alpha) + " rect \(rect(w.bounds))"
         case .gesture: return "a drag owned by a window"
         case .offDesktop: return "off the exposed desktop"
-        case .unknown: return "unknown (window list unreadable)"
+        case .unknown: return "unknown"
         }
     }
 

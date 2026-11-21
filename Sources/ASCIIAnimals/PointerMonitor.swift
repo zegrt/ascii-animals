@@ -4,10 +4,12 @@ import OceanKit
 /// Watches the pointer for the desktop without taking any event from anyone: the AppKit host of `DesktopPointer`
 /// (the contract is there). Installed only while a habitat is live, interaction is on and a screen is exposed.
 ///
-/// Sources: a global monitor (events dispatched to other apps), a passive local monitor (events dispatched to ASCII
-/// Animals itself; it hands every event back unchanged) and `tick`, the sample the display link calls each step in
-/// common modes, which also covers events no monitor sees (a nested tracking loop). The window list is read only as
-/// `DesktopPointer` asks; changes that make it stale (own windows, menus, Spaces, the active app) invalidate it.
+/// Sources: the monitors `PointerHost.monitors` names with its mask (a global monitor for events dispatched to other
+/// apps, a passive local monitor for events dispatched to ASCII Animals itself; it hands every event back unchanged)
+/// and `tick`, the sample the display link calls each step in common modes, which also covers events no monitor sees
+/// (a nested tracking loop). Every event is read through `PointerHost` (its kind, its own location, and for a local
+/// one the own window AppKit dispatched it to). The window list is read only as `DesktopPointer` asks: a Space change
+/// is a boundary (`invalidate`), changes of own windows, menus and the active app are ordinary (`windowsChanged`).
 final class PointerMonitor {
     private var global: Any?
     private var local: Any?
@@ -48,19 +50,24 @@ final class PointerMonitor {
         }
     }
 
-    /// Screens, windows, Spaces or the app receiving events changed.
+    /// A boundary: screens, Spaces or the desktop's visibility changed (the director calls it on every such change).
     func invalidate() {
         guard core.running else { return }
         primaryHeight = NSScreen.screens.first?.frame.height
         core.invalidate()
     }
 
-    /// One simulation step (the display link, common modes): the newest move, or the cursor.
+    /// A habitat was replaced: its new scene is told the pointer at the next step.
+    func retell() { core.retell() }
+
+    /// One simulation step (the display link, common modes): the newest move, or the cursor. `DesktopPointer` takes
+    /// one a step whichever display ticks first.
     func tick() {
         guard core.running, let h = primaryHeight else { return }
         let cursor: CGPoint = ScreenGeometry.flip(NSEvent.mouseLocation, primaryHeight: h)
         let held: Bool = NSEvent.pressedMouseButtons & 1 != 0
         apply(core.tick(cursor: cursor, buttonDown: held, now: PointerMonitor.now))
+        trace?.flushIfDue()
     }
 
     // MARK: Inside
@@ -75,16 +82,24 @@ final class PointerMonitor {
     }
 
     private func install() {
-        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .leftMouseDown]
-        global = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] e in
-            self?.handle(e, source: .global)
+        let mask = NSEvent.EventTypeMask(rawValue: PointerHost.mask)
+        for source in PointerHost.monitors {
+            switch source {
+            case .global:
+                global = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] e in
+                    self?.handle(e, source: .global)
+                }
+                if global == nil { Log.write("pointer: the global mouse monitor could not be installed") }
+            case .local:
+                local = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] e in
+                    self?.handle(e, source: .local)
+                    return e   // passive: the event goes on as if nothing watched it
+                }
+                if local == nil { Log.write("pointer: the local mouse monitor could not be installed") }
+            case .sample:
+                break   // the display link's tick
+            }
         }
-        local = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] e in
-            self?.handle(e, source: .local)
-            return e   // passive: the event goes on as if nothing watched it
-        }
-        if global == nil { Log.write("pointer: the global mouse monitor could not be installed") }
-        if local == nil { Log.write("pointer: the local mouse monitor could not be installed") }
         let nc = NotificationCenter.default
         let ws = NSWorkspace.shared.notificationCenter
         let own: [Notification.Name] = [
@@ -93,17 +108,19 @@ final class PointerMonitor {
             NSMenu.didBeginTrackingNotification, NSMenu.didEndTrackingNotification,
             NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification,
         ]
-        for name in own { observe(nc, name) }
-        let system: [Notification.Name] = [
-            NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification,
-            NSWorkspace.didHideApplicationNotification, NSWorkspace.didUnhideApplicationNotification,
+        for name in own { observe(nc, name, boundary: false) }
+        let apps: [Notification.Name] = [
+            NSWorkspace.didActivateApplicationNotification, NSWorkspace.didHideApplicationNotification,
+            NSWorkspace.didUnhideApplicationNotification,
         ]
-        for name in system { observe(ws, name) }
+        for name in apps { observe(ws, name, boundary: false) }
+        observe(ws, NSWorkspace.activeSpaceDidChangeNotification, boundary: true)
     }
 
-    private func observe(_ center: NotificationCenter, _ name: Notification.Name) {
+    private func observe(_ center: NotificationCenter, _ name: Notification.Name, boundary: Bool) {
         let token: NSObjectProtocol = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-            self?.invalidate()
+            guard let self else { return }
+            if boundary { self.invalidate() } else if self.core.running { self.core.windowsChanged() }
         }
         observers.append((center, token))
     }
@@ -118,29 +135,25 @@ final class PointerMonitor {
     }
 
     private func handle(_ e: NSEvent, source: PointerSource) {
-        guard let h = primaryHeight else { return }
-        let kind: DesktopPointer.Kind
-        switch e.type {
-        case .leftMouseDown: kind = .down
-        case .leftMouseDragged: kind = .drag
-        default: kind = .move
-        }
+        guard let h = primaryHeight, let kind = PointerHost.kind(eventType: UInt(e.type.rawValue)) else { return }
         let cursor: CGPoint = ScreenGeometry.flip(NSEvent.mouseLocation, primaryHeight: h)
-        let event = DesktopPointer.Event(kind: kind, source: source, location: PointerMonitor.location(e, primaryHeight: h),
-                                         cursor: cursor, hitWindow: PointerMonitor.hitWindow(e), time: e.timestamp)
+        let w: NSWindow? = source == .local ? e.window : nil
+        let screenPoint: CGPoint? = w.map { $0.convertPoint(toScreen: e.locationInWindow) }
+            ?? (e.windowNumber == 0 ? e.locationInWindow : nil)
+        let location: CGPoint? = PointerHost.location(cgLocation: e.cgEvent?.location, screenPoint: screenPoint,
+                                                      primaryHeight: h)
+        let receiver: PointerReceiver? = w.map {
+            PointerHost.receiver(number: $0.windowNumber, appKitFrame: $0.frame, ignoresMouse: $0.ignoresMouseEvents,
+                                 primaryHeight: h)
+        }
+        let event = DesktopPointer.Event(kind: kind, source: source, location: location, cursor: cursor,
+                                         hitWindow: PointerMonitor.hitWindow(e), receiver: receiver, time: e.timestamp)
         trace?.received(source)
         apply(core.receive(event))
     }
 
-    /// The event's own location at event time, top-left global points (the window server's, else AppKit's).
-    static func location(_ e: NSEvent, primaryHeight: CGFloat) -> CGPoint? {
-        if let cg = e.cgEvent { return cg.location }
-        if let w = e.window { return ScreenGeometry.flip(w.convertPoint(toScreen: e.locationInWindow), primaryHeight: primaryHeight) }
-        if e.windowNumber == 0 { return ScreenGeometry.flip(e.locationInWindow, primaryHeight: primaryHeight) }
-        return nil
-    }
-
-    /// The window the window server handed the event to (nil when the event does not say).
+    /// The window the window server handed the event to (nil when the event does not say). Supporting evidence only
+    /// (`PointerRouter.assess`); what it holds for each monitor is for the live trace to show.
     static func hitWindow(_ e: NSEvent) -> Int? {
         guard let cg = e.cgEvent else { return nil }
         let n: Int64 = cg.getIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent)
@@ -148,101 +161,79 @@ final class PointerMonitor {
     }
 }
 
-/// The energy-test copy's pointer trace (`ASCII_ANIMALS_POINTER_TRACE=1`), for a supervised session: every click and
-/// every change of route with its source, point, run-loop mode, the window the window server named, the blocking
-/// window (pid, layer, rect, own) and what the habitats were told; once a second, the events per source, the
-/// window-list reads and the frames drawn. A missing callback and a callback refused by a rectangle read apart.
+/// The energy-test copy's pointer trace (`ASCII_ANIMALS_POINTER_TRACE=1`), for a supervised session. Every callback
+/// and every judgement is a line (`PointerTraceLog`: shared sequence number, time, source, exact point, run-loop mode,
+/// the route's reason, the verdict, the read and what was told), written to `pointer-trace.log` beside the copy's log,
+/// at most 16 MB a run, flushed once a second. Once a second the copy's log also gets the events per source, the
+/// judgements, the window-list reads and the frames drawn.
 final class PointerTrace {
     static let enabled: Bool = Launch.identity.isEnergyTest
         && ProcessInfo.processInfo.environment["ASCII_ANIMALS_POINTER_TRACE"] == "1"
+    static let file: URL = Log.folder.appendingPathComponent("pointer-trace.log")
 
     private let frames: () -> Int
     private weak var core: DesktopPointer?
+    private let lines = PointerTraceLog(capacity: 16 << 20)
+    private var handle: FileHandle? = nil
     private var counts: [PointerSource: Int] = [:]
     private var judged: Int = 0
-    private var lastKey: String = ""
     private var lastSummary: Double = 0
     private var readsAtSummary: Int = 0
 
     init(frames: @escaping () -> Int, core: DesktopPointer) {
         self.frames = frames
         self.core = core
+        core.onReceive = { [weak self] e in self?.lines.callback(e, mode: PointerTrace.mode) }
         core.onDecision = { [weak self] d in self?.decided(d) }
     }
 
+    private static var mode: String { RunLoop.current.currentMode?.rawValue ?? "none" }
+
     func started(global: Bool, local: Bool) {
-        Log.write("pointer trace: start; global monitor \(global ? "on" : "MISSING"), local monitor \(local ? "on" : "MISSING")")
+        if handle == nil {
+            try? FileManager.default.createDirectory(at: Log.folder, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: PointerTrace.file.path, contents: nil)
+            handle = try? FileHandle(forWritingTo: PointerTrace.file)
+        }
+        Log.write("pointer trace: start; global monitor \(global ? "on" : "MISSING"), local monitor \(local ? "on" : "MISSING"); "
+                  + "lines in \(PointerTrace.file.lastPathComponent)")
     }
 
     func stopped() {
         summary(force: true)
+        flush()
         Log.write("pointer trace: stop")
-        lastKey = ""
     }
 
     func received(_ s: PointerSource) {
         counts[s, default: 0] += 1
-        summary(force: false)
     }
+
+    func flushIfDue() { summary(force: false) }
 
     private func decided(_ d: DesktopPointer.Decision) {
         judged += 1
-        let key: String = PointerTrace.verdictKey(d.verdict)
-        if d.kind == .down || key != lastKey {
-            lastKey = key
-            let mode: String = RunLoop.current.currentMode?.rawValue ?? "none"
-            let point: String = String(format: "(%.0f, %.0f)", Double(d.point.x), Double(d.point.y))
-            let hit: String = d.hitWindow.map { "\($0)" } ?? "-"
-            let told: String = d.outputs.map(PointerTrace.output).joined(separator: ",")
-            Log.write("pointer \(d.source.rawValue) \(d.kind?.rawValue ?? "sample") at \(point) mode \(mode) hit \(hit) -> "
-                      + "\(PointerTrace.verdict(d.verdict)) read \(d.fetched ? "yes" : "no") told [\(told)] frames \(frames())")
-        }
-        summary(force: false)
+        lines.judgement(d, mode: PointerTrace.mode, frames: frames())
+    }
+
+    private func flush() {
+        let out: [String] = lines.take()
+        guard !out.isEmpty, let h = handle else { return }
+        h.write(Data((out.joined(separator: "\n") + "\n").utf8))
     }
 
     private func summary(force: Bool) {
         let now: Double = ProcessInfo.processInfo.systemUptime
         guard force || now - lastSummary >= 1 else { return }
         lastSummary = now
+        flush()
         let reads: Int = core?.fetches ?? 0
         let g: Int = counts[.global] ?? 0
         let l: Int = counts[.local] ?? 0
-        Log.write("pointer 1s: global \(g) local \(l) judged \(judged) reads \(reads - readsAtSummary) frames \(frames())")
+        Log.write("pointer 1s: global \(g) local \(l) judged \(judged) reads \(reads - readsAtSummary) frames \(frames())"
+                  + (lines.full ? " (trace full)" : ""))
         counts.removeAll()
         judged = 0
         readsAtSummary = reads
-    }
-
-    static func verdictKey(_ v: PointerVerdict) -> String {
-        switch v {
-        case .desktop(let t): return "desktop \(t.viewportID)"
-        case .blocked(let w): return "blocked \(w.number)"
-        case .gesture: return "gesture"
-        case .offDesktop: return "off"
-        case .unknown: return "unknown"
-        }
-    }
-
-    static func verdict(_ v: PointerVerdict) -> String {
-        switch v {
-        case .desktop(let t):
-            return "desktop display \(t.viewportID) " + String(format: "(%.0f, %.0f)", Double(t.local.x), Double(t.local.y))
-        case .blocked(let w):
-            let r: String = String(format: "%.0f,%.0f %.0fx%.0f", Double(w.bounds.minX), Double(w.bounds.minY),
-                                   Double(w.bounds.width), Double(w.bounds.height))
-            return "blocked by window \(w.number) pid \(w.pid)\(w.own ? " (own)" : "") layer \(w.layer) alpha "
-                + String(format: "%.2f", w.alpha) + " rect \(r)"
-        case .gesture: return "a drag owned by a window"
-        case .offDesktop: return "off the exposed desktop"
-        case .unknown: return "unknown (window list unreadable)"
-        }
-    }
-
-    static func output(_ o: DesktopPointer.Output) -> String {
-        switch o {
-        case .moved(let t): return "moved \(t.viewportID)"
-        case .left: return "left"
-        case .down(let t): return "down \(t.viewportID)"
-        }
     }
 }

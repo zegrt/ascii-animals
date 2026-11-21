@@ -837,7 +837,7 @@ private func pointerCadenceChecks() {
             if d.out.count > 64 { d.out.removeAll(keepingCapacity: true) }
         }
         let us: Double = (ProcessInfo.processInfo.systemUptime - start) * 1e6 / Double(n)
-        print("INFO pointer step with a move (judged, no read): " + String(format: "%.2f", us) + " µs")
+        print("INFO pointer step with a move, judged (the model desk's list, a read every 0.25 s): " + String(format: "%.2f", us) + " µs")
     }
     check("pointerStepCost", stepCost)
 }
