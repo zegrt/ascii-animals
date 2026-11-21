@@ -58,6 +58,39 @@ public struct PointerWindow: Equatable, Sendable {
     }
 }
 
+/// The window AppKit dispatched a local event to (`NSEvent.window`): one of ASCII Animals' own, known exactly
+/// in-process. `frame`: global top-left points; `takesMouse`: it does not ignore mouse events.
+public struct PointerReceiver: Equatable, Sendable {
+    public var number: Int
+    public var frame: CGRect
+    public var takesMouse: Bool
+    public init(number: Int, frame: CGRect, takesMouse: Bool = true) {
+        self.number = number; self.frame = frame; self.takesMouse = takesMouse
+    }
+}
+
+/// Why a reading was judged as it was (the trace's route reason).
+public enum PointerReason: String, Sendable, CaseIterable {
+    /// The own window AppKit dispatched it to holds the point.
+    case receiver
+    /// The window server named the window under the point (the event's hit field), and the list agrees.
+    case eventHit = "event-hit"
+    /// A hit an earlier move gave at this very point, still in its life.
+    case retainedHint = "retained-hint"
+    /// The window list's rectangles, front to back.
+    case rectangles
+    /// The list could not be read.
+    case noList = "no-list"
+    /// In no exposed screen.
+    case offScreen = "off-screen"
+    /// A drag of a gesture that began on a window.
+    case gesture
+    /// A click without its own location (never judged at the cursor).
+    case noLocation = "no-location"
+    /// The list is known stale and a read is not yet allowed: hover waits for it.
+    case deferred
+}
+
 /// Where a pointer reading came from: the global monitor (events dispatched to other apps), the local monitor (events
 /// dispatched to ASCII Animals itself), or the once-a-step sample of the cursor.
 public enum PointerSource: String, Sendable, CaseIterable {
@@ -173,11 +206,15 @@ public final class DesktopPointer {
         public var location: CGPoint?
         public var cursor: CGPoint
         public var hitWindow: Int?
+        /// The own window AppKit dispatched it to (local events only).
+        public var receiver: PointerReceiver?
         public var time: Double
+        /// The trace's sequence number, given on receipt.
+        public var seq: Int = 0
         public init(kind: Kind, source: PointerSource, location: CGPoint?, cursor: CGPoint, hitWindow: Int? = nil,
-                    time: Double) {
+                    receiver: PointerReceiver? = nil, time: Double) {
             self.kind = kind; self.source = source; self.location = location; self.cursor = cursor
-            self.hitWindow = hitWindow; self.time = time
+            self.hitWindow = hitWindow; self.receiver = receiver; self.time = time
         }
     }
 
@@ -189,6 +226,9 @@ public final class DesktopPointer {
 
     /// One judged reading, for the diagnostic trace.
     public struct Decision: Sendable {
+        /// The judged event's sequence number (a sample gets its own).
+        public var seq: Int = 0
+        public var reason: PointerReason = .rectangles
         public var source: PointerSource
         public var kind: Kind?
         public var point: CGPoint
@@ -209,6 +249,8 @@ public final class DesktopPointer {
     public static let minRefetch: Double = 0.1
     /// Several screens tick each step: one sample a step.
     public static let sampleGap: Double = OceanClock.step * 0.5
+    /// How long a hit a move gave is kept for samples at that point.
+    public static let hintLife: Double = 1.0
 
     private let viewportSource: () -> [Viewport]
     private let windowSource: () -> [PointerWindow]?
@@ -233,8 +275,12 @@ public final class DesktopPointer {
     public private(set) var viewportReads: Int = 0
     public private(set) var running: Bool = false
     public private(set) var last: Decision? = nil
+    /// Steps that sampled the pointer.
+    public private(set) var samples: Int = 0
     /// Every judged reading (the energy-test copy's trace).
     public var onDecision: ((Decision) -> Void)? = nil
+    /// Every event received (the trace's callback lines).
+    public var onReceive: ((Event) -> Void)? = nil
 
     public init(viewports: @escaping () -> [Viewport], windows: @escaping () -> [PointerWindow]?) {
         viewportSource = viewports
@@ -263,6 +309,12 @@ public final class DesktopPointer {
         told = false
     }
 
+    /// An ordinary window change (an own window moved, resized, keyed, closed; a menu; the active app).
+    public func windowsChanged() { invalidate() }
+
+    /// A habitat was replaced: tell its new scene the pointer again.
+    public func retell() {}
+
     public func receive(_ e: Event) -> [Output] {
         guard running else { return [] }
         switch e.kind {
@@ -289,6 +341,7 @@ public final class DesktopPointer {
     public func tick(cursor: CGPoint, buttonDown: Bool = false, now: Double) -> [Output] {
         guard running, now - lastSampleAt >= DesktopPointer.sampleGap else { return [] }
         lastSampleAt = now
+        samples += 1
         if !buttonDown && pending?.kind != .drag { gestureOwned = false }
         var source: PointerSource = .sample
         var kind: Kind? = nil
@@ -390,6 +443,107 @@ public final class DesktopPointer {
     private func record(_ d: Decision) {
         last = d
         onDecision?(d)
+    }
+}
+
+/// What the AppKit host installs and how it reads an event, as data the checks hold it to.
+public enum PointerHost {
+    /// The monitors the host installs (the sample comes from the display link).
+    public static let monitors: [PointerSource] = [.global, .local]
+    /// The `NSEvent.EventType` raw values the monitors match: leftMouseDown 1, mouseMoved 5, leftMouseDragged 6.
+    public static let eventTypes: [UInt] = [1, 5, 6]
+
+    /// The monitors' `NSEvent.EventTypeMask` raw value.
+    public static var mask: UInt64 {
+        var m: UInt64 = 0
+        for t in eventTypes { m |= UInt64(1) << UInt64(t) }
+        return m
+    }
+
+    public static func kind(eventType: UInt) -> DesktopPointer.Kind? {
+        switch eventType {
+        case 1: return .down
+        case 6: return .drag
+        default: return .move
+        }
+    }
+
+    /// The event's own location at event time, top-left global points: the window server's (`cgLocation`), else
+    /// AppKit's screen point (bottom-left; from the receiving window, or a windowless event's own) flipped.
+    public static func location(cgLocation: CGPoint?, screenPoint: CGPoint?, primaryHeight: CGFloat) -> CGPoint? {
+        if let cg = cgLocation { return cg }
+        if let s = screenPoint { return ScreenGeometry.flip(s, primaryHeight: primaryHeight) }
+        return nil
+    }
+
+    /// An own window as a receiver: its AppKit frame (bottom-left) flipped to global top-left points.
+    public static func receiver(number: Int, appKitFrame: CGRect, ignoresMouse: Bool, primaryHeight: CGFloat) -> PointerReceiver {
+        PointerReceiver(number: number, frame: ScreenGeometry.flip(appKitFrame, primaryHeight: primaryHeight),
+                        takesMouse: !ignoresMouse)
+    }
+}
+
+/// The energy-test copy's pointer trace, as lines (the host writes them to a file).
+public final class PointerTraceLog {
+    public let capacity: Int
+    public private(set) var written: Int = 0
+    public private(set) var full: Bool = false
+    private var lines: [String] = []
+    private var lastKey: String = ""
+
+    public init(capacity: Int = 16 << 20) { self.capacity = capacity }
+
+    public func callback(_ e: DesktopPointer.Event, mode: String) {}
+
+    public func judgement(_ d: DesktopPointer.Decision, mode: String, frames: Int) {
+        let key: String = PointerTraceLog.verdictKey(d.verdict)
+        guard d.kind == .down || key != lastKey else { return }
+        lastKey = key
+        let point: String = String(format: "(%.0f, %.0f)", Double(d.point.x), Double(d.point.y))
+        let hit: String = d.hitWindow.map { "\($0)" } ?? "-"
+        let told: String = d.outputs.map(PointerTraceLog.output).joined(separator: ",")
+        lines.append("pointer \(d.source.rawValue) \(d.kind?.rawValue ?? "sample") at \(point) mode \(mode) hit \(hit) -> "
+                     + "\(PointerTraceLog.verdict(d.verdict)) read \(d.fetched ? "yes" : "no") told [\(told)] frames \(frames)")
+    }
+
+    /// The lines since the last take.
+    public func take() -> [String] {
+        let out: [String] = lines
+        lines.removeAll(keepingCapacity: true)
+        return out
+    }
+
+    public static func verdictKey(_ v: PointerVerdict) -> String {
+        switch v {
+        case .desktop(let t): return "desktop \(t.viewportID)"
+        case .blocked(let w): return "blocked \(w.number)"
+        case .gesture: return "gesture"
+        case .offDesktop: return "off"
+        case .unknown: return "unknown"
+        }
+    }
+
+    public static func verdict(_ v: PointerVerdict) -> String {
+        switch v {
+        case .desktop(let t):
+            return "desktop display \(t.viewportID) " + String(format: "(%.0f, %.0f)", Double(t.local.x), Double(t.local.y))
+        case .blocked(let w):
+            let r: String = String(format: "%.0f,%.0f %.0fx%.0f", Double(w.bounds.minX), Double(w.bounds.minY),
+                                   Double(w.bounds.width), Double(w.bounds.height))
+            return "blocked by window \(w.number) pid \(w.pid)\(w.own ? " (own)" : "") layer \(w.layer) alpha "
+                + String(format: "%.2f", w.alpha) + " rect \(r)"
+        case .gesture: return "a drag owned by a window"
+        case .offDesktop: return "off the exposed desktop"
+        case .unknown: return "unknown (window list unreadable)"
+        }
+    }
+
+    public static func output(_ o: DesktopPointer.Output) -> String {
+        switch o {
+        case .moved(let t): return "moved \(t.viewportID)"
+        case .left: return "left"
+        case .down(let t): return "down \(t.viewportID)"
+        }
     }
 }
 

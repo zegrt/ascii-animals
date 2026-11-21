@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import OceanKit
@@ -29,23 +30,26 @@ final class PointerDesk {
     static let screen2: CGRect = CGRect(x: 1440, y: 0, width: 1920, height: 1080)
     static let twoScreens: [Viewport] = [Viewport(id: 1, rect: screen1), Viewport(id: 2, rect: screen2)]
 
-    /// An event at `p` (its own location), dispatched `d`; the cursor is at `cursorAtCallback` (default `p`) by the
-    /// time a callback runs, and stays there.
-    func deliver(_ kind: DesktopPointer.Kind, at p: CGPoint, via d: PointerDispatch, cursorAtCallback: CGPoint? = nil,
-                 hit: Int? = nil) {
-        let c: CGPoint = cursorAtCallback ?? p
+    /// An event at `p` (its own location; nil: the event has none), dispatched `d`; the cursor is at
+    /// `cursorAtCallback` (default `p`) by the time a callback runs, and stays there. `receiver`: the own window AppKit
+    /// dispatched it to.
+    func deliver(_ kind: DesktopPointer.Kind, at p: CGPoint?, via d: PointerDispatch, cursorAtCallback: CGPoint? = nil,
+                 hit: Int? = nil, receiver: PointerReceiver? = nil) {
+        let c: CGPoint = cursorAtCallback ?? p ?? cursor
         cursor = c
         guard let src = PointerDelivery.source(for: d, installed: DesktopPointer.sources) else { return }
-        let e = DesktopPointer.Event(kind: kind, source: src, location: p, cursor: c, hitWindow: hit, time: now)
+        let e = DesktopPointer.Event(kind: kind, source: src, location: p, cursor: c, hitWindow: hit, receiver: receiver,
+                                     time: now)
         out += pointer.receive(e)
     }
 
-    func move(to p: CGPoint, via d: PointerDispatch = .foreign, hit: Int? = nil) {
-        deliver(button ? .drag : .move, at: p, via: d, hit: hit)
+    func move(to p: CGPoint, via d: PointerDispatch = .foreign, hit: Int? = nil, receiver: PointerReceiver? = nil) {
+        deliver(button ? .drag : .move, at: p, via: d, hit: hit, receiver: receiver)
     }
 
-    func click(at p: CGPoint, via d: PointerDispatch = .foreign, cursorAtCallback: CGPoint? = nil, hit: Int? = nil) {
-        deliver(.down, at: p, via: d, cursorAtCallback: cursorAtCallback, hit: hit)
+    func click(at p: CGPoint?, via d: PointerDispatch = .foreign, cursorAtCallback: CGPoint? = nil, hit: Int? = nil,
+               receiver: PointerReceiver? = nil) {
+        deliver(.down, at: p, via: d, cursorAtCallback: cursorAtCallback, hit: hit, receiver: receiver)
     }
 
     /// One simulation step later (the host samples on the display link).
@@ -108,6 +112,9 @@ func pointerChecks() {
     pointerFreshnessChecks()
     pointerBudgetChecks()
     pointerFeelChecks()
+    pointerRound1Checks()
+    pointerCadenceChecks()
+    pointerHostChecks()
 }
 
 // MARK: Delivery: own dispatch, nested loops, the event's own location
@@ -203,8 +210,10 @@ private func pointerEligibilityChecks() {
         let d = PointerDesk(windows: [overlay, habitatWindow, finderDesktop])
         d.click(at: desktopSpot, hit: finderDesktop.number)
         try expect(d.downs == [t1(100, 500)], "the window server sent the click to the desktop, a rectangle refused it: \(d.out)")
-        d.ticks(for: 3)
-        try expect(d.target == t1(100, 500), "the resting pointer lost the desktop the window server named: \(d.out)")
+        // Fix round 1, finding 1: a click's hit is that click's alone; a resting pointer is judged by the rectangles
+        // again at its next refresh (before: the click's verdict was kept for the hover with no end).
+        d.ticks(for: DesktopPointer.stillLife + 0.1)
+        try expect(d.target == nil, "a click's hit held the hover of the resting pointer: \(d.out)")
         let e = PointerDesk(windows: [overlay, habitatWindow, finderDesktop])
         e.click(at: desktopSpot)
         try expect(e.downs.isEmpty, "with no word from the window server the rectangle must hold (conservative): \(e.out)")
@@ -503,4 +512,411 @@ private struct SplitMix {
         z = z ^ (z >> 31)
         return Double(z >> 11) / Double(UInt64(1) << 53)
     }
+}
+
+// MARK: Fix round 1 (review r1 @ a3f20ee): each finding, then what the review found missing
+
+/// A display-sized foreign surface (an overlay whose pixels may be clear).
+private let overlay: PointerWindow = PointerWindow(number: 77, pid: 600, layer: 25, alpha: 1, bounds: PointerDesk.screen1)
+
+private func pointerRound1Checks() {
+    // Finding 1: a down judges only its own event against a fresh list; a hint a move left is for hover, and ends.
+    func downJudgesItsOwnEvent() throws {
+        let d = PointerDesk(windows: [overlay, habitatWindow, finderDesktop])
+        d.move(to: desktopSpot, hit: finderDesktop.number)
+        d.tick()
+        try expect(d.target == t1(100, 500), "a move the window server gave the desktop: \(d.out)")
+        d.now += 0.2
+        d.click(at: desktopSpot)
+        try expect(d.downs.isEmpty, "a click with no hit of its own took the desktop verdict a move left: \(d.out)")
+        let e = PointerDesk(windows: [overlay, habitatWindow, finderDesktop])
+        e.move(to: desktopSpot, hit: finderDesktop.number)
+        e.tick()
+        e.ticks(for: DesktopPointer.hintLife + DesktopPointer.stillLife + 0.1)
+        try expect(e.target == nil, "one move's hit held the resting pointer's hover with no end: \(e.out)")
+    }
+    check("pointerDownJudgesItsOwnEvent", downJudgesItsOwnEvent)
+
+    // Finding 2: the own window AppKit dispatched to rejects the point when it holds it (even before the window list
+    // has it); a click needs its own location; the hit field is supporting evidence, never against what is known.
+    func receiverAndLocation() throws {
+        let alert = PointerReceiver(number: 44, frame: CGRect(x: 0, y: 300, width: 420, height: 400))
+        let d = PointerDesk(windows: [habitatWindow, finderDesktop])
+        d.click(at: desktopSpot, via: .own, receiver: alert)
+        try expect(d.downs.isEmpty, "a click AppKit gave an own alert (not yet in the list) reached the habitat: \(d.out)")
+        d.move(to: desktopSpot, via: .own, receiver: alert)
+        d.tick()
+        try expect(d.target == nil, "a move over the own window AppKit named reached the habitat: \(d.out)")
+        d.move(to: CGPoint(x: 1000, y: 800), via: .own, receiver: alert)
+        d.tick()
+        try expect(d.target == t1(1000, 800), "a receiver that does not hold the point blocked bare desktop: \(d.out)")
+        let e = PointerDesk(windows: [])
+        e.click(at: nil, cursorAtCallback: CGPoint(x: 2000, y: 500))
+        try expect(e.downs.isEmpty, "a click with no location of its own was put where the cursor went: \(e.out)")
+        let settings = PointerWindow(number: 40, pid: 42, own: true, layer: 0,
+                                     bounds: CGRect(x: 0, y: 300, width: 400, height: 400))
+        let f = PointerDesk(windows: [settings, habitatWindow, finderDesktop])
+        f.click(at: desktopSpot, hit: finderDesktop.number)
+        try expect(f.downs.isEmpty, "a hit naming the desktop outranked an own window known to hold the point: \(f.out)")
+        let otherDesktop = PointerWindow(number: 6, pid: 300, layer: -2147483603, bounds: PointerDesk.screen2)
+        let g = PointerDesk(windows: [overlay, habitatWindow, finderDesktop, otherDesktop])
+        g.click(at: desktopSpot, hit: otherDesktop.number)
+        try expect(g.downs.isEmpty, "a hit naming a window that does not hold the point was taken: \(g.out)")
+    }
+    check("pointerReceiverAndLocation", receiverAndLocation)
+
+    // Finding 3: new facts at an unchanged point (a hit; the button going up after a drag) count at the next step,
+    // with no extra read.
+    func samePointNewFacts() throws {
+        let d = PointerDesk(windows: [overlay, habitatWindow, finderDesktop])
+        d.move(to: desktopSpot)
+        d.tick()
+        try expect(d.target == nil, "the overlay's rectangle blocks a move with no hit: \(d.out)")
+        let reads: Int = d.pointer.fetches
+        d.move(to: desktopSpot, hit: finderDesktop.number)
+        d.tick()
+        try expect(d.target == t1(100, 500), "a new hit at the same point was dropped: \(d.out)")
+        try expect(d.pointer.fetches == reads, "a new hit read the list again (\(d.pointer.fetches - reads))")
+        let e = PointerDesk(windows: [foreignWindow, habitatWindow])
+        e.click(at: onForeign)
+        e.button = true
+        e.move(to: desktopSpot)
+        e.tick()
+        try expect(e.target == nil, "a drag from a window entered the habitat: \(e.out)")
+        let reads2: Int = e.pointer.fetches
+        e.button = false
+        e.tick()
+        e.tick()
+        try expect(e.target == t1(100, 500), "a drag released over bare desktop stayed the window's: \(e.out)")
+        try expect(e.pointer.fetches == reads2, "the release read the list again (\(e.pointer.fetches - reads2))")
+    }
+    check("pointerSamePointNewFacts", samePointNewFacts)
+
+    // Finding 4: a Space or display change is a boundary (the next step reads); an ordinary window change defers hover
+    // until a read is allowed, never judging on the old list; a burst of them keeps the throttle.
+    func boundaryWaitsForFreshList() throws {
+        let spot2: CGPoint = CGPoint(x: 800, y: 600)
+        let opened = PointerWindow(number: 94, pid: 901, layer: 0, bounds: CGRect(x: 700, y: 500, width: 300, height: 300))
+        let d = PointerDesk(windows: [habitatWindow])
+        d.move(to: desktopSpot)
+        d.tick()
+        d.windows = [opened, habitatWindow]
+        d.pointer.invalidate()
+        d.move(to: spot2)
+        d.tick()
+        try expect(d.target == nil, "after a Space change a move was judged on the old list: \(d.out)")
+        let own = PointerWindow(number: 95, pid: 42, own: true, layer: 0, bounds: opened.bounds)
+        let e = PointerDesk(windows: [habitatWindow])
+        e.move(to: desktopSpot)
+        e.tick()
+        e.windows = [own, habitatWindow]
+        e.pointer.windowsChanged()
+        e.move(to: spot2)
+        e.tick()
+        try expect(!e.out.contains(.moved(t1(800, 600))), "a move inside the throttle was judged on the old list: \(e.out)")
+        e.ticks(for: DesktopPointer.minRefetch + 2 * OceanClock.step)
+        try expect(e.target == nil, "after the read the new window did not block: \(e.out)")
+        let f = PointerDesk(windows: [own, habitatWindow])
+        let before: Int = f.pointer.fetches
+        var told: Int = 0
+        for i in 0..<240 {
+            f.now += 1.0 / 120.0
+            f.move(to: CGPoint(x: 100 + CGFloat(i), y: 200))
+            if i % 2 == 1 {
+                f.pointer.windowsChanged()
+                let n: Int = f.out.count
+                f.tick(0)
+                told += f.out.count - n
+            }
+        }
+        let reads: Int = f.pointer.fetches - before
+        print("INFO pointer own window changing at 60 Hz for 2 s while moving: \(reads) window-list reads, \(told) told")
+        try expect(reads <= 22, "\(reads) reads for 2 s of window changes (the throttle allows 21)")
+        try expect(told >= 15, "the hover starved during a burst of window changes: \(told) told in 2 s")
+    }
+    check("pointerBoundaryWaitsForFreshList", boundaryWaitsForFreshList)
+
+    // Finding 5: every callback and every judgement is its own line, sharing a sequence number, with time, run-loop
+    // mode, exact point, source and the route's reason; the trace is bounded.
+    func traceRecordsCallbacksAndJudgements() throws {
+        let d = PointerDesk(windows: [overlay, habitatWindow, finderDesktop])
+        let log = PointerTraceLog(capacity: 1 << 20)
+        d.pointer.onReceive = { e in log.callback(e, mode: "kCFRunLoopDefaultMode") }
+        d.pointer.onDecision = { r in log.judgement(r, mode: "NSEventTrackingRunLoopMode", frames: 0) }
+        d.move(to: CGPoint(x: 100.25, y: 500.75))
+        d.move(to: CGPoint(x: 101, y: 500))
+        d.move(to: CGPoint(x: 102, y: 500))
+        d.tick()
+        let a: [String] = log.take()
+        let cbs: [String] = a.filter { $0.hasPrefix("cb ") }
+        let js: [String] = a.filter { $0.hasPrefix("judge ") }
+        try expect(cbs.count == 3 && js.count == 1, "three callbacks and one judgement, as lines: \(a)")
+        try expect(cbs[0].contains("#1 ") && cbs[0].contains("(100.25, 500.75)") && cbs[0].contains("kCFRunLoopDefaultMode"),
+                   "a callback line: \(cbs[0])")
+        try expect(js[0].contains("#3 ") && js[0].contains("reason rectangles") && js[0].contains("NSEventTrackingRunLoopMode")
+                   && js[0].contains("t=") && js[0].contains("global move"), "the judgement line: \(js[0])")
+        d.move(to: CGPoint(x: 103, y: 500))
+        d.tick()
+        try expect(log.take().filter { $0.hasPrefix("judge ") }.count == 1, "a judgement with the same verdict left no line")
+        d.move(to: CGPoint(x: 103, y: 500), hit: finderDesktop.number)
+        d.tick()
+        let hitLines: [String] = log.take()
+        try expect(hitLines.contains { $0.hasPrefix("judge ") && $0.contains("reason event-hit") }, "no event-hit line: \(hitLines)")
+        d.ticks(for: DesktopPointer.stillLife + 0.05)
+        let hintLines: [String] = log.take()
+        try expect(hintLines.contains { $0.contains("sample") && $0.contains("reason retained-hint") },
+                   "no retained-hint line: \(hintLines)")
+        let small = PointerTraceLog(capacity: 600)
+        d.pointer.onReceive = { e in small.callback(e, mode: "m") }
+        d.pointer.onDecision = { r in small.judgement(r, mode: "m", frames: 0) }
+        for i in 0..<40 {
+            d.move(to: CGPoint(x: 200 + CGFloat(i), y: 500))
+            d.tick()
+        }
+        let b: [String] = small.take()
+        let fullLines: Int = b.filter { $0.contains("trace full") }.count
+        try expect(small.full && fullLines == 1, "a bounded trace says once that it is full: \(b.suffix(3))")
+        try expect(small.written <= 600 + 200, "the trace wrote \(small.written) bytes past a 600-byte cap")
+    }
+    check("pointerTraceRecordsCallbacksAndJudgements", traceRecordsCallbacksAndJudgements)
+
+    // Finding 6: a replaced habitat is told the resting pointer again at the next step (no click, no read).
+    func retellsAReplacedHabitat() throws {
+        let d = PointerDesk(windows: [habitatWindow])
+        d.move(to: desktopSpot)
+        d.tick()
+        d.ticks(for: 0.5)
+        d.out.removeAll()
+        let reads: Int = d.pointer.fetches
+        d.pointer.retell()
+        d.tick()
+        try expect(d.out == [.moved(t1(100, 500))], "a new habitat was not told the resting pointer: \(d.out)")
+        try expect(d.pointer.fetches == reads, "telling a new habitat read the list")
+        d.ticks(for: 0.3)
+        try expect(d.out.count == 1, "told more than once: \(d.out)")
+    }
+    check("pointerRetellsAReplacedHabitat", retellsAReplacedHabitat)
+
+    // The Meadow through the contract: a resting pointer is landed on (a butterfly comes through dwell and spirals
+    // in), the once-a-second refresh does not disturb it, a popup over it takes the pointer, and a replaced meadow is
+    // told it again and landed on too.
+    func meadowLandsOnRestingPointer() throws {
+        let terrain: Terrain = Terrain.single(width: 1440, height: 900)
+        let cell: CGSize = CGSize(width: 13, height: 19)
+        var w = MeadowWorld(terrain: terrain, cell: cell, seed: 8)
+        let d = PointerDesk(viewports: [Viewport(id: 1, rect: PointerDesk.screen1)], windows: [habitatWindow, finderDesktop])
+        func step() {
+            d.tick()
+            for o in d.out {
+                switch o {
+                case .moved(let t): w.pointerMoved(x: Double(t.local.x), y: Double(t.local.y))
+                case .left: w.pointerLeft()
+                case .down(let t): w.pointerDown(x: Double(t.local.x), y: Double(t.local.y))
+                }
+            }
+            d.out.removeAll()
+            w.step(OceanClock.step)
+        }
+        func landed() -> Bool { w.flies.contains { $0.state == .cursor } }
+        func stepUntilLanded(seconds: Double) -> Bool {
+            for _ in 0..<Int(seconds * 60) {
+                step()
+                if landed() { return true }
+            }
+            return false
+        }
+        for _ in 0..<120 { step() }
+        d.move(to: CGPoint(x: 720, y: 450))
+        try expect(stepUntilLanded(seconds: 40), "nobody landed on the resting pointer in 40 s")
+        for _ in 0..<Int(2.5 * 60) { step() }
+        try expect(landed(), "the sitter left a resting pointer (the refresh disturbed it)")
+        d.windows = [PointerWindow(number: 96, pid: 902, layer: 0, bounds: CGRect(x: 600, y: 350, width: 300, height: 200)),
+                     habitatWindow, finderDesktop]
+        for _ in 0..<Int((DesktopPointer.stillLife + 0.1) * 60) { step() }
+        try expect(!w.pointerHas, "a popup over the resting pointer, the meadow still holds it")
+        d.windows = [habitatWindow, finderDesktop]
+        for _ in 0..<Int((DesktopPointer.stillLife + 0.1) * 60) { step() }
+        try expect(w.pointerHas, "the popup closed, the meadow did not get the pointer back")
+        w = MeadowWorld(terrain: terrain, cell: cell, seed: 9)
+        d.pointer.retell()
+        step()
+        try expect(w.pointerHas, "a replaced meadow was not told the resting pointer")
+        try expect(stepUntilLanded(seconds: 40), "nobody landed on the resting pointer in the replaced meadow in 40 s")
+    }
+    check("pointerMeadowLandsOnRestingPointer", meadowLandsOnRestingPointer)
+}
+
+// MARK: Cadence: one sample a step across displays, and the reads in each case the review named
+
+private func pointerCadenceChecks() {
+    // Two display links at 60 Hz, staggered by `offset`, with 1 ms of jitter each: at most one sample per step, and
+    // no step starved. At 30 and 15 fps one callback samples once for the steps it advances.
+    func oneSampleAStep() throws {
+        let step: Double = OceanClock.step
+        for offset in [0.0, 0.004, 0.0084, 0.012, 0.0165] {
+            let d = PointerDesk(windows: [habitatWindow])
+            var rng = SplitMix(seed: 11)
+            var times: [Double] = []
+            let start: Double = d.now
+            for k in 0..<120 {
+                let base: Double = start + Double(k) * step
+                times.append(base + (rng.unit() - 0.5) * 0.002)
+                times.append(base + offset + (rng.unit() - 0.5) * 0.002)
+            }
+            times.sort()
+            let before: Int = d.pointer.samples
+            for t in times {
+                d.now = t
+                d.out += d.pointer.tick(cursor: d.cursor, now: t)
+            }
+            let n: Int = d.pointer.samples - before
+            let ms: String = String(format: "%.1f", offset * 1000)
+            print("INFO pointer two displays staggered \(ms) ms: \(n) samples for 120 steps")
+            try expect(n <= 121, "\(n) samples in 120 steps with two displays staggered \(ms) ms")
+            try expect(n >= 118, "\(n) samples in 120 steps: steps starved")
+        }
+        for fps in [30.0, 15.0] {
+            let d = PointerDesk(windows: [habitatWindow])
+            let before: Int = d.pointer.samples
+            let frames: Int = Int(2 * fps)
+            for _ in 0..<frames { d.tick(1.0 / fps) }
+            let n: Int = d.pointer.samples - before
+            print("INFO pointer at \(Int(fps)) fps: \(n) samples in 2 s (one a callback; each advances \(Int(60 / fps)) steps)")
+            try expect(n == frames, "\(n) samples for \(frames) callbacks at \(Int(fps)) fps")
+        }
+    }
+    check("pointerOneSampleAStep", oneSampleAStep)
+
+    // Reads in the cases the review named: two staggered displays with moves, idle over bare and over blocked desktop.
+    func readsByCase() throws {
+        let d = PointerDesk(windows: [foreignWindow, habitatWindow, finderDesktop])
+        let before: Int = d.pointer.fetches
+        var times: [(Double, Bool)] = []
+        let start: Double = d.now
+        for k in 0..<240 { times.append((start + Double(k) / 120.0, true)) }
+        for k in 0..<120 {
+            times.append((start + Double(k) * OceanClock.step + 0.0001, false))
+            times.append((start + Double(k) * OceanClock.step + 0.0085, false))
+        }
+        times.sort { $0.0 < $1.0 }
+        var i: Int = 0
+        for (t, isMove) in times {
+            d.now = t
+            if isMove {
+                let a: Double = Double(i) * 0.05
+                i += 1
+                d.move(to: CGPoint(x: CGFloat(720.0 + 600.0 * cos(a)), y: CGFloat(450.0 + 380.0 * sin(a))))
+            } else {
+                d.out += d.pointer.tick(cursor: d.cursor, now: t)
+            }
+        }
+        let staggered: Int = d.pointer.fetches - before
+        print("INFO pointer two staggered displays, 240 moves in 2 s: \(staggered) window-list reads")
+        try expect(staggered <= 10, "\(staggered) reads for 2 s of moves on two displays")
+        for (label, spot) in [("bare", desktopSpot), ("blocked", onForeign)] {
+            let e = PointerDesk(windows: [foreignWindow, habitatWindow, finderDesktop])
+            e.move(to: spot)
+            e.tick()
+            let b: Int = e.pointer.fetches
+            e.ticks(for: 60)
+            let r: Int = e.pointer.fetches - b
+            print("INFO pointer idle a minute over \(label) desktop: \(r) window-list reads")
+            try expect(r <= 61, "\(r) reads idle over \(label) desktop")
+        }
+    }
+    check("pointerReadsByCase", readsByCase)
+
+    // Not a pass/fail: the contract's own cost per step (pure; the host's AppKit callbacks are outside it).
+    func stepCost() throws {
+        let d = PointerDesk(windows: [foreignWindow, habitatWindow, finderDesktop])
+        let n: Int = 20_000
+        let start: Double = ProcessInfo.processInfo.systemUptime
+        for k in 0..<n {
+            d.move(to: CGPoint(x: 100 + CGFloat(k % 400), y: 500))
+            d.tick()
+            if d.out.count > 64 { d.out.removeAll(keepingCapacity: true) }
+        }
+        let us: Double = (ProcessInfo.processInfo.systemUptime - start) * 1e6 / Double(n)
+        print("INFO pointer step with a move (judged, no read): " + String(format: "%.2f", us) + " µs")
+    }
+    check("pointerStepCost", stepCost)
+}
+
+// MARK: The host boundary: what PointerMonitor installs and how it reads an event, held to `PointerHost`
+
+private func pointerHostChecks() {
+    func hostInstallsBothMonitors() throws {
+        try expect(PointerHost.monitors.contains(.global), "the host installs no global monitor")
+        try expect(PointerHost.monitors.contains(.local), "the host installs no local monitor (own dispatch is lost)")
+    }
+    check("pointerHostInstallsBothMonitors", hostInstallsBothMonitors)
+
+    // A real AppKit local monitor with the host's mask, and events dispatched in this process through `sendEvent`
+    // (no window, nothing on screen): it sees exactly moves, drags and downs, hands each back unchanged, and the host's
+    // reading gives their kinds.
+    func localMonitorWithTheHostMask() throws {
+        let app: NSApplication = NSApplication.shared
+        var seen: [NSEvent] = []
+        var same: Bool = true
+        let mask = NSEvent.EventTypeMask(rawValue: PointerHost.mask)
+        guard let m = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { e in
+            seen.append(e)
+            return e
+        }) else { throw CheckFailure(detail: "no local monitor") }
+        defer { NSEvent.removeMonitor(m) }
+        let types: [NSEvent.EventType] = [.mouseMoved, .leftMouseDragged, .leftMouseDown, .leftMouseUp, .rightMouseDown,
+                                          .rightMouseDragged, .otherMouseDown, .mouseEntered]
+        for t in types {
+            let e: NSEvent?
+            if t == .mouseEntered {
+                e = NSEvent.enterExitEvent(with: t, location: NSPoint(x: 10, y: 10), modifierFlags: [], timestamp: 1,
+                                           windowNumber: 0, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil)
+            } else {
+                e = NSEvent.mouseEvent(with: t, location: NSPoint(x: 10, y: 10), modifierFlags: [], timestamp: 1,
+                                       windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+            }
+            guard let ev = e else { continue }
+            let n: Int = seen.count
+            app.sendEvent(ev)
+            if seen.count > n, seen[n] !== ev { same = false }
+        }
+        let kinds: [DesktopPointer.Kind?] = seen.map { PointerHost.kind(eventType: UInt($0.type.rawValue)) }
+        try expect(kinds == [.move, .drag, .down], "the local monitor saw \(seen.map { $0.type.rawValue }) as \(kinds)")
+        try expect(same, "the monitor did not see the very event dispatched")
+        for t in types where !(t == .mouseMoved || t == .leftMouseDragged || t == .leftMouseDown) {
+            try expect(PointerHost.kind(eventType: UInt(t.rawValue)) == nil, "the host reads \(t.rawValue) as pointer input")
+        }
+    }
+    check("pointerLocalMonitorWithTheHostMask", localMonitorWithTheHostMask)
+
+    // The coordinate adapter on real events at AppKit points across an offset, negative-origin layout: the window
+    // server's location and AppKit's flipped point agree, in global top-left points.
+    func coordinateAdapter() throws {
+        guard let primary = NSScreen.screens.first?.frame.height else {
+            print("INFO pointer coordinate adapter: no screens, the event half skipped")
+            return
+        }
+        let points: [NSPoint] = [NSPoint(x: 720, y: 450), NSPoint(x: -1500, y: 300), NSPoint(x: 2600, y: -400),
+                                 NSPoint(x: 100, y: 1500)]
+        for p in points {
+            guard let e = NSEvent.mouseEvent(with: .leftMouseDown, location: p, modifierFlags: [], timestamp: 1,
+                                             windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+            else { continue }
+            let want: CGPoint = ScreenGeometry.flip(p, primaryHeight: primary)
+            let screenPoint: CGPoint? = e.windowNumber == 0 ? e.locationInWindow : nil
+            let viaCG: CGPoint? = PointerHost.location(cgLocation: e.cgEvent?.location, screenPoint: screenPoint,
+                                                       primaryHeight: primary)
+            let viaAppKit: CGPoint? = PointerHost.location(cgLocation: nil, screenPoint: screenPoint, primaryHeight: primary)
+            for (label, got) in [("the window server's", viaCG), ("AppKit's", viaAppKit)] {
+                guard let g = got else { throw CheckFailure(detail: "\(label) location missing at \(p)") }
+                try expect(abs(g.x - want.x) < 0.5 && abs(g.y - want.y) < 0.5, "\(label) location of \(p): \(g), want \(want)")
+            }
+        }
+        try expect(PointerHost.location(cgLocation: nil, screenPoint: nil, primaryHeight: primary) == nil,
+                   "an event with no location was given one")
+        let r: PointerReceiver = PointerHost.receiver(number: 7, appKitFrame: CGRect(x: -1920, y: 100, width: 800, height: 600),
+                                                      ignoresMouse: false, primaryHeight: 900)
+        try expect(r.frame == CGRect(x: -1920, y: 200, width: 800, height: 600) && r.takesMouse, "a receiver's frame: \(r)")
+    }
+    check("pointerCoordinateAdapter", coordinateAdapter)
 }
