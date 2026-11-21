@@ -491,13 +491,16 @@ enum WhatsNewCard {
             }
         }
         run(timed, 10)
-        expect(!timed.isClosing && abs(timed.countdownRemaining - 10) < 0.01, "10 s untouched: still up, 10 s left (\(timed.countdownRemaining))")
+        expect(!timed.isClosing && abs(timed.countdownRemaining - 10) < 0.01,
+               "10 s untouched: still up, " + String(format: "%.2f", timed.countdownRemaining) + " s left")
         timed.setHovering(true)
         run(timed, 60)
-        expect(!timed.isClosing && abs(timed.countdownRemaining - 10) < 0.01, "the pointer over it for a minute: paused (\(timed.countdownRemaining))")
+        expect(!timed.isClosing && abs(timed.countdownRemaining - 10) < 0.01,
+               "the pointer over it for a minute: paused at " + String(format: "%.2f", timed.countdownRemaining) + " s")
         timed.setHovering(false)
         timed.advance(by: 30)
-        expect(!timed.isClosing && timed.countdownRemaining > 9.7, "a 30 s stall counts a quarter second at most (\(timed.countdownRemaining))")
+        expect(!timed.isClosing && timed.countdownRemaining > 9.7,
+               "a 30 s stall counts a quarter second at most: " + String(format: "%.2f", timed.countdownRemaining) + " s left")
         var stopped = PowerInputs()
         stopped.screenLocked = true
         timed.apply(WhatsNew.preview(stopped))
@@ -507,7 +510,8 @@ enum WhatsNewCard {
         run(timed, 9.5)
         expect(!timed.isClosing, "19.5 s of looking: still up")
         run(timed, 0.6)
-        expect(timed.isClosing && reasons == [.timeout] && timed.ignoresClicks, "20 s untouched: it goes, unanswered (\(reasons))")
+        expect(timed.isClosing && reasons == [.timeout] && timed.ignoresClicks,
+               "20 s untouched: it goes, unanswered (\(reasons.map { (r: WhatsNew.CloseReason) -> String in r.rawValue }))")
         timed.close(trying: false, now: true)
 
         let closer = make(ProbeHost())
@@ -516,27 +520,31 @@ enum WhatsNewCard {
         closer.arm(power: PowerInputs())
         closer.pressCloseForProbe()
         expect(closer.isClosing && closeReasons == [.close] && WhatsNew.CloseReason.close.endsForGood,
-               "the close button: it goes for good (\(closeReasons))")
+               "the close button: it goes for good (\(closeReasons.map { (r: WhatsNew.CloseReason) -> String in r.rawValue }))")
         closer.close(trying: false, now: true)
 
-        // The return logic as the app runs it: in the preview's memory, the clock faked.
+        // The return logic as the app runs it: in the preview's memory, the clock faked (a minute a step, as the
+        // app's 30 s looks are capped).
+        func awake(_ minutes: Int, seeable: Bool = true) {
+            for _ in 0..<minutes { update(preview: true) { $0.accrue(60, seeable: seeable) } }
+        }
         save(WhatsNew.Showings(), preview: true)
         markShown(preview: true)
         update(preview: true) { $0.closed(.timeout) }
-        update(preview: true) { $0.accrue(3 * 3600 - 60, seeable: true) }
+        awake(179)
         expect(!showings(preview: true).due, "a timeout: not back before 3 h")
-        update(preview: true) { $0.accrue(10_000, seeable: false) }
+        awake(600, seeable: false)
         expect(!showings(preview: true).due, "locked or asleep time doesn't count")
-        update(preview: true) { $0.accrue(60, seeable: true) }
+        awake(1)
         expect(showings(preview: true).due, "3 h awake: back")
         markShown(preview: true)
         update(preview: true) { $0.closed(.timeout) }
-        update(preview: true) { $0.accrue(3 * 3600, seeable: true) }
+        awake(180)
         markShown(preview: true)
         update(preview: true) { $0.closed(.timeout) }
-        update(preview: true) { $0.accrue(10 * 3600, seeable: true) }
+        awake(600)
         let three: WhatsNew.Showings = showings(preview: true)
-        expect(three.count == 3 && three.finished && !three.due, "three showings unanswered: never again (\(three))")
+        expect(three.count == 3 && three.finished && !three.due, "three showings unanswered: never again (count \(three.count))")
         save(WhatsNew.Showings(), preview: true)
         markShown(preview: true)
         update(preview: true) { $0.closed(.keep) }
