@@ -115,7 +115,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
 
         menu.addItem(header("Habitat"))
-        for (i, h) in HabitatKind.allCases.enumerated() {
+        for (i, h) in HabitatKind.offered.enumerated() {
             add(menu, h.title, #selector(pickHabitat(_:)), state: s.habitat == h, tag: i)
         }
 
@@ -153,6 +153,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             add(spiders, "Flies", #selector(toggleFlies), state: s.webFlies)
             add(spiders, "Jumping Spider", #selector(toggleJumper), state: s.webJumper)
             submenu(menu, "Spiders", symbol: "ant", spiders)
+        case .meadow:
+            break   // Not offered yet (HabitatKind.offered); its line-ups come with m8.
         }
 
         let look = NSMenu()
@@ -309,7 +311,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func toggleCalm() { app.store.update { $0.calm.toggle() } }
     @objc private func toggleGrid() { app.store.update { $0.grid.toggle() } }
     @objc private func toggleSharedOcean() { app.store.update { $0.sharedOcean.toggle() } }
-    @objc private func pickHabitat(_ i: NSMenuItem) { app.store.update { $0.habitat = HabitatKind.allCases[i.tag] } }
+    @objc private func pickHabitat(_ i: NSMenuItem) { app.store.update { $0.habitat = HabitatKind.offered[i.tag] } }
     @objc private func pickPreset(_ i: NSMenuItem) { app.store.update { $0.sharks = Presets.all[i.tag].sharks } }
     @objc private func pickSpiders(_ i: NSMenuItem) { app.store.update { $0.webSpiders = Presets.spiderPresets[i.tag].spiders } }
     @objc private func toggleFlies() { app.store.update { $0.webFlies.toggle() } }
