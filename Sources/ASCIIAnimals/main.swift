@@ -42,7 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SharksHandover.watch()
         crashedLastTime = CrashMarker.launch()
         if plan.identity.isEnergyTest {
-            Log.write("energy-test copy: greeting \(plan.greeting), built-in display only \(plan.builtInDisplayOnly)")
+            // Tools/energy.sh checks this line against the mode it asked for (every flag is set on each launch).
+            Log.write(EnergyLog.plan(pid: getpid(), plan))
         }
         Log.write("launch \(AppInfo.version) (\(AppInfo.build))\(crashedLastTime ? " after an unclean exit" : "")")
         do {
@@ -92,33 +93,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// The energy-test copy logs, every 5 seconds, the power mode and the frames actually drawn per second per screen,
-    /// so Tools/energy.sh can report what was measured (a hot Mac can hold 30 fps at 15).
+    /// The energy-test copy logs, every 5 seconds, the power state and the frames actually drawn per second on each
+    /// display (`EnergyLog.reading`), so Tools/energy.sh can check what was measured: the mode, every display at the
+    /// asked rate, the displays drawn against those attached, never on battery or in Low Power Mode.
     private func startFrameMeter() {
-        var lastFrames: Int = director?.framesDrawn ?? 0
+        var last: [CGDirectDisplayID: Int] = director?.framesByDisplay ?? [:]
         var lastTime: TimeInterval = ProcessInfo.processInfo.systemUptime
+        let pid: Int32 = getpid()
         frameMeter = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             guard let self, let d = self.director else { return }
             let now: TimeInterval = ProcessInfo.processInfo.systemUptime
-            let frames: Int = d.framesDrawn
-            let screens: Int = max(1, d.screens.count)
             let elapsed: Double = max(0.001, now - lastTime)
-            let perScreen: Double = Double(frames - lastFrames) / elapsed / Double(screens)
-            lastFrames = frames
-            lastTime = now
-            let i: PowerInputs = self.signals.inputs
-            let fps: String = String(format: "%.1f", perScreen)
-            let mode: String
-            switch d.mode {
-            case .live(let f): mode = "live\(f)"
-            case .still: mode = "still"
-            case .paused: mode = "paused"
+            let counts: [CGDirectDisplayID: Int] = d.framesByDisplay
+            var displays: [EnergyLog.Display] = []
+            for screen in d.screens {
+                let id: CGDirectDisplayID = screen.displayID
+                let frames: Int = counts[id, default: 0] - last[id, default: 0]
+                let fps: Double = Double(frames) / elapsed
+                displays.append(EnergyLog.Display(id: id, builtIn: CGDisplayIsBuiltin(id) != 0, fps: fps))
             }
+            last = counts
+            lastTime = now
             let s: OceanKit.Settings = self.store.settings
-            let fields: [String] = ["mode=\(mode)", "fps=\(fps)", "screens=\(d.screens.count)", "setting=\(s.fps)",
-                                    "habitat=\(s.habitat.rawValue)", "count=\(s.meadowCount)", "lowPower=\(i.lowPowerMode)",
-                                    "battery=\(i.onBattery)", "thermal=\(i.thermal)"]
-            Log.write("energy: " + fields.joined(separator: " "))
+            Log.write(EnergyLog.reading(pid: pid, mode: d.mode, setting: s.fps, habitat: s.habitat.rawValue,
+                                        count: s.meadowCount, attached: NSScreen.screens.count, displays: displays,
+                                        inputs: self.signals.inputs))
         }
     }
 
@@ -203,9 +202,19 @@ sigterm.resume()
 
 let app = NSApplication.shared
 
+/// A `--snapshot-*` output path, or (the energy-test copy, a path outside `build/energy-test`) a refusal and exit 1
+/// before anything is drawn or written (`Launch.snapshotOutput`).
+func snapshotOutputOrExit(_ path: String) -> URL {
+    if let url = Launch.snapshotOutput(path) { return url }
+    let folder: String = Launch.testFolder?.path ?? "?"
+    FileHandle.standardError.write(Data("refused: the energy-test copy writes snapshots only inside \(folder) (got \(path))\n".utf8))
+    exit(1)
+}
+
 // Debug: render the settings window to a PNG and exit (the UI can't be
 // screenshotted from a terminal without Screen Recording permission).
 if let i = CommandLine.arguments.firstIndex(of: "--snapshot-settings"), i + 1 < CommandLine.arguments.count {
+    let out: URL = snapshotOutputOrExit(CommandLine.arguments[i + 1])
     app.setActivationPolicy(.prohibited)
     let model = SettingsModel(store: SettingsStore.snapshot())
     let view = NSHostingView(rootView: SettingsView(model: model))
@@ -216,7 +225,7 @@ if let i = CommandLine.arguments.firstIndex(of: "--snapshot-settings"), i + 1 < 
     view.layoutSubtreeIfNeeded()
     if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
         view.cacheDisplay(in: view.bounds, to: rep)
-        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: CommandLine.arguments[i + 1]))
+        try? rep.representation(using: .png, properties: [:])?.write(to: out)
     }
     exit(0)
 }
@@ -254,8 +263,9 @@ let snapshots: [(String, (URL) -> Void)] = [("--snapshot-onboarding", Onboarding
                                             ("--snapshot-menu", StatusMenu.snapshot(to:))]
 for (flag, render) in snapshots {
     if let i = CommandLine.arguments.firstIndex(of: flag), i + 1 < CommandLine.arguments.count {
+        let out: URL = snapshotOutputOrExit(CommandLine.arguments[i + 1])
         app.setActivationPolicy(.prohibited)
-        render(URL(fileURLWithPath: CommandLine.arguments[i + 1]))
+        render(out)
         exit(0)
     }
 }

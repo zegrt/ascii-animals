@@ -1,3 +1,5 @@
+import Foundation
+
 /// Which copy of the app this is, decided from its bundle ID alone, and what that copy may do on this Mac.
 ///
 /// The energy-test copy (`Tools/build.sh --test`, driven by `Tools/energy.sh`) is a separate identity: its own bundle
@@ -100,4 +102,88 @@ public struct LaunchPlan: Equatable, Sendable {
     public init(bundleID: String?, environment: [String: String]) {
         self.init(identity: AppIdentity(bundleID: bundleID), environment: environment)
     }
+}
+
+extension LaunchPlan.Greeting {
+    /// One word for the energy-test copy's log (`EnergyLog.plan`).
+    public var word: String {
+        switch self {
+        case .asSaved: return "asSaved"
+        case .quiet: return "quiet"
+        case .whatsNewPreview: return "preview"
+        }
+    }
+}
+
+/// The energy-test copy's one folder: `build/energy-test`, next to `build/ASCII Animals Test.app`. Its log and crash
+/// marker live there, its `--snapshot-*` outputs may only go there, and Tools/energy.sh keeps its lock and scratch
+/// there. Nothing of the test copy's own files reaches the user's Library.
+public enum EnergyTestFolder {
+    public static let name = "energy-test"
+    /// The subfolder for the test copy's log and crash marker.
+    public static let appFolder = "app"
+
+    /// The folder for a test bundle at `bundle`.
+    public static func url(bundle: URL) -> URL {
+        bundle.deletingLastPathComponent().appendingPathComponent(name, isDirectory: true)
+    }
+
+    /// True when `path` lies strictly inside `folder`. Both must already have their symbolic links resolved; no
+    /// component may be empty, `.` or `..` (so a sibling such as `energy-test2` or an escape never counts).
+    public static func contains(_ path: String, in folder: String) -> Bool {
+        guard folder.hasPrefix("/"), path.hasPrefix("/") else { return false }
+        let base: String = folder.hasSuffix("/") ? folder : folder + "/"
+        guard path.count > base.count, path.hasPrefix(base) else { return false }
+        let rest: Substring = path.dropFirst(base.count)
+        let parts: [Substring] = rest.split(separator: "/", omittingEmptySubsequences: false)
+        return !parts.contains { (p: Substring) -> Bool in p.isEmpty || p == "." || p == ".." }
+    }
+}
+
+/// The energy-test copy's log lines that Tools/energy.sh reads (its selftest parses these exact shapes, and
+/// OceanChecks pins them). One plan line at launch, then a reading every few seconds.
+public enum EnergyLog {
+    /// One display's frames actually drawn per second in the last interval.
+    public struct Display: Equatable, Sendable {
+        public let id: UInt32
+        public let builtIn: Bool
+        public let fps: Double
+        public init(id: UInt32, builtIn: Bool, fps: Double) {
+            self.id = id
+            self.builtIn = builtIn
+            self.fps = fps
+        }
+    }
+
+    /// `energy-plan: pid=<pid> greeting=<quiet|preview> builtInOnly=<0|1>`
+    public static func plan(pid: Int32, _ p: LaunchPlan) -> String {
+        let only: String = p.builtInDisplayOnly ? "1" : "0"
+        return "energy-plan: pid=\(pid) greeting=\(p.greeting.word) builtInOnly=\(only)"
+    }
+
+    /// `energy: pid=<pid> mode=<live30|still|paused> setting=<fps> habitat=<h> count=<n> attached=<n> drawn=<n>
+    /// displays=<id>:<b|e>:<fps>,... lowPower=<bool> battery=<bool> thermal=<state>` (`b` built-in, `e` external;
+    /// `displays=none` when nothing is drawn).
+    public static func reading(pid: Int32, mode: RunMode, setting: Int, habitat: String, count: Int, attached: Int,
+                               displays: [Display], inputs: PowerInputs) -> String {
+        let modeWord: String
+        switch mode {
+        case .live(let f): modeWord = "live\(f)"
+        case .still: modeWord = "still"
+        case .paused: modeWord = "paused"
+        }
+        let list: [String] = displays.map { (d: Display) -> String in
+            let kind: String = d.builtIn ? "b" : "e"
+            return "\(d.id):\(kind):" + String(format: "%.1f", d.fps)
+        }
+        let shown: String = list.isEmpty ? "none" : list.joined(separator: ",")
+        let fields: [String] = ["pid=\(pid)", "mode=\(modeWord)", "setting=\(setting)", "habitat=\(habitat)",
+                                "count=\(count)", "attached=\(attached)", "drawn=\(displays.count)", "displays=\(shown)",
+                                "lowPower=\(inputs.lowPowerMode)", "battery=\(inputs.onBattery)",
+                                "thermal=\(inputs.thermal)"]
+        return "energy: " + fields.joined(separator: " ")
+    }
+
+    /// The preview card reached the screen.
+    public static func cardShown(pid: Int32) -> String { "energy-card: pid=\(pid) shown" }
 }

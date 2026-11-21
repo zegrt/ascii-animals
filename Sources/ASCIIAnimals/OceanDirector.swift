@@ -22,8 +22,10 @@ final class OceanDirector {
     /// Called after the first frame on every screen, and after looks change.
     var onLooksSettled: (() -> Void)?
     private(set) var lastError: String?
-    /// Frames committed on all screens since launch (the energy-test copy's frame-rate log reads it).
+    /// Frames committed on all screens since launch.
     private(set) var framesDrawn: Int = 0
+    /// Frames committed per display since launch (the energy-test copy's frame-rate log reads it, per display).
+    private(set) var framesByDisplay: [CGDirectDisplayID: Int] = [:]
 
     init(renderer: OceanRenderer, store: SettingsStore, signals: SystemSignals) {
         self.renderer = renderer
@@ -125,6 +127,7 @@ final class OceanDirector {
         }
         cb.commit()
         framesDrawn += 1
+        framesByDisplay[s.displayID, default: 0] += 1
         if s.stillPending {
             s.stillPending = false
             s.setRunning(false)

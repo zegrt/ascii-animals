@@ -37,7 +37,12 @@ enum WhatsNewCard {
 
     /// Marks the card shown once it reached the screen: the saved flag, or (previewing) this run only.
     static func markShown(preview: Bool) {
-        if preview { previewShown = true } else { UserDefaults.standard.set(true, forKey: Handover.meadowCardKey) }
+        if preview {
+            previewShown = true
+            Log.write(EnergyLog.cardShown(pid: getpid()))   // Tools/energy.sh preview waits for it
+        } else {
+            UserDefaults.standard.set(true, forKey: Handover.meadowCardKey)
+        }
     }
 
     /// About a second after launch, and only once the screen can be seen: after an automatic update at night the

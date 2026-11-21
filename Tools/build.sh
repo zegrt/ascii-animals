@@ -63,4 +63,10 @@ codesign --verify --strict "$APP"
 got="$(plutil -extract CFBundleIdentifier raw -o - "$APP/Contents/Info.plist")"
 [[ "$got" == "$ID" && "$(plutil -extract CFBundleExecutable raw -o - "$APP/Contents/Info.plist")" == "$EXE" ]] \
   || { echo "the bundle's identity is wrong: $got"; exit 1; }
-echo "built $APP: $ID, $EXE ($(lipo -archs "$APP/Contents/MacOS/$EXE")), from $(git rev-parse --short HEAD)$(git diff --quiet HEAD -- Sources Package.swift Info.plist || echo ' + uncommitted changes')"
+if [[ "$ID" == "$TEST_ID" ]]; then
+  mkdir -p build/energy-test   # the test copy's one folder: its log and crash marker, snapshots, energy.sh's files
+fi
+# Provenance: the commit, and whether anything the build reads differs from it (changed, staged or untracked).
+inputs=(Sources Package.swift Info.plist Resources LICENSE)
+dirty="$(git status --porcelain --untracked-files=all -- "${inputs[@]}")"
+echo "built $APP: $ID, $EXE ($(lipo -archs "$APP/Contents/MacOS/$EXE")), from $(git rev-parse --short HEAD)${dirty:+ + uncommitted changes}"

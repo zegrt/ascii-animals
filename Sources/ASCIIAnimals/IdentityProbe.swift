@@ -37,9 +37,10 @@ enum IdentityProbe {
         expect(id == AppIdentity.energyTestBundleID && id.lowercased() != Handover.animalsBundleID.lowercased(),
                "its own bundle ID and defaults domain (\(id))")
         expect(Bundle.main.executableURL?.lastPathComponent == AppIdentity.energyTestExecutable, "its own executable name")
-        let ownFolders: Bool = Log.folder.lastPathComponent == "ASCII Animals Energy Test"
-            && CrashMarker.folder.lastPathComponent == "ASCII Animals Energy Test"
-        expect(ownFolders, "its own log folder and crash marker")
+        let appFolder: URL? = Launch.testFolder?.appendingPathComponent(EnergyTestFolder.appFolder, isDirectory: true)
+        let ownFolders: Bool = appFolder != nil && Log.folder.path == appFolder?.path && CrashMarker.folder.path == appFolder?.path
+        expect(ownFolders, "its log and crash marker in build/\(EnergyTestFolder.name)/\(EnergyTestFolder.appFolder), nothing in ~/Library")
+        probeConfinement(expect)
         let allOff: Bool = !plan.startsUpdates && !plan.runsHandover && !plan.offersUninstall
             && !plan.matchesSystemWallpaper && !plan.changesLoginItem
         expect(allOff, "the plan: no updates, hand-over, uninstall, system wallpaper or login item")
@@ -105,11 +106,43 @@ enum IdentityProbe {
 
         let all: [NSScreen] = NSScreen.screens
         let drawn: [NSScreen] = OceanDirector.drawnScreens(all, builtInOnly: plan.builtInDisplayOnly)
-        note("screens: \(all.count) attached, \(drawn.count) drawn")
+        let builtIn: Int = drawn.filter { CGDisplayIsBuiltin($0.displayID) != 0 }.count
+        note("screens: \(all.count) attached, \(drawn.count) drawn, \(builtIn) of them built-in")
         if plan.builtInDisplayOnly {
             expect(drawn.allSatisfy { CGDisplayIsBuiltin($0.displayID) != 0 }, "built-in display only: no other screen drawn")
         }
         finish(lines, failed, url)
+    }
+
+    /// `--snapshot-*` outputs: only plain files strictly inside build/energy-test, links resolved. Makes two links
+    /// inside the folder for the test and removes them; nothing is written outside it.
+    private static func probeConfinement(_ expect: (Bool, String) -> Void) {
+        guard let folder = Launch.testFolder, let real = Launch.realPath(folder.path) else {
+            expect(false, "snapshot outputs: build/\(EnergyTestFolder.name) does not exist")
+            return
+        }
+        let fm = FileManager.default
+        let inside: URL = folder.appendingPathComponent("probe-output.txt")
+        expect(Launch.snapshotOutput(inside.path) != nil, "snapshot output inside build/\(EnergyTestFolder.name): allowed")
+        let escapes: [String] = [folder.appendingPathComponent("../escape.txt").path,
+                                 folder.deletingLastPathComponent().appendingPathComponent("escape.txt").path,
+                                 real + "2/escape.txt", NSTemporaryDirectory() + "escape.txt",
+                                 NSHomeDirectory() + "/Library/escape.txt", "relative-escape.txt", folder.path, real + "/."]
+        let refused: [String] = escapes.filter { Launch.snapshotOutput($0) == nil }
+        expect(refused.count == escapes.count,
+               "snapshot outputs outside it, its parent, a sibling, TMPDIR, ~/Library, relative, itself: refused (\(refused.count) of \(escapes.count))")
+        let dirLink: URL = folder.appendingPathComponent("probe-dir-link")
+        let fileLink: URL = folder.appendingPathComponent("probe-file-link")
+        try? fm.removeItem(at: dirLink)
+        try? fm.removeItem(at: fileLink)
+        let parent: String = folder.deletingLastPathComponent().path
+        let made: Bool = (try? fm.createSymbolicLink(atPath: dirLink.path, withDestinationPath: parent)) != nil
+            && (try? fm.createSymbolicLink(atPath: fileLink.path, withDestinationPath: parent + "/escape.txt")) != nil
+        let viaDir: Bool = Launch.snapshotOutput(dirLink.appendingPathComponent("escape.txt").path) == nil
+        let viaFile: Bool = Launch.snapshotOutput(fileLink.path) == nil
+        try? fm.removeItem(at: dirLink)
+        try? fm.removeItem(at: fileLink)
+        expect(made && viaDir && viaFile, "snapshot outputs through a link out of the folder (a folder link, a file link): refused")
     }
 
     private static func finish(_ lines: [String], _ failed: Int, _ url: URL) {
