@@ -18,7 +18,8 @@ enum OnboardingController {
         let s = app.store.settings
         let welcome = Handover.launchWelcome(onboarded: d.bool(forKey: seenKey), handedOver: SharksHandover.happened,
                                              webCardShown: d.bool(forKey: Handover.webCardKey), habitat: s.habitat,
-                                             arrival: app.arrival, meadowCardShown: d.bool(forKey: Handover.meadowCardKey),
+                                             arrival: app.arrival,
+                                             meadowCardShown: WhatsNewCard.showings(preview: false).finished,
                                              meadowTried: s.meadowTried)
         switch welcome {
         case .nothing:
@@ -346,10 +347,13 @@ final class OnboardingSession: NSObject {
         model = OnboardingModel(settings: s, light: theme.light)
         model.card = card
 
-        // The display with the menu-bar icon (it follows the active display), else the main one.
-        let iconFrame = app.menu?.iconScreenFrame
-        let screen = NSScreen.screens.first { s in iconFrame.map { s.frame.intersects($0) } ?? false }
-            ?? NSScreen.screens[0]
+        // The screen in focus (the active menu bar's display), and the icon only where it really shows on it: on that
+        // menu bar and not behind a notch (`MenuBarIcon.place`); else the hidden-icon words.
+        let (bars, focused) = WhatsNewCard.menuBarScreens()
+        let icon: CGRect? = app.store.settings.showMenuBarIcon ? app.menu?.iconScreenFrame : nil
+        let placed = MenuBarIcon.place(icon: icon, screens: bars, focused: focused)
+        let screen: NSScreen = NSScreen.screens[placed?.screen ?? 0]
+        let iconFrame: CGRect? = placed?.icon
         let frame = screen.frame
 
         window = OnboardingWindow(contentRect: frame, styleMask: .borderless, backing: .buffered, defer: false)
@@ -394,7 +398,7 @@ final class OnboardingSession: NSObject {
         }
         super.init()
 
-        if let f = iconFrame, app.store.settings.showMenuBarIcon, frame.intersects(f) {
+        if let f = iconFrame {
             model.iconRect = CGRect(x: f.minX - frame.minX, y: frame.maxY - f.maxY, width: f.width, height: f.height)
         }
         model.iconHidden = model.iconRect == nil

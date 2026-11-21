@@ -416,17 +416,16 @@ func whatsNewCardChecks() {
                                                       CGRect(x: 0, y: 0, width: 1512, height: 949))
         let narrow: (frame: CGRect, visible: CGRect) = (CGRect(x: 1512, y: 0, width: 400, height: 700),
                                                         CGRect(x: 1512, y: 0, width: 400, height: 667))
-        let screens = [main, narrow]
+        let screens: [MenuBarScreen] = [MenuBarScreen(frame: main.frame, visible: main.visible),
+                                         MenuBarScreen(frame: narrow.frame, visible: narrow.visible)]
         let icon = CGRect(x: 1298, y: 949, width: 30, height: 33)
-        let a = WhatsNew.anchor(icon: icon, screens: screens)
-        try expect(a?.icon == icon && a?.visible == main.visible, "an icon in the menu bar anchors on its screen")
-        try expect(WhatsNew.anchor(icon: CGRect(x: 5000, y: 949, width: 30, height: 33), screens: screens) == nil,
-                   "a stale frame on no screen: the top-right fallback")
-        try expect(WhatsNew.anchor(icon: CGRect(x: 1298, y: 400, width: 30, height: 33), screens: screens) == nil,
-                   "a frame inside the visible frame (not in the menu bar): the fallback")
-        try expect(WhatsNew.anchor(icon: CGRect(x: 1298, y: 949, width: 0, height: 0), screens: screens) == nil,
-                   "a zero-size frame: the fallback")
-        try expect(WhatsNew.anchor(icon: nil, screens: screens) == nil, "hidden: the fallback")
+        let a = MenuBarIcon.place(icon: icon, screens: screens, focused: 0)
+        try expect(a?.icon == icon && a?.screen == 0, "an icon in the menu bar anchors on its screen")
+        func noArrow(_ f: CGRect?) -> Bool { MenuBarIcon.place(icon: f, screens: screens, focused: 0)?.icon == nil }
+        try expect(noArrow(CGRect(x: 5000, y: 949, width: 30, height: 33)), "a stale frame on no screen: the top-right fallback")
+        try expect(noArrow(CGRect(x: 1298, y: 400, width: 30, height: 33)), "a frame inside the visible frame (not in the menu bar): the fallback")
+        try expect(noArrow(CGRect(x: 1298, y: 949, width: 0, height: 0)), "a zero-size frame: the fallback")
+        try expect(noArrow(nil), "hidden: the fallback")
 
         for v in [main.visible, narrow.visible, CGRect(x: 0, y: 0, width: 300, height: 200)] {
             let w: CGFloat = WhatsNew.width(visible: v)
@@ -560,15 +559,15 @@ func cardDrawnChecks() {
         try expect(wild.contains(" drawn=0.000 "), "a share that is not a number logs as 0: \(wild)")
         let over: String = EnergyLog.cardDrawn(pid: 501, launch: nil, share: 1.5, width: 1, height: 1)
         try expect(over.contains(" drawn=1.000 "), "a share over 1 logs as 1: \(over)")
-        let closed: String = EnergyLog.cardClosed(pid: 501, launch: "0a1b2c3d4e5f6789", reason: .click, after: 41.4)
-        try expect(closed == "energy-card: pid=501 launch=0a1b2c3d4e5f6789 closed=click after=41s", closed)
+        let closed: String = EnergyLog.cardClosed(pid: 501, launch: "0a1b2c3d4e5f6789", reason: .timeout, after: 20.4)
+        try expect(closed == "energy-card: pid=501 launch=0a1b2c3d4e5f6789 closed=timeout after=20s", closed)
         let reasons: [String] = WhatsNew.CloseReason.allCases.map { (r: WhatsNew.CloseReason) -> String in r.rawValue }
         let wordy: Bool = reasons.allSatisfy { (r: String) -> Bool in
             !r.isEmpty && r.unicodeScalars.allSatisfy { (c: Unicode.Scalar) -> Bool in (c >= "a" && c <= "z") || c == "-" }
         }
         try expect(wordy && Set(reasons).count == reasons.count, "close reasons are distinct lowercase words: \(reasons)")
         let energy: String = source("Tools/energy.sh")
-        try expect(energy.contains("drawn=0.977 size=460x333") && energy.contains("closed=click after=1s"),
+        try expect(energy.contains("drawn=0.977 size=460x333") && energy.contains("closed=timeout after=20s"),
                    "energy.sh's selftest uses the same drawn and closed shapes")
     }
     check("cardDrawnLogShapes", cardDrawnLogShapes)
@@ -595,9 +594,11 @@ func cardDrawnChecks() {
         try expect(card.contains("EnergyLog.cardDrawn(pid: pid, launch: launch"), "the preview logs the drawn line with its launch id")
         try expect(card.contains("EnergyLog.cardClosed(pid: pid, launch: launch"), "the preview logs why the card went")
         // Every way the card goes names its reason (the probe's and a failed opening's teardown need none).
-        let reasons: [String] = ["reason: .click", "reason: .ownClick", "reason: .screens", "reason: .esc", "reason: .meadow",
+        let reasons: [String] = ["reason: .timeout", "reason: .close", "reason: .screens", "reason: .esc", "reason: .meadow",
                                  "reason: .tryMeadow", "reason: .keep", "reason: .welcome"]
         for r in reasons { try expect(card.contains(r), "a close with \(r)") }
+        // Fix round 1: a click elsewhere no longer closes it.
+        try expect(!card.contains("addGlobalMonitorForEvents"), "no global click monitor on the card")
         let energy: String = source("Tools/energy.sh")
         try expect(energy.contains("launch_test 0 1 0 preview bg") && energy.contains("exec open ${5:+-g} "),
                    "the preview opens the test copy in the background (the director answers without a click)")
@@ -624,4 +625,149 @@ func cardDrawnChecks() {
         try expect(app.contains("frameMeter = CommonTimer.repeating(every: 5)"), "the test copy's readings use the common modes")
     }
     check("readingTimerCommonModes", readingTimerCommonModes)
+    cardLifetimeChecks()
+}
+
+/// t11 fix round 1: the card's 20 s on screen, its return after 3 h of awake time (at most three showings), and where
+/// it and the welcome go: the screen in focus, an arrow only to an icon really showing there (never behind a notch).
+func cardLifetimeChecks() {
+    func cardCountdown() throws {
+        var c = WhatsNew.Countdown()
+        try expect(c.fraction == 1 && !c.expired, "starts full")
+        // A fake clock: 30 ticks a second.
+        func run(_ seconds: Double, paused: Bool = false) {
+            let ticks: Int = Int((seconds * 30).rounded())
+            for _ in 0..<ticks { c.advance(by: 1.0 / 30, paused: paused) }
+        }
+        run(10)
+        try expect(abs(c.remaining - 10) < 0.01 && abs(c.fraction - 0.5) < 0.001, "half way at 10 s (\(c.remaining))")
+        run(120, paused: true)
+        try expect(abs(c.remaining - 10) < 0.01, "the pointer over it: paused (\(c.remaining))")
+        c.advance(by: 3600, paused: false)
+        try expect(abs(c.remaining - 9.75) < 0.001, "a stall (a sleep) takes a quarter second at most (\(c.remaining))")
+        c.advance(by: -5, paused: false)
+        c.advance(by: Double.nan, paused: false)
+        try expect(abs(c.remaining - 9.75) < 0.001, "negative or not a number: nothing")
+        run(9.7)
+        try expect(!c.expired, "not yet")
+        run(0.1)
+        try expect(c.expired && c.fraction == 0, "20 s untouched: run out")
+    }
+    check("cardCountdown", cardCountdown)
+
+    func cardShowingsReturn() throws {
+        var s = WhatsNew.Showings()
+        try expect(s.due && !s.finished, "never shown: due")
+        s.shown()
+        try expect(!s.due && s.count == 1, "up: not due again")
+        s.closed(.timeout)
+        try expect(!s.due && !s.finished, "unanswered: waits")
+        // A fake clock: an awake, unlocked minute at a time.
+        for _ in 0..<179 { s.accrue(60, seeable: true) }
+        try expect(!s.due, "2 h 59 min: not yet (\(s.awake))")
+        s.accrue(8 * 3600, seeable: false)
+        try expect(!s.due, "locked, asleep or the screensaver: not counted")
+        s.accrue(8 * 3600, seeable: true)
+        try expect(abs(s.awake - 3 * 3600) < 0.001 && s.due, "a step spanning a sleep counts one minute at most; 3 h: back")
+        s.shown()
+        try expect(s.awake == 0 && s.count == 2, "the second showing starts the count again")
+        s.closed(.screens)
+        try expect(!s.due && !s.finished, "the displays changed: unanswered, it comes back")
+        for _ in 0..<180 { s.accrue(60, seeable: true) }
+        s.shown()
+        s.closed(.timeout)
+        for _ in 0..<600 { s.accrue(60, seeable: true) }
+        try expect(s.count == 3 && s.finished && !s.due, "three showings unanswered: never again")
+        let answers: [WhatsNew.CloseReason] = [.tryMeadow, .keep, .esc, .close, .meadow]
+        for r in answers {
+            var a = WhatsNew.Showings()
+            a.shown()
+            a.closed(r)
+            for _ in 0..<600 { a.accrue(60, seeable: true) }
+            try expect(a.finished && !a.due, "\(r.rawValue): never again")
+        }
+        let unanswered: [WhatsNew.CloseReason] = WhatsNew.CloseReason.allCases.filter { (r: WhatsNew.CloseReason) -> Bool in !answers.contains(r) }
+        try expect(unanswered == [.timeout, .screens, .welcome], "only a timeout, a display change or the welcome come back: \(unanswered)")
+        var never = WhatsNew.Showings()
+        never.accrue(10 * 3600, seeable: true)
+        try expect(never.awake == 0 && never.due, "nothing counts before the first showing")
+    }
+    check("cardShowingsReturn", cardShowingsReturn)
+
+    func cardShowingsSaved() throws {
+        var s = WhatsNew.Showings()
+        s.shown()
+        s.closed(.timeout)
+        s.accrue(600, seeable: true)
+        let back: WhatsNew.Showings = WhatsNew.Showings.load(s.encoded(), legacyShown: false)
+        try expect(back == s, "saved and read back across a relaunch: \(back)")
+        try expect(WhatsNew.Showings.load(nil, legacyShown: false) == WhatsNew.Showings(), "nothing saved: fresh, due")
+        try expect(WhatsNew.Showings.load(Data("junk".utf8), legacyShown: false) == WhatsNew.Showings(), "junk: fresh")
+        try expect(WhatsNew.Showings.load(nil, legacyShown: true).finished, "the old flag (the tour seen, t9's card): ended")
+        let bad = Data(#"{"count":-4,"ended":false,"awake":-7}"#.utf8)
+        let fixed: WhatsNew.Showings = WhatsNew.Showings.load(bad, legacyShown: false)
+        try expect(fixed.count == 0 && fixed.awake == 0, "negative values read as none: \(fixed)")
+        try expect(Handover.meadowShowingsKey != Handover.meadowCardKey, "a key of its own")
+        // The launch decision reads "finished", so an unanswered card still waiting starts its clock each launch.
+        func welcome(_ finished: Bool) -> LaunchWelcome {
+            Handover.launchWelcome(onboarded: true, handedOver: false, webCardShown: true, habitat: .ocean, arrival: .before31,
+                                   meadowCardShown: finished, meadowTried: false)
+        }
+        try expect(welcome(false) == .meadowCard && welcome(true) == .nothing, "launch: the card waits until finished")
+    }
+    check("cardShowingsSaved", cardShowingsSaved)
+
+    // A MacBook with a notch (the built-in, main) and a monitor above it, as the director's office desk.
+    let laptop = MenuBarScreen(frame: CGRect(x: 0, y: 0, width: 1800, height: 1169),
+                               visible: CGRect(x: 0, y: 0, width: 1800, height: 1130),
+                               besideNotch: [CGRect(x: 0, y: 1131, width: 790, height: 38),
+                                             CGRect(x: 1010, y: 1131, width: 790, height: 38)])
+    let monitor = MenuBarScreen(frame: CGRect(x: -375, y: 1169, width: 2560, height: 1440),
+                                visible: CGRect(x: -375, y: 1169, width: 2560, height: 1415))
+
+    func cardNotchHidesTheIcon() throws {
+        let clear = CGRect(x: 1389, y: 1131, width: 30, height: 38)
+        try expect(MenuBarIcon.usable(clear, on: laptop) == clear, "right of the notch: pointed at")
+        let behind = CGRect(x: 880, y: 1131, width: 30, height: 38)
+        try expect(MenuBarIcon.usable(behind, on: laptop) == nil, "behind the notch (a crowded menu bar): hidden, no arrow")
+        let straddle = CGRect(x: 995, y: 1131, width: 30, height: 38)
+        try expect(MenuBarIcon.usable(straddle, on: laptop) == nil, "half under the notch's edge: hidden")
+        let left = CGRect(x: 600, y: 1131, width: 30, height: 38)
+        try expect(MenuBarIcon.usable(left, on: laptop) == left, "left of the notch (beside the app menus): pointed at")
+        let noNotch = MenuBarScreen(frame: laptop.frame, visible: laptop.visible)
+        try expect(MenuBarIcon.usable(behind, on: noNotch) == behind, "the same place on a display without a notch: pointed at")
+        // AppKit's notch areas in the screen's own space on a display that isn't at the origin: moved onto it.
+        let side = MenuBarScreen(frame: CGRect(x: 2560, y: 0, width: 1512, height: 982),
+                                 visible: CGRect(x: 2560, y: 0, width: 1512, height: 944),
+                                 besideNotch: [CGRect(x: 0, y: 945, width: 660, height: 37),
+                                               CGRect(x: 852, y: 945, width: 660, height: 37)])
+        try expect(side.besideNotch.first?.minX == 2560, "local notch areas moved to global: \(side.besideNotch)")
+        try expect(MenuBarIcon.usable(CGRect(x: 2560 + 740, y: 945, width: 30, height: 37), on: side) == nil, "behind that notch: hidden")
+        try expect(MenuBarIcon.usable(CGRect(x: 2560 + 1200, y: 945, width: 30, height: 37), on: side) != nil, "beside it: pointed at")
+        try expect(MenuBarScreen(frame: laptop.frame, visible: laptop.visible, besideNotch: [.zero, .null]).besideNotch.isEmpty,
+                   "empty areas mean no notch")
+    }
+    check("cardNotchHidesTheIcon", cardNotchHidesTheIcon)
+
+    func cardAndWelcomeOnTheScreenInFocus() throws {
+        let screens: [MenuBarScreen] = [laptop, monitor]
+        let onLaptop = CGRect(x: 1389, y: 1131, width: 30, height: 38)
+        let onMonitor = CGRect(x: 1700, y: 2585, width: 30, height: 24)
+        let a = MenuBarIcon.place(icon: onMonitor, screens: screens, focused: 1)
+        try expect(a?.screen == 1 && a?.icon == onMonitor, "working on the monitor, the fish there: on the monitor, arrow to it")
+        let b = MenuBarIcon.place(icon: onLaptop, screens: screens, focused: 1)
+        try expect(b?.screen == 1 && b?.icon == nil, "working on the monitor, the fish on the laptop: the monitor, top right, no arrow")
+        let c = MenuBarIcon.place(icon: onLaptop, screens: screens, focused: 0)
+        try expect(c?.screen == 0 && c?.icon == onLaptop, "working on the laptop: the laptop, arrow to the fish")
+        let d = MenuBarIcon.place(icon: CGRect(x: 880, y: 1131, width: 30, height: 38), screens: screens, focused: 0)
+        try expect(d?.screen == 0 && d?.icon == nil, "the fish behind the laptop's notch: no arrow (the welcome's hidden-icon words)")
+        try expect(MenuBarIcon.place(icon: onLaptop, screens: screens, focused: nil)?.screen == 0, "no screen in focus known: the first")
+        try expect(MenuBarIcon.place(icon: onLaptop, screens: screens, focused: 7)?.screen == 0, "a stale index: the first")
+        try expect(MenuBarIcon.place(icon: onLaptop, screens: [], focused: 0) == nil, "no screens: nowhere")
+        let source: String = (try? String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("ASCIIAnimals/OnboardingController.swift"), encoding: .utf8)) ?? ""
+        try expect(source.contains("MenuBarIcon.place(icon: icon, screens: bars, focused: focused)"),
+                   "the welcome takes its screen and icon from the same rule")
+    }
+    check("cardAndWelcomeOnTheScreenInFocus", cardAndWelcomeOnTheScreenInFocus)
 }

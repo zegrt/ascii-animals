@@ -92,8 +92,11 @@ public enum Handover {
                       arrival: .since31, meadowCardShown: true, meadowTried: false)
     }
 
-    /// Marks the Meadow card as shown (the tour sets it too: its habitat choice offers the Meadow).
+    /// Marks the Meadow card as done with for good (the tour sets it too: its habitat choice offers the Meadow).
     public static let meadowCardKey = "whatsNew.meadow.v1"
+    /// The Meadow card's showings (`WhatsNew.Showings`, JSON): how often it came up, whether it was answered, and the
+    /// awake time since it last went unanswered.
+    public static let meadowShowingsKey = "whatsNew.meadow.v2"
 
     /// The same, with 3.1's Meadow card: someone who used an earlier version (`Arrival.before31`) gets it once, on
     /// this launch or a later one, unless they found the Meadow already. The Web card for someone just come from ASCII

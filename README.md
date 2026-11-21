@@ -69,7 +69,7 @@ It's all in the 🐟 menu and in **Settings**.
 
 ## Good to know
 
-- **Easy on your battery.** It stops when the desktop is covered or your Mac is locked or asleep. It slows down on battery and holds still in Low Power Mode. The Web costs no more than the Ocean, and the Meadow costs the app the least of the three.
+- **Easy on your battery.** It stops when the desktop is covered or your Mac is locked or asleep. It slows down on battery and holds still in Low Power Mode. The Meadow costs the app the least of the three; the Web costs a little more than the Ocean at 30 fps and the same at 15.
 - **Your lock screen matches.** While it runs, a still of your habitat becomes your wallpaper too. Quit, and your own wallpaper comes back.
 - **It keeps itself up to date.** New versions install themselves in a second or two. Rather choose when? Turn that off in Settings.
 - **Private.** No accounts, no ads, no tracking. The only thing it ever asks the internet is "is there a new version?"

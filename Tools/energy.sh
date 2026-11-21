@@ -768,9 +768,9 @@ if [ "$MODE" = selftest ]; then
   expect "card: another launch's or a probe's drawn line does not count" "$(card_drawn_check "$L" 501 $LID 2)" "FAIL the card logged no drawn check*"
   printf '2026-11-21T10:00:07Z energy-card: pid=501 launch=%s drawn=0.98 size=460x333\n2026-11-21T10:00:07Z energy-card: pid=501 launch=%s drawn=0.977\n' "$LID" "$LID" >"$L"
   expect "card: a malformed drawn line does not count" "$(card_drawn_check "$L" 501 $LID 2)" "FAIL the card logged no drawn check*"
-  printf '2026-11-21T10:00:05Z energy-card: pid=501 launch=%s shown\n2026-11-21T10:00:06Z energy-card: pid=501 launch=%s closed=click after=1s\n' "$LID" "$LID" >"$L"
-  expect "card: closed before its drawn check fails the preview" "$(card_drawn_check "$L" 501 $LID 2)" "FAIL the card closed (click, 1 s after it was shown)*"
-  expect "card: the close line" "$(card_closed "$L" 501 $LID)" "click 1"
+  printf '2026-11-21T10:00:05Z energy-card: pid=501 launch=%s shown\n2026-11-21T10:00:06Z energy-card: pid=501 launch=%s closed=timeout after=20s\n' "$LID" "$LID" >"$L"
+  expect "card: closed before its drawn check fails the preview" "$(card_drawn_check "$L" 501 $LID 2)" "FAIL the card closed (timeout, 20 s after it was shown)*"
+  expect "card: the close line" "$(card_closed "$L" 501 $LID)" "timeout 20"
   expect "card: another launch's close line does not count" "$(card_closed "$L" 501 ffffffffffffffff)" ""
   # Calibration's last check covers the readings from the director's answer on (a menu was open before it).
   { for s in 00 05 10 15 20 34 39 44 49; do rd "2026-11-21T10:00:${s}Z" attached=1 drawn=1 displays=1:b:29.9; done; } >"$L"
@@ -932,8 +932,8 @@ find_launched() { # sets TEST_PID and TEST_START when exactly one of this checko
   [ -n "$TEST_START" ]
 }
 launch_test() { # $1 quiet, $2 preview, $3 built-in only (each 1 or 0); $4 the greeting the plan must show; $5 "bg":
-                # opened in the background (open -g), so the director's app keeps the keyboard and they type their
-                # answer without a click (a click anywhere closes the card)
+                # opened in the background (open -g), so the director's app keeps the keyboard (and keeps the
+                # screen in focus where it is) and they type their answer without a click
   local want plan i
   preflight_processes refuse
   LAUNCH_ID="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
@@ -1083,8 +1083,9 @@ case "$MODE" in
     ;;
   preview)
     launch_test 0 1 0 preview bg
-    echo "the card appears under the test copy's menu bar icon in a second or two (later if the screen is locked or"
-    echo "asleep). DON'T CLICK ANYWHERE until you have looked: any click closes the card. Its buttons and Esc only close it."
+    echo "the card appears in a second or two (later if the screen is locked or asleep) on the screen you are working on,"
+    echo "under the test copy's menu bar icon if it shows there. It stays 20 s, a line along its bottom draining (the"
+    echo "pointer over it pauses that); clicks elsewhere leave it be. Its buttons, its close button and Esc only close it."
     for i in $(seq 1 30); do card_shown "$APPLOG" "$TEST_PID" "$LAUNCH_ID" && break; sleep 1; done
     card_shown "$APPLOG" "$TEST_PID" "$LAUNCH_ID" || die "the test copy logged no card on screen in 30 s -- preview failed"
     echo "the test copy put the card on screen"
@@ -1093,7 +1094,7 @@ case "$MODE" in
       OK*) read -r _ share size <<<"$D"; echo "the card's drawn check: $share of its window drawn ($size points); its image: build/energy-test/card-drawn.png" ;;
       *) die "${D#FAIL } -- preview failed before asking (its image, if any: build/energy-test/card-drawn.png)" ;;
     esac
-    echo "look at the top right of the laptop screen, under the fish icon, without clicking"
+    echo "look at the top right of the screen you are working on, within 20 s"
     exec 3</dev/tty
     SEEN=0; confirm_seen && SEEN=1
     C="$(card_closed "$APPLOG" "$TEST_PID" "$LAUNCH_ID")"

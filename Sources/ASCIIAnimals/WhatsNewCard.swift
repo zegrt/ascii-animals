@@ -3,53 +3,91 @@ import Metal
 import OceanKit
 import SwiftUI
 
-/// 3.1's what's-new for people upgrading (design d1, option C): a small card in the welcome's voice under the menu bar
-/// icon (top right of the main display when the icon is hidden), with the Meadow live in it. Shown once
-/// (`Handover.meadowCardKey`, decided by `Handover.launchWelcome`), never to new users.
+/// 3.1's what's-new for people upgrading (design d1, option C, as changed after the director's live look): a small card
+/// in the welcome's voice on the screen in focus, under the menu bar icon when it shows there (top right otherwise),
+/// with the Meadow live in it. Never to new users (`Handover.launchWelcome`).
 ///
 /// It never takes the keyboard from the app in use: it can come up right after an automatic update, mid-work. Its
-/// panel never becomes key and has no Return default; Esc closes it while ASCII Animals is the active app, and a click
-/// anywhere else closes it always. Closing keeps the current habitat; "Try the Meadow" dissolves the desktop to it.
+/// panel never becomes key and has no Return default; Esc closes it while ASCII Animals is the active app. A click
+/// elsewhere leaves it be. Untouched, it goes after 20 s, a thin line along its bottom edge draining meanwhile; the
+/// pointer over it pauses that (`WhatsNew.Countdown`). Going that way is not an answer: it comes back after 3 hours of
+/// awake, unlocked time, at most three showings in all (`WhatsNew.Showings`). Try the Meadow, Keep, Esc and its close
+/// button end it for good, as does finding the Meadow. Closing keeps the current habitat; "Try the Meadow" dissolves the
+/// desktop to it.
 enum WhatsNewCard {
     static let title = "There's a new habitat: the Meadow."
     static let line = "Butterflies drift over a field of flowers. Hold the pointer still and one may land."
     static let tryTitle = "Try the Meadow"
     /// "Keep the Ocean", "Keep the Web": names what stays rather than "Not now", which promises a later ask.
     static func keepTitle(_ h: HabitatKind) -> String { "Keep the \(h.title)" }
+    static let closeLabel = "Close"
 
     private static var current: WhatsNewSession?
     private static var presenter: WhatsNew.Presenter?
     private static var looker: Timer?
+    /// Counts awake, unlocked time while an unanswered card waits to come back.
+    private static var accruer: Timer?
 
     /// The energy-test copy launched with `ASCII_ANIMALS_PREVIEW_WHATSNEW=1` (`LaunchPlan.Greeting.whatsNewPreview`;
     /// the app people install ignores the flag): the card on the real desktop once, as an upgrader sees it. Its
-    /// settings are the defaults held in memory (`LaunchPlan.transientSettings`), the once-only flag and `arrival.v1`
-    /// are neither read nor written, the card saves nothing, and "Try the Meadow", Keep and Esc only close it
+    /// settings are the defaults held in memory (`LaunchPlan.transientSettings`), its showings and `arrival.v1` are
+    /// neither read nor written (this run's memory only), and "Try the Meadow", Keep and Esc only close it
     /// (`PreviewHost`). The welcome from Help is off for the run.
     static let preview: Bool = Launch.plan.greeting == .whatsNewPreview
-    /// The preview's once-only flag: this run's memory only.
-    private static var previewShown = false
+    /// The preview's showings: this run's memory only.
+    private static var previewShowings = WhatsNew.Showings()
 
-    /// Whether the card has been shown: the saved flag, or (previewing) this run only, the flag left unread.
-    static func shownBefore(preview: Bool) -> Bool {
-        preview ? previewShown : UserDefaults.standard.bool(forKey: Handover.meadowCardKey)
+    // MARK: Showings
+
+    /// The card's showings: saved (`Handover.meadowShowingsKey`, with the old once-only flag read as "ended"), or
+    /// (previewing) this run's memory.
+    static func showings(preview: Bool) -> WhatsNew.Showings {
+        if preview { return previewShowings }
+        let d = UserDefaults.standard
+        return WhatsNew.Showings.load(d.data(forKey: Handover.meadowShowingsKey), legacyShown: d.bool(forKey: Handover.meadowCardKey))
     }
 
-    /// Marks the card shown once it reached the screen: the saved flag, or (previewing) this run only. It writes no
-    /// energy evidence: the offscreen probe calls it too, and only the live presenter logs the card (`showWhenSeen`).
-    static func markShown(preview: Bool) {
+    static func save(_ s: WhatsNew.Showings, preview: Bool) {
         if preview {
-            previewShown = true
+            previewShowings = s
         } else {
-            UserDefaults.standard.set(true, forKey: Handover.meadowCardKey)
+            UserDefaults.standard.set(s.encoded(), forKey: Handover.meadowShowingsKey)
         }
     }
 
-    /// About a second after launch, and only once the screen can be seen: after an automatic update at night the
-    /// card waits for the screen to wake and unlock rather than be marked shown on a locked screen. It looks once a
-    /// second (`WhatsNew.Presenter`); every look reads the session, lock and displays live.
+    private static func update(preview: Bool, _ change: (inout WhatsNew.Showings) -> Void) {
+        var s: WhatsNew.Showings = showings(preview: preview)
+        change(&s)
+        save(s, preview: preview)
+    }
+
+    /// Counts a showing once it reached the screen. It writes no energy evidence: the offscreen probe calls it too, and
+    /// only the live presenter logs the card (`showWhenSeen`).
+    static func markShown(preview: Bool) {
+        update(preview: preview) { $0.shown() }
+    }
+
+    // MARK: Waiting
+
+    /// From launch (`OnboardingController.showIfNeeded`): the card is due, or comes back once its 3 hours have passed.
+    /// Due, it comes about a second later, and only once the screen can be seen: after an automatic update at night it
+    /// waits for the screen to wake and unlock rather than spend a showing on a locked screen. It looks once a second
+    /// (`WhatsNew.Presenter`); every look reads the session, lock and displays live. Not due yet, it counts awake,
+    /// unlocked time every 30 s (`WhatsNew.Showings.accrue`), saved as it goes, and looks again when it is.
     static func showWhenSeen(app: AppDelegate) {
         stopLooking()
+        var s: WhatsNew.Showings = showings(preview: preview)
+        let settings: OceanKit.Settings = cardHost(app).cardSettings
+        if !preview, settings.habitat == .meadow || settings.meadowTried {
+            // Found the Meadow meanwhile: nothing to tell, ever.
+            s.end()
+            save(s, preview: preview)
+        }
+        if s.finished { return }
+        if s.due { present(app) } else { accrue(app) }
+    }
+
+    private static func present(_ app: AppDelegate) {
         let previewing: Bool = preview
         let p = WhatsNew.Presenter(moment: { moment(app) }, open: { open(app) },
                                    mark: {
@@ -63,9 +101,26 @@ enum WhatsNewCard {
         }
     }
 
+    private static func accrue(_ app: AppDelegate) {
+        var last: TimeInterval = ProcessInfo.processInfo.systemUptime
+        let t = CommonTimer.repeating(every: 30) { _ in
+            let now: TimeInterval = ProcessInfo.processInfo.systemUptime
+            let seen: Bool = target(app).map { seeable(app, NSScreen.screens[$0.screen]) } ?? false
+            var s: WhatsNew.Showings = showings(preview: preview)
+            s.accrue(now - last, seeable: seen)
+            last = now
+            save(s, preview: preview)
+            if s.due || s.finished { showWhenSeen(app: app) }
+        }
+        t.tolerance = 5
+        accruer = t
+    }
+
     private static func stopLooking() {
         looker?.invalidate()
         looker = nil
+        accruer?.invalidate()
+        accruer = nil
         presenter?.cancel()
         presenter = nil
     }
@@ -73,8 +128,8 @@ enum WhatsNewCard {
     private static func moment(_ app: AppDelegate) -> WhatsNew.Moment {
         let host: WhatsNewHost = cardHost(app)
         let s: OceanKit.Settings = host.cardSettings
-        let seen: Bool = target(app).map { seeable(app, $0.screen) } ?? false
-        let shown: Bool = shownBefore(preview: preview) || current != nil
+        let seen: Bool = target(app).map { seeable(app, NSScreen.screens[$0.screen]) } ?? false
+        let shown: Bool = !showings(preview: preview).due || current != nil
         let tried: Bool = preview ? false : s.meadowTried
         return WhatsNew.Moment(seeable: seen, screens: NSScreen.screens.count, shown: shown,
                                habitat: s.habitat, tried: tried, welcomeUp: OnboardingController.isShowing,
@@ -101,29 +156,50 @@ enum WhatsNewCard {
         return CGDisplayIsAsleep(id) == 0
     }
 
-    /// The screen the card goes on and the icon it hangs under: the icon's screen when the icon is a usable anchor
-    /// (`WhatsNew.anchor`), else the main display's top right with no arrow. nil with no screens.
-    static func target(_ app: AppDelegate) -> (screen: NSScreen, icon: CGRect?)? {
-        let screens: [NSScreen] = NSScreen.screens
-        guard let primary = screens.first else { return nil }
-        let frames: [(frame: CGRect, visible: CGRect)] = screens.map { ($0.frame, $0.visibleFrame) }
+    /// The screens as the menu bar sees them, and the one in focus (`NSScreen.main`: the screen with the active menu
+    /// bar and the keyboard focus, whichever app has it).
+    static func menuBarScreens() -> (screens: [MenuBarScreen], focused: Int?) {
+        let all: [NSScreen] = NSScreen.screens
+        let facts: [MenuBarScreen] = all.map { (s: NSScreen) -> MenuBarScreen in
+            MenuBarScreen(frame: s.frame, visible: s.visibleFrame,
+                          besideNotch: [s.auxiliaryTopLeftArea, s.auxiliaryTopRightArea].compactMap { $0 })
+        }
+        let focused: Int? = NSScreen.main.flatMap { (m: NSScreen) -> Int? in all.firstIndex(of: m) }
+        return (facts, focused)
+    }
+
+    /// The screen the card goes on (an index into `NSScreen.screens`), the screen in focus, and the icon it hangs
+    /// under when the icon is showing there (`MenuBarIcon.place`: on that screen's menu bar, not behind a notch);
+    /// otherwise no icon, and the card goes top right. nil with no screens.
+    static func target(_ app: AppDelegate) -> (screen: Int, icon: CGRect?)? {
+        let (screens, focused) = menuBarScreens()
         let icon: CGRect? = app.store.settings.showMenuBarIcon ? app.menu?.iconAnchorFrame : nil
-        guard let a = WhatsNew.anchor(icon: icon, screens: frames),
-              let screen = screens.first(where: { $0.visibleFrame == a.visible }) else { return (primary, nil) }
-        return (screen, a.icon)
+        return MenuBarIcon.place(icon: icon, screens: screens, focused: focused)
     }
 
     /// Builds the card and orders it forward. True only when it reached a usable display that can still be seen;
     /// otherwise it goes again at once, unmarked, and the presenter waits.
     private static func open(_ app: AppDelegate) -> Bool {
         guard current == nil, let renderer = app.director?.renderer, let t = target(app) else { return false }
-        let session = WhatsNewSession(host: cardHost(app), renderer: renderer, visible: t.screen.visibleFrame, icon: t.icon)
+        let screen: NSScreen = NSScreen.screens[t.screen]
+        let session = WhatsNewSession(host: cardHost(app), renderer: renderer, visible: screen.visibleFrame, icon: t.icon)
         current = session
         session.onFinish = { [weak session] in if current === session { current = nil } }
-        guard session.orderFront(), seeable(app, t.screen) else {
+        guard session.orderFront(), seeable(app, screen) else {
             session.close(trying: false, now: true)
             current = nil
             return false
+        }
+        let previewing: Bool = preview
+        let pid: Int32 = getpid()
+        let launch: String? = Launch.plan.launchID
+        session.onClose = { (reason: WhatsNew.CloseReason, after: Double) in
+            update(preview: previewing) { $0.closed(reason) }
+            if previewing { Log.write(EnergyLog.cardClosed(pid: pid, launch: launch, reason: reason, after: after)) }
+            // Unanswered: it waits to come back (counting from now). The welcome taking over looks again itself.
+            if !reason.endsForGood, reason != .welcome {
+                DispatchQueue.main.async { showWhenSeen(app: app) }
+            }
         }
         session.arm(power: app.signals.inputs)
         if preview { watchPreview(session) }
@@ -133,15 +209,11 @@ enum WhatsNewCard {
     // MARK: The preview's evidence
 
     /// The preview (`Tools/energy.sh preview`) logs, bound to its launch id, how much of the card is drawn once it has
-    /// faded in (`EnergyLog.cardDrawn`, with the window's image saved as build/energy-test/card-drawn.png) and when and
-    /// why it went (`EnergyLog.cardClosed`), so a card that draws empty, or one a click closed before anyone looked,
-    /// shows in the log rather than only to the director's eye.
+    /// faded in (`EnergyLog.cardDrawn`, with the window's image saved as build/energy-test/card-drawn.png); `open` logs
+    /// when and why it went (`EnergyLog.cardClosed`). A card that draws empty shows in the log, not only to the eye.
     private static func watchPreview(_ session: WhatsNewSession) {
         let pid: Int32 = getpid()
         let launch: String? = Launch.plan.launchID
-        session.onClose = { (reason: WhatsNew.CloseReason, after: Double) in
-            Log.write(EnergyLog.cardClosed(pid: pid, launch: launch, reason: reason, after: after))
-        }
         DispatchQueue.main.asyncAfter(deadline: .now() + drawnCheckDelay) { [weak session] in
             guard let session, current === session, !session.isClosing else { return }
             let png: URL? = Launch.testFolder.flatMap { (f: URL) -> URL? in
@@ -160,11 +232,11 @@ enum WhatsNewCard {
     static let drawnCheckDelay: TimeInterval = 1.5
 
     /// The welcome is opening from Help: no more looks, and a card up goes at once (no fade under the welcome).
-    /// Returns whether a card was still waiting, so the caller can wait again if the welcome couldn't open (the
-    /// flag, saved by a welcome that reached the screen, decides).
+    /// Returns whether a card was still waiting or up, so the caller can wait again if the welcome couldn't open (a
+    /// welcome that reached the screen ends the card for good: `Handover.meadowCardKey`).
     @discardableResult
     static func dismiss() -> Bool {
-        let waiting: Bool = presenter != nil && current == nil
+        let waiting: Bool = presenter != nil || accruer != nil || current != nil
         stopLooking()
         current?.close(trying: false, now: true, reason: .welcome)
         current = nil
@@ -193,8 +265,9 @@ enum WhatsNewCard {
     /// Recording needed). `--snapshot-whatsnew <png>`; `ASCII_ANIMALS_SNAPSHOT_LIGHT=1` the light look;
     /// `ASCII_ANIMALS_SNAPSHOT_HABITAT=web` someone on the Web ("Keep the Web"; default the Ocean);
     /// `ASCII_ANIMALS_SNAPSHOT_ICON_HIDDEN=1` the menu bar icon hidden (top right, no arrow);
-    /// `ASCII_ANIMALS_SNAPSHOT_SCREEN=<w>x<h>` another screen size (a narrow one fits the card to it). The Meadow in the
-    /// card is its still, as in Low Power Mode.
+    /// `ASCII_ANIMALS_SNAPSHOT_SCREEN=<w>x<h>` another screen size (a narrow one fits the card to it);
+    /// `ASCII_ANIMALS_SNAPSHOT_REMAINING=<0…1>` the countdown's line (default 0.6). The Meadow in the card is its still,
+    /// as in Low Power Mode.
     static func snapshot(to url: URL) {
         let env = ProcessInfo.processInfo.environment
         var size = CGSize(width: 1512, height: 982)
@@ -222,6 +295,8 @@ enum WhatsNewCard {
             model.cover = true
             model.finishTyping()
             model.contentVisible = true
+            // The countdown's line part drained, as a few seconds in (`ASCII_ANIMALS_SNAPSHOT_REMAINING=<0…1>`).
+            model.remaining = env["ASCII_ANIMALS_SNAPSHOT_REMAINING"].flatMap(Double.init).map { min(1, max(0, $0)) } ?? 0.6
             let place = WhatsNewSession.layout(model, icon: iconHidden ? nil : icon, visible: visible)
             let host = NSHostingView(rootView: WhatsNewView(model: model, live: nil))
             host.frame = CGRect(origin: .zero, size: place.frame.size)
@@ -391,12 +466,82 @@ enum WhatsNewCard {
                "preview on the Meadow: shown as to someone on the Ocean (\(meadowCard.keepLabel))")
         meadowCard.close(trying: false, now: true)
         let flag: Any? = UserDefaults.standard.object(forKey: Handover.meadowCardKey)
-        let wasShown: Bool = shownBefore(preview: true)
+        let saved: Data? = UserDefaults.standard.data(forKey: Handover.meadowShowingsKey)
+        let before: WhatsNew.Showings = showings(preview: true)
         markShown(preview: true)
+        let after: WhatsNew.Showings = showings(preview: true)
         let flagAfter: Any? = UserDefaults.standard.object(forKey: Handover.meadowCardKey)
         let flagSame: Bool = (flag == nil) == (flagAfter == nil) && (flag as? Bool) == (flagAfter as? Bool)
-        expect(!wasShown && shownBefore(preview: true) && flagSame,
-               "preview: shown once, kept in memory only (the saved flag untouched: \(flagAfter.map { "\($0)" } ?? "absent"))")
+        let savedSame: Bool = UserDefaults.standard.data(forKey: Handover.meadowShowingsKey) == saved
+        expect(before.count == 0 && after.count == 1 && flagSame && savedSame,
+               "preview: a showing kept in memory only (the saved flag and showings untouched: \(flagAfter.map { "\($0)" } ?? "absent"))")
+
+        // Fix round 1: clicks elsewhere leave it be; untouched it goes after 20 s, the pointer over it pauses that.
+        let timed = make(ProbeHost())
+        var reasons: [WhatsNew.CloseReason] = []
+        timed.onClose = { (r: WhatsNew.CloseReason, _: Double) in reasons.append(r) }
+        timed.arm(power: PowerInputs())
+        timed.setHovering(false)
+        func run(_ card: WhatsNewSession, _ seconds: Double) {
+            var left: Double = seconds
+            while left > 0 {
+                let step: Double = min(0.1, left)
+                card.advance(by: step)
+                left -= step
+            }
+        }
+        run(timed, 10)
+        expect(!timed.isClosing && abs(timed.countdownRemaining - 10) < 0.01, "10 s untouched: still up, 10 s left (\(timed.countdownRemaining))")
+        timed.setHovering(true)
+        run(timed, 60)
+        expect(!timed.isClosing && abs(timed.countdownRemaining - 10) < 0.01, "the pointer over it for a minute: paused (\(timed.countdownRemaining))")
+        timed.setHovering(false)
+        timed.advance(by: 30)
+        expect(!timed.isClosing && timed.countdownRemaining > 9.7, "a 30 s stall counts a quarter second at most (\(timed.countdownRemaining))")
+        var stopped = PowerInputs()
+        stopped.screenLocked = true
+        timed.apply(WhatsNew.preview(stopped))
+        run(timed, 30)
+        expect(!timed.isClosing, "the screen locked: paused")
+        timed.apply(WhatsNew.preview(PowerInputs()))
+        run(timed, 9.5)
+        expect(!timed.isClosing, "19.5 s of looking: still up")
+        run(timed, 0.6)
+        expect(timed.isClosing && reasons == [.timeout] && timed.ignoresClicks, "20 s untouched: it goes, unanswered (\(reasons))")
+        timed.close(trying: false, now: true)
+
+        let closer = make(ProbeHost())
+        var closeReasons: [WhatsNew.CloseReason] = []
+        closer.onClose = { (r: WhatsNew.CloseReason, _: Double) in closeReasons.append(r) }
+        closer.arm(power: PowerInputs())
+        closer.pressCloseForProbe()
+        expect(closer.isClosing && closeReasons == [.close] && WhatsNew.CloseReason.close.endsForGood,
+               "the close button: it goes for good (\(closeReasons))")
+        closer.close(trying: false, now: true)
+
+        // The return logic as the app runs it: in the preview's memory, the clock faked.
+        save(WhatsNew.Showings(), preview: true)
+        markShown(preview: true)
+        update(preview: true) { $0.closed(.timeout) }
+        update(preview: true) { $0.accrue(3 * 3600 - 60, seeable: true) }
+        expect(!showings(preview: true).due, "a timeout: not back before 3 h")
+        update(preview: true) { $0.accrue(10_000, seeable: false) }
+        expect(!showings(preview: true).due, "locked or asleep time doesn't count")
+        update(preview: true) { $0.accrue(60, seeable: true) }
+        expect(showings(preview: true).due, "3 h awake: back")
+        markShown(preview: true)
+        update(preview: true) { $0.closed(.timeout) }
+        update(preview: true) { $0.accrue(3 * 3600, seeable: true) }
+        markShown(preview: true)
+        update(preview: true) { $0.closed(.timeout) }
+        update(preview: true) { $0.accrue(10 * 3600, seeable: true) }
+        let three: WhatsNew.Showings = showings(preview: true)
+        expect(three.count == 3 && three.finished && !three.due, "three showings unanswered: never again (\(three))")
+        save(WhatsNew.Showings(), preview: true)
+        markShown(preview: true)
+        update(preview: true) { $0.closed(.keep) }
+        expect(showings(preview: true).finished, "Keep: never again")
+        save(WhatsNew.Showings(), preview: true)
         // The probe is offscreen: it never writes the live card evidence energy.sh waits for, and has no launch id.
         let cardLine: String = "energy-card: pid=\(getpid()) "
         let logged: Bool = Log.tail(4000).contains { (l: String) -> Bool in l.contains(cardLine) }
@@ -510,8 +655,11 @@ final class WhatsNewModel: ObservableObject {
     @Published var cover = false
     /// The chip under the pointer (SwiftUI's own state needs macros this package can't load).
     @Published var hovered: String?
+    /// The countdown's line along the bottom edge: 1 full, 0 run out (`WhatsNew.Countdown.fraction`).
+    @Published var remaining: Double = 1
     var onTry: () -> Void = {}
     var onKeep: () -> Void = {}
+    var onClose: () -> Void = {}
 
     init(light: Bool, keep: HabitatKind, reduceMotion: Bool, width: CGFloat) {
         self.light = light
@@ -534,8 +682,30 @@ private final class WhatsNewPanel: NSPanel {
 }
 
 /// Takes the first click in a window that isn't key, so a chip answers at once.
+/// Also tells, in any app state, whether the pointer is over the card (the countdown pauses then).
 private final class FirstClickHostingView<V: View>: NSHostingView<V> {
+    var onHover: (Bool) -> Void = { _ in }
+    private var area: NSTrackingArea?
+
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let area { removeTrackingArea(area) }
+        let a = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
+        addTrackingArea(a)
+        area = a
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        onHover(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        onHover(false)
+    }
 }
 
 /// One showing of the card: its panel, timers and event monitors. `close` removes all of it.
@@ -552,9 +722,14 @@ final class WhatsNewSession {
     private var closing = false
     private var preview: WhatsNew.Preview?
     var onFinish: (() -> Void)?
-    /// Told once when the card starts to go, with why and how many seconds after `arm` (the preview logs it).
+    /// Told once when the card starts to go, with why and how many seconds after `arm`.
     var onClose: ((WhatsNew.CloseReason, Double) -> Void)?
     private var armedAt: Date?
+    private var countdown = WhatsNew.Countdown()
+    private var ticker: Timer?
+    private var lastTick: CFTimeInterval = 0
+    /// The pointer is over the card: the countdown waits.
+    private(set) var hovering = false
 
     /// The Meadow at the person's look and line-up: what the card shows.
     static func meadow(_ s: OceanKit.Settings) -> OceanKit.Settings {
@@ -626,6 +801,8 @@ final class WhatsNewSession {
 
         model.onTry = { [weak self] in self?.close(trying: true, reason: .tryMeadow) }
         model.onKeep = { [weak self] in self?.close(trying: false, reason: .keep) }
+        model.onClose = { [weak self] in self?.close(trying: false, reason: .close) }
+        view.onHover = { [weak self] inside in self?.hovering = inside }
     }
 
     /// Puts the panel on screen without activating the app. True when it is there: visible, on a display.
@@ -649,15 +826,15 @@ final class WhatsNewSession {
         if let m = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] e in
             self?.key(e, appActive: NSApp.isActive) ?? e
         }) { monitors.append(m) }
-        // A click anywhere else: in another app (no permission needed for clicks) or another of this app's windows.
-        let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        if let m = NSEvent.addGlobalMonitorForEvents(matching: clicks, handler: { [weak self] _ in
-            self?.close(trying: false, reason: .click)
-        }) { monitors.append(m) }
-        if let m = NSEvent.addLocalMonitorForEvents(matching: clicks, handler: { [weak self] e in
-            if let self, e.window !== self.panel { self.close(trying: false, reason: .ownClick) }
-            return e
-        }) { monitors.append(m) }
+        // A click elsewhere leaves the card be (it reaches what was clicked); untouched, the card goes by itself.
+        hovering = panel.frame.contains(NSEvent.mouseLocation)
+        lastTick = CACurrentMediaTime()
+        ticker = CommonTimer.repeating(every: 1.0 / 30) { [weak self] _ in
+            guard let self else { return }
+            let now: CFTimeInterval = CACurrentMediaTime()
+            self.advance(by: now - self.lastTick)
+            self.lastTick = now
+        }
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                                 object: nil, queue: .main) { [weak self] _ in
             self?.close(trying: false, reason: .screens)
@@ -676,6 +853,22 @@ final class WhatsNewSession {
         }
         blinker = Timer.scheduledTimer(withTimeInterval: 0.53, repeats: true) { [weak self] _ in self?.model.cursorOn.toggle() }
     }
+
+    /// The countdown moves on by `seconds`: paused while the pointer is over the card or nothing is drawn (the screen
+    /// can't be seen); run out, the card goes, unanswered (`CloseReason.timeout`). The probe drives it directly.
+    func advance(by seconds: Double) {
+        guard !closing else { return }
+        countdown.advance(by: seconds, paused: hovering || preview == .stopped)
+        let f: Double = countdown.fraction
+        if abs(model.remaining - f) >= 0.001 || f == 0 { model.remaining = f }
+        if countdown.expired { close(trying: false, reason: .timeout) }
+    }
+
+    /// The probe's stand-ins for the pointer moving over the card and off it, and for a click on its close button.
+    func setHovering(_ inside: Bool) { hovering = inside }
+    func pressCloseForProbe() { model.onClose() }
+
+    var countdownRemaining: Double { countdown.remaining }
 
     /// A key typed while the card is up: Esc closes it when ASCII Animals is the active app. The event always goes on
     /// to the window it was meant for (Esc still cancels a sheet or closes Settings).
@@ -743,6 +936,8 @@ final class WhatsNewSession {
         observers = []
         typer?.invalidate()
         blinker?.invalidate()
+        ticker?.invalidate()
+        ticker = nil
         live.stop()
         if now { teardown(); return }
         let duration: Double = trying && !model.reduceMotion ? 0.6 : 0.25
@@ -814,6 +1009,8 @@ final class WhatsNewSession {
     private func teardown() {
         guard !tornDown else { return }
         tornDown = true
+        ticker?.invalidate()
+        ticker = nil
         live.stop()
         panel.orderOut(nil)
         panel.close()
@@ -870,6 +1067,10 @@ struct WhatsNewView: View {
                 .frame(width: model.previewSize.width, height: model.previewSize.height)
                 .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(ink.opacity(0.14), lineWidth: 1))
                 .accessibilityLabel("The Meadow: butterflies over a field of flowers")
+                .overlay(alignment: .topTrailing) {
+                    CloseButton(light: light, action: model.onClose)
+                        .padding(7)
+                }
 
             Typed(full: WhatsNewCard.title, count: model.typedTitle,
                   cursor: model.isTyping || model.cursorOn, accent: Ink.accent(light))
@@ -896,8 +1097,22 @@ struct WhatsNewView: View {
         .padding(.top, model.arrowX == nil ? 0 : WhatsNewCard.arrowHeight)
         .frame(width: model.width, alignment: .leading)
         .background(shape.fill(plate))
+        .overlay(alignment: .bottomLeading) { drainingLine }
         .overlay(shape.stroke(ink.opacity(light ? 0.12 : 0.17), lineWidth: 1))
         .opacity(model.contentVisible ? 1 : 0)
+    }
+
+    /// The card's time left, a thin line along its bottom edge between the corners, draining from the right.
+    private var drainingLine: some View {
+        let inset: CGFloat = 14
+        let full: CGFloat = max(0, model.width - 2 * inset)
+        let fraction: CGFloat = CGFloat(min(1, max(0, model.remaining)))
+        return Capsule()
+            .fill(Ink.accent(model.light).opacity(0.75))
+            .frame(width: full * fraction, height: 2)
+            .padding(.leading, inset)
+            .padding(.bottom, 3)
+            .accessibilityHidden(true)
     }
 
     private func chips(escHint: Bool) -> some View {
@@ -943,6 +1158,29 @@ struct WhatsNewView: View {
                 }
             }
         }
+    }
+}
+
+/// A small round × over the preview's top-right corner: ends the card for good, like Keep.
+private struct CloseButton: View {
+    let light: Bool
+    let action: () -> Void
+
+    var body: some View {
+        let ink: Color = Ink.text(light)
+        let plate: Color = Ink.plate(light)
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(ink.opacity(0.8))
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(plate.opacity(0.85)))
+                .overlay(Circle().strokeBorder(ink.opacity(0.22), lineWidth: 1))
+                .contentShape(Circle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel(WhatsNewCard.closeLabel)
+        .help(WhatsNewCard.closeLabel)
     }
 }
 

@@ -13,7 +13,7 @@ public enum WhatsNew {
         public var seeable: Bool
         /// Displays attached.
         public var screens: Int
-        /// The once-only flag (`Handover.meadowCardKey`) as saved now.
+        /// No showing due now: answered, out of showings, or not yet back (`Showings.due`), or a card is up.
         public var shown: Bool
         public var habitat: HabitatKind
         public var tried: Bool
@@ -129,12 +129,12 @@ public enum WhatsNew {
         public func cancel() { finished = true }
     }
 
-    /// Why a card went (the preview logs it: `EnergyLog.cardClosed`).
+    /// Why a card went (the preview logs it: `EnergyLog.cardClosed`). A click elsewhere no longer closes it.
     public enum CloseReason: String, Sendable, CaseIterable {
-        /// A click in another app (any click anywhere closes the card).
-        case click
-        /// A click in another of this app's windows or its menu bar icon.
-        case ownClick = "own-click"
+        /// Left untouched for `Countdown.duration` (the pointer over it pauses that).
+        case timeout
+        /// The small close button.
+        case close
         case esc
         /// "Try the Meadow".
         case tryMeadow = "try"
@@ -146,6 +146,99 @@ public enum WhatsNew {
         case meadow
         /// The welcome opened from Help.
         case welcome
+
+        /// The person answered it (or found the Meadow): never again. A timeout, a display change or the welcome
+        /// taking over is not an answer: the card may come back (`Showings`).
+        public var endsForGood: Bool {
+            switch self {
+            case .close, .esc, .tryMeadow, .keep, .meadow: return true
+            case .timeout, .screens, .welcome: return false
+            }
+        }
+    }
+
+    // MARK: Its life across launches
+
+    /// The Meadow card's showings, saved across quits and relaunches (`Handover.meadowShowingsKey`). It comes up once;
+    /// if it goes without an answer (`CloseReason.endsForGood` false) it comes back after `returnAfter` of awake,
+    /// unlocked time (sleep, the lock screen and the screensaver don't count), at most `maxShowings` times in all.
+    public struct Showings: Codable, Equatable, Sendable {
+        public static let maxShowings: Int = 3
+        public static let returnAfter: Double = 3 * 3600
+        /// The most one step of `accrue` may add: a step longer than that spanned a sleep, which doesn't count.
+        public static let maxStep: Double = 60
+
+        /// Showings that reached the screen.
+        public var count: Int = 0
+        /// Answered (try, keep, esc, the close button), the Meadow found, or the tour seen: never again.
+        public var ended: Bool = false
+        /// Awake, unlocked seconds since the last showing went unanswered.
+        public var awake: Double = 0
+
+        public init(count: Int = 0, ended: Bool = false, awake: Double = 0) {
+            self.count = count
+            self.ended = ended
+            self.awake = awake
+        }
+
+        /// Never again.
+        public var finished: Bool { ended || count >= Showings.maxShowings }
+        /// It may come up now (the screen permitting): never shown, or unanswered and `returnAfter` has passed.
+        public var due: Bool { !finished && (count == 0 || awake >= Showings.returnAfter) }
+
+        /// It reached the screen.
+        public mutating func shown() {
+            count += 1
+            awake = 0
+        }
+
+        /// It went: for good, or to come back later.
+        public mutating func closed(_ reason: CloseReason) {
+            if reason.endsForGood { ended = true }
+            awake = 0
+        }
+
+        /// Never again (the tour was seen, the Meadow picked).
+        public mutating func end() { ended = true }
+
+        /// `seconds` passed; they count only while the screen could be seen, and at most `maxStep` at a time.
+        public mutating func accrue(_ seconds: Double, seeable: Bool) {
+            guard seeable, !finished, count > 0, seconds.isFinite, seconds > 0 else { return }
+            awake += min(seconds, Showings.maxStep)
+        }
+
+        /// The saved state: the JSON, or a fresh one; the old once-only flag (`Handover.meadowCardKey`, set by the
+        /// tour and by t9's card) means ended.
+        public static func load(_ data: Data?, legacyShown: Bool) -> Showings {
+            var s: Showings = data.flatMap { (d: Data) -> Showings? in try? JSONDecoder().decode(Showings.self, from: d) } ?? Showings()
+            if s.count < 0 { s.count = 0 }
+            if !s.awake.isFinite || s.awake < 0 { s.awake = 0 }
+            if legacyShown { s.ended = true }
+            return s
+        }
+
+        public func encoded() -> Data { (try? JSONEncoder().encode(self)) ?? Data() }
+    }
+
+    /// The card's time on screen: `duration` seconds untouched, paused while the pointer is over it (or the screen
+    /// can't be seen). The line along its bottom edge shows `fraction`.
+    public struct Countdown: Equatable, Sendable {
+        public static let duration: Double = 20
+        /// The most one step may take off: a longer gap is a stall (a sleep, a busy main thread), not time looked at.
+        public static let maxStep: Double = 0.25
+
+        public private(set) var remaining: Double = Countdown.duration
+
+        public init() {}
+
+        public mutating func advance(by seconds: Double, paused: Bool) {
+            guard !paused, seconds.isFinite, seconds > 0 else { return }
+            remaining = max(0, remaining - min(seconds, Countdown.maxStep))
+        }
+
+        /// 1 when it starts, 0 when it has run out.
+        public var fraction: Double { remaining / Countdown.duration }
+        public var expired: Bool { remaining <= 0 }
     }
 
     /// The share of pixels drawn in an 8-bit RGBA bitmap (alpha last, `bytesPerRow` = width × 4): those whose alpha
@@ -172,20 +265,6 @@ public enum WhatsNew {
     public static func width(visible: CGRect) -> CGFloat {
         let room: CGFloat = visible.width - 2 * margin
         return max(1, min(width, room))
-    }
-
-    /// The icon's frame, when it is a usable anchor: on a screen, at the top of it (in the menu bar, above the visible
-    /// frame), and of a real size. Otherwise nil, and the card goes top right. `screens`: each screen's frame and
-    /// visible frame.
-    public static func anchor(icon: CGRect?, screens: [(frame: CGRect, visible: CGRect)]) -> (icon: CGRect, visible: CGRect)? {
-        guard let icon, icon.width >= 1, icon.height >= 1, icon.minX.isFinite, icon.minY.isFinite else { return nil }
-        let mid = CGPoint(x: icon.midX, y: icon.midY)
-        for s in screens where s.frame.contains(mid) {
-            // In the menu bar: at or above the top of the visible frame (the app menu can push an item off it).
-            let inBar: Bool = icon.minY >= s.visible.maxY - 2 && icon.maxY <= s.frame.maxY + 1
-            return inBar ? (icon, s.visible) : nil
-        }
-        return nil
     }
 
     /// Where the card goes, in screen coordinates (bottom-left origin): its frame, and the arrow's x in the card when
