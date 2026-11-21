@@ -26,7 +26,11 @@
 # it); the test domain is deleted, written for this run (habitat, fps, count; the wallpaper match and update checks
 # off) and deleted again at the end, verified; the test copy is launched with every test flag set (1 or 0) and its
 # logged plan checked against the mode; the sampled minute must be complete (top rows, the copy's readings, the power
-# state), every display at the asked rate, the displays drawn = the displays attached, plugged in, Low Power Mode off.
+# state), every display at the asked rate, the displays drawn = the displays attached and the same set throughout,
+# plugged in, Low Power Mode off, and no wallpaper app (ASCII Animals, ASCII Sharks, another test copy) seen at any
+# look during the sampling. Each launch gets its own id (ASCII_ANIMALS_ENERGY_LAUNCH): the plan, the card and the
+# readings count only when they carry it, so an old log line, a reused pid or an offscreen probe never counts.
+# build/energy-test and its parents inside the checkout must be real folders (a symbolic link there is refused).
 #
 # Test hooks (never for a real run): ENERGY_DRY=1 does the lock, the test domain and the read-only checks only
 # (nothing launched, quit or sampled); with it, ENERGY_TEST_DOMAIN=local.ascii-animals.energy-test.<word> picks a
@@ -56,8 +60,15 @@ QUIT_MSG="Quit ASCII Animals and ASCII Sharks from their menus first"
 # Nothing inherited may change a mode: each launch sets every flag itself.
 unset ASCII_ANIMALS_QUIET_LAUNCH ASCII_ANIMALS_PREVIEW_WHATSNEW ASCII_ANIMALS_BUILTIN_DISPLAY_ONLY ASCII_ANIMALS_SNAPSHOT_LIGHT
 CONFIRM_FIXTURE=""   # set by the selftest only (it answers at once instead of waiting a second per look)
+LAUNCH_ID=""         # this launch's id, made in launch_test
 
 die() { echo "energy.sh: $*" >&2; exit 1; }
+
+# A pre-check, not a general filesystem guard: build/ and build/energy-test (and what this script makes in it) must not
+# be symbolic links, or the lock, the scratch and the test copy's files could land outside the checkout.
+for linkcheck in "$ROOT/build" "$FOLDER" "$LOCK" "$RUN" "$FOLDER/selftest" "$FOLDER/app" "$RESULTS"; do
+  [ ! -L "$linkcheck" ] || die "refused: ${linkcheck#"$ROOT"/} is a symbolic link; build/energy-test and its parents must be real folders"
+done
 
 # ---- What this script may touch: the test identity only ----
 
@@ -85,7 +96,7 @@ refuse_real "$DOMAIN"
   && [[ "$DOMAIN" != *.plist ]] || die "refused: '$DOMAIN' is not in the test namespace ($TEST_ID[.<word>])"
 [ "$DRY" = 1 ] || [ "$DOMAIN" = "$TEST_ID" ] || die "a live run uses the test copy's own domain only"
 
-for tool in jq xxd plutil base64 defaults top ps open lsof lsappinfo pgrep pmset codesign; do
+for tool in jq xxd plutil base64 defaults top ps open lsof lsappinfo pgrep pmset codesign od; do
   command -v "$tool" >/dev/null 2>&1 || die "needs '$tool' on the PATH"
 done
 
@@ -293,51 +304,65 @@ parse_top() { # $1 top's output, $2 app pid or "", $3 WindowServer pid, $4 sampl
     }' "$1"
 }
 
-# One power line from `pmset -g batt` and `pmset -g`: "ac=<1|0> lowpower=<1|0|?>".
+# One power line from `pmset -g batt` and `pmset -g`: "ac=<1|0|?> lowpower=<1|0|?>". Only known values count: a
+# source other than 'AC Power' or 'Battery Power', or a mode value other than 0 or 1, is "?" (and a run with it is
+# invalid).
 power_line() { # $1 pmset -g batt, $2 pmset -g
-  local ac=0 lp="?"
-  case "$(printf '%s\n' "$1" | head -1)" in *"'AC Power'"*) ac=1 ;; esac
+  local ac="?" lp="?"
+  case "$(printf '%s\n' "$1" | head -1)" in *"'AC Power'"*) ac=1 ;; *"'Battery Power'"*) ac=0 ;; esac
   lp="$(printf '%s\n' "$2" | awk '
+    function known(x) { return (x == "0" || x == "1") ? x : "?" }
     /^Currently in use:/ { cur = 1; next }
     /^[^ \t]/ { cur = 0 }
-    cur && $1 == "lowpowermode" { v = ($2 == "1") ? 1 : 0; found = 1 }
-    cur && $1 == "powermode" && !found { v = ($2 == "1") ? 1 : 0; found = 1 }
+    cur && $1 == "lowpowermode" { v = known($2); found = 1 }
+    cur && $1 == "powermode" && !found { v = known($2); found = 1 }
     END { print (found ? v : "?") }')"
   echo "ac=$ac lowpower=$lp"
 }
 power_now() { power_line "$(pmset -g batt 2>/dev/null || true)" "$(pmset -g 2>/dev/null || true)"; }
-# The power trace: "<utc> ac=1 lowpower=0" lines, one every 5 s through the sampling. Valid when complete and every
-# line is plugged in with Low Power Mode off.
-check_power() { # $1 trace, $2 seconds sampled
-  awk -v secs="$2" '
+# The power trace: "<utc> ac=1 lowpower=0" lines, one every 5 s through the sampling. Valid when complete: real UTC
+# stamps inside the sampled window, each later than the one before, covering it (no more than 7 s missing at either
+# end), and every line plugged in with Low Power Mode off (known values only).
+check_power() { # $1 trace, $2 from (UTC), $3 to (UTC), $4 seconds sampled
+  awk -v from="$2" -v to="$3" -v secs="$4" '
+    function t(s) { return ((substr(s, 6, 2) * 31 + substr(s, 9, 2)) * 86400) + substr(s, 12, 2) * 3600 + substr(s, 15, 2) * 60 + substr(s, 18, 2) }
+    function stamp(s) { return s ~ /^20[0-9][0-9]-[01][0-9]-[0-3][0-9]T[0-2][0-9]:[0-5][0-9]:[0-5][0-9]Z$/ }
     { n++ }
-    $0 !~ /^[0-9T:-]+Z ac=[01] lowpower=[01?]$/ { bad = "malformed power line: " $0; exit }
+    $0 !~ /^[^ ]+ ac=[01?] lowpower=[01?]$/ { bad = "malformed power line: " $0; exit }
+    !stamp($1) { bad = "a power reading with a malformed stamp: " $0; exit }
+    $1 < from || $1 > to { bad = "a power reading at " $1 ", outside the sampled window " from " to " to; exit }
+    n > 1 && $1 <= last { bad = "power readings out of order or repeated at " $1; exit }
+    { last = $1; if (n == 1) first = $1 }
+    $2 == "ac=?" { bad = "power source unknown at " $1 " (pmset shows neither AC nor battery)"; exit }
     $2 != "ac=1" { bad = "on battery at " $1; exit }
-    $3 == "lowpower=?" { bad = "Low Power Mode unknown at " $1 " (pmset shows no powermode)"; exit }
+    $3 == "lowpower=?" { bad = "Low Power Mode unknown at " $1 " (pmset shows no known powermode value)"; exit }
     $3 != "lowpower=0" { bad = "Low Power Mode on at " $1; exit }
     END {
       if (bad != "") { print "INVALID " bad; exit }
+      if (!stamp(from) || !stamp(to)) { print "INVALID the sampled window is not two UTC stamps"; exit }
       if (n < int(secs / 5)) { printf "INVALID %d power readings for %d s\n", n, secs; exit }
+      if (t(first) - t(from) > 7 || t(to) - t(last) > 7) { print "INVALID the power readings do not cover the sampled window"; exit }
       printf "plugged in, Low Power Mode off (%d readings)\n", n
     }' "$1"
 }
 
 # The test copy's readings (EnergyLog.reading in OceanKit) between two UTC stamps for one pid. Strict: each line
 # has exactly the expected fields, once each, well formed; no duplicate stamps; no gap over 7 s; the window covered.
-# Kinds: measure (live at the asked rate on every display, displays drawn = attached, constant, never on battery
-# or in Low Power Mode), calibrate (one display, built-in, drawn), preview (a built-in display drawn).
-check_readings() { # $1 log, $2 pid, $3 from, $4 to, $5 kind, $6 fps, $7 habitat, $8 count or ""
-  awk -v pid="$2" -v from="$3" -v to="$4" -v kind="$5" -v want="$6" -v hab="$7" -v cnt="$8" '
+# Only this launch's readings count (pid and launch id). Kinds: measure (live at the asked rate on every display,
+# displays drawn = attached, the same set of displays throughout, never on battery or in Low Power Mode), calibrate
+# (one display, built-in, drawn), preview (a built-in display drawn).
+check_readings() { # $1 log, $2 pid, $3 launch id, $4 from, $5 to, $6 kind, $7 fps, $8 habitat, $9 count or ""
+  awk -v pid="$2" -v launch="$3" -v from="$4" -v to="$5" -v kind="$6" -v want="$7" -v hab="$8" -v cnt="$9" '
     function t(s) { return (substr(s, 9, 2) + 0) * 86400 + substr(s, 12, 2) * 3600 + substr(s, 15, 2) * 60 + substr(s, 18, 2) }
     function fail(why) { if (bad == "") bad = why; done = 1 }
     done { next }
     $2 != "energy:" || $1 < from || $1 > to { next }
-    $3 != "pid=" pid { next }
+    $3 != "pid=" pid || $4 != "launch=" launch { next }
     {
       if ($1 !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/) { fail("a reading with a malformed stamp: " $0); next }
-      if (NF != 13) { fail("a reading with " NF - 2 " fields, not 11: " $0); next }
-      split("pid mode setting habitat count attached drawn displays lowPower battery thermal", keys, " ")
-      for (i = 1; i <= 11; i++) {
+      if (NF != 14) { fail("a reading with " NF - 2 " fields, not 12: " $0); next }
+      split("pid launch mode setting habitat count attached drawn displays lowPower battery thermal", keys, " ")
+      for (i = 1; i <= 12; i++) {
         eq = index($(i + 2), "=")
         if (eq == 0 || substr($(i + 2), 1, eq - 1) != keys[i]) { fail("a reading out of shape at " keys[i] ": " $0); next }
         f[keys[i]] = substr($(i + 2), eq + 1)
@@ -352,14 +377,14 @@ check_readings() { # $1 log, $2 pid, $3 from, $4 to, $5 kind, $6 fps, $7 habitat
       if (n > 0 && t($1) - prev > 7) { fail("no reading for " t($1) - prev " s before " $1); next }
       if (n == 0) first = t($1)
       prev = t($1); n++
-      nd = 0; b = 0
+      nd = 0; b = 0; delete idsnow
       if (f["displays"] != "none") {
         nd = split(f["displays"], ds, ",")
         for (i = 1; i <= nd; i++) {
           if (ds[i] !~ /^[0-9]+:[be]:[0-9]+\.[0-9]$/) { fail("a malformed display entry " ds[i] " at " $1); next }
           split(ds[i], d, ":")
           if ((d[1], n) in got) { fail("display " d[1] " twice at " $1); next }
-          got[d[1], n] = 1
+          got[d[1], n] = 1; idsnow[i] = d[1] + 0
           if (d[2] == "b" && d[3] + 0 > 0) b++
           if (!(d[1] in sum)) { ids[++nids] = d[1]; kindof[d[1]] = d[2]; low[d[1]] = d[3] + 0 }
           sum[d[1]] += d[3]; cnt_d[d[1]]++
@@ -376,6 +401,10 @@ check_readings() { # $1 log, $2 pid, $3 from, $4 to, $5 kind, $6 fps, $7 habitat
         if (f["battery"] != "false") { fail("on battery at " $1); next }
         if (f["attached"] + 0 < 1 || f["drawn"] != f["attached"]) { fail(f["drawn"] " of " f["attached"] " displays drawn at " $1); next }
         if (n == 1) screens = f["attached"]; else if (f["attached"] != screens) { fail("the displays changed during the run at " $1); next }
+        # The same displays (by id) at every reading, not only the same number.
+        for (i = 1; i <= nd; i++) for (j = i + 1; j <= nd; j++) if (idsnow[j] < idsnow[i]) { x = idsnow[i]; idsnow[i] = idsnow[j]; idsnow[j] = x }
+        set = ""; for (i = 1; i <= nd; i++) set = set (i > 1 ? "," : "") idsnow[i]
+        if (n == 1) firstset = set; else if (set != firstset) { fail("the displays changed during the run at " $1 " (" set ", was " firstset ")"); next }
         for (i = 1; i <= nd; i++) {
           split(ds[i], d, ":")
           if (d[3] + 0 < 0.85 * want || d[3] + 0 > 1.15 * want) { fail("display " d[1] " at " d[3] " fps at " $1 ", asked " want); next }
@@ -408,14 +437,26 @@ sampled_ok() { [[ "$1" =~ ^[0-9]+\.[0-9]{2}\ [0-9]+\.[0-9]{2}\ [0-9]+\.[0-9]\ [0
 power_ok() { [[ "$1" == "plugged in, Low Power Mode off ("*" readings)" ]]; }
 readings_ok() { [[ "$(printf '%s' "$1" | tail -1)" =~ ^OK\ [0-9]+\ readings ]] && [[ "$1" != *INVALID* ]]; }
 
-# The count the test copy shows in its first reading stamped after $3 ("" if none yet). $1 log, $2 pid.
-count_after() {
-  awk -v pid="$2" -v after="$3" '$2 == "energy:" && $3 == "pid=" pid && $1 > after {
-      for (i = 4; i <= NF; i++) if ($i ~ /^count=[0-9]+$/) { print substr($i, 7); exit } }' "$1"
+# This launch's first reading stamped after $4 ("" if none yet): "<count> drew" when it drew live on the built-in
+# display alone (one display, built-in, more than 0 fps), else "<count> not-drawn" (paused, still, nothing drawn, an
+# external display). $1 log, $2 pid, $3 launch id.
+calibration_after() {
+  awk -v pid="$2" -v launch="$3" -v after="$4" '$2 == "energy:" && $3 == "pid=" pid && $4 == "launch=" launch && $1 > after {
+      c = ""; m = ""; dr = ""; ds = ""
+      for (i = 5; i <= NF; i++) {
+        if ($i ~ /^count=[0-9]+$/) c = substr($i, 7)
+        else if ($i ~ /^mode=/) m = substr($i, 6)
+        else if ($i ~ /^drawn=/) dr = substr($i, 7)
+        else if ($i ~ /^displays=/) ds = substr($i, 10)
+      }
+      if (c == "") next
+      ok = (m ~ /^live[0-9]+$/ && dr == "1" && ds ~ /^[0-9]+:b:[0-9]+\.[0-9]$/ && substr(ds, index(ds, ":b:") + 3) + 0 > 0)
+      print c, (ok ? "drew" : "not-drawn"); exit }' "$1"
 }
 
-plan_of() { # the logged plan for pid $2: "greeting=<g> builtInOnly=<0|1>"
-  awk -v pid="$2" '$2 == "energy-plan:" && $3 == "pid=" pid { print $4, $5 }' "$1" 2>/dev/null | tail -1
+card_shown() { grep -qF "energy-card: pid=$2 launch=$3 shown" "$1" 2>/dev/null; }   # $1 log, $2 pid, $3 launch id
+plan_of() { # this launch's logged plan (pid $2, launch id $3): "greeting=<g> builtInOnly=<0|1>"
+  awk -v pid="$2" -v launch="$3" '$2 == "energy-plan:" && $3 == "pid=" pid && $4 == "launch=" launch { print $5, $6 }' "$1" 2>/dev/null | tail -1
 }
 
 # Answers typed by the director, from fd 3 (the terminal). End of input is a failure, never a yes.
@@ -425,22 +466,28 @@ ask() { # $1 prompt; prints the answer, trimmed
   IFS= read -r a <&3 || return 1
   printf '%s' "$a" | tr -d '[:space:]'
 }
-# Calibration: the director types the count they chose; it must be the count the test copy shows. $1 log, $2 pid,
-# $3 seconds to wait for a fresh reading. Prints the count.
+# Calibration: the director types the count they chose; the test copy's first reading after the answer must show that
+# count AND have drawn it live on the built-in display alone (a paused or undrawn reading never confirms). $1 log,
+# $2 pid, $3 launch id, $4 seconds to wait for a fresh reading. Prints the count.
 confirm_count() {
-  local a shown since i
+  local a shown since i sc sd
   while :; do
     a="$(ask "type the butterfly count you settled on (1-12), then Return: ")" || { echo "no answer (end of input)" >&2; return 1; }
     case "$a" in ''|*[!0-9]*) echo "  a number from 1 to 12, please" >&2; continue ;; esac
     if [ "$a" -lt 1 ] || [ "$a" -gt 12 ]; then echo "  a number from 1 to 12, please" >&2; continue; fi
     since="$(utc)"; shown=""
-    for i in $(seq 1 "$3"); do
-      shown="$(count_after "$1" "$2" "$since")"; [ -n "$shown" ] && break
+    for i in $(seq 1 "$4"); do
+      shown="$(calibration_after "$1" "$2" "$3" "$since")"; [ -n "$shown" ] && break
       [ -n "$CONFIRM_FIXTURE" ] || sleep 1
     done
     [ -n "$shown" ] || { echo "the test copy logged no reading after your answer" >&2; return 1; }
-    [ "$shown" = "$a" ] && { echo "$a"; return 0; }
-    echo "  the test copy shows $shown, not $a: set it in Settings (or type $shown)" >&2
+    read -r sc sd <<<"$shown"
+    if [ "$sc" = "$a" ] && [ "$sd" = drew ]; then echo "$a"; return 0; fi
+    if [ "$sc" = "$a" ]; then
+      echo "  the test copy shows $a but did not draw it live on the built-in display alone (paused or covered?): resume it, then type $a again" >&2
+      continue
+    fi
+    echo "  the test copy shows $sc, not $a: set it in Settings (or type $sc)" >&2
   done
 }
 # Preview: the director types "seen" (or "no"). Anything else asks again.
@@ -507,104 +554,154 @@ if [ "$MODE" = selftest ]; then
   expect "power: Low Power Mode (powermode 1)" "$(power_line "$AC" "$G1")" "ac=1 lowpower=1"
   expect "power: Low Power Mode (lowpowermode 1)" "$(power_line "$AC" "$GOLD")" "ac=1 lowpower=1"
   expect "power: unknown" "$(power_line "$AC" "$GNONE")" "ac=1 lowpower=?"
+  G2="$(printf 'Currently in use:\n standby              1\n powermode            2\n')"
+  GODD="$(printf 'Currently in use:\n lowpowermode         x\n')"
+  UPS="$(printf "Now drawing from 'UPS Power'\n")"
+  expect "power: an unknown powermode value is unknown, not off" "$(power_line "$AC" "$G2")" "ac=1 lowpower=?"
+  expect "power: an unknown lowpowermode value is unknown" "$(power_line "$AC" "$GODD")" "ac=1 lowpower=?"
+  expect "power: an unknown source is unknown, not battery" "$(power_line "$UPS" "$G0")" "ac=? lowpower=0"
+  expect "power: no pmset output at all" "$(power_line "" "")" "ac=? lowpower=?"
   P="$RUN/power.txt"
-  ptrace() { local i; : >"$P"; for i in $(seq 1 "$1"); do echo "2026-11-21T10:00:$(printf %02d $((i * 5 % 60)))Z $2" >>"$P"; done; }
-  ptrace 12 "ac=1 lowpower=0"; expect "power trace: complete" "$(check_power "$P" 60)" "plugged in, Low Power Mode off (12 readings)"
-  ptrace 3 "ac=1 lowpower=0"; expect "power trace: short" "$(check_power "$P" 60)" "INVALID 3 power readings for 60 s"
-  ptrace 12 "ac=1 lowpower=0"; echo "2026-11-21T10:01:01Z ac=0 lowpower=0" >>"$P"
-  expect "power trace: unplugged once" "$(check_power "$P" 60)" "INVALID on battery at*"
-  ptrace 12 "ac=1 lowpower=0"; echo "2026-11-21T10:01:01Z ac=1 lowpower=1" >>"$P"
-  expect "power trace: Low Power once" "$(check_power "$P" 60)" "INVALID Low Power Mode on at*"
-  ptrace 12 "ac=1 lowpower=?"; expect "power trace: unknown" "$(check_power "$P" 60)" "INVALID Low Power Mode unknown*"
+  # A trace from 10:00:00 to 10:01:00, a reading every 5 s from 10:00:01 (stamps $3 onwards override the values).
+  ptrace() { local i; : >"$P"; for i in $(seq 0 $(($1 - 1))); do echo "2026-11-21T10:0$(((1 + i * 5) / 60)):$(printf %02d $(((1 + i * 5) % 60)))Z $2" >>"$P"; done; }
+  PF=2026-11-21T10:00:00Z; PT=2026-11-21T10:01:00Z
+  ptrace 12 "ac=1 lowpower=0"; expect "power trace: complete" "$(check_power "$P" $PF $PT 60)" "plugged in, Low Power Mode off (12 readings)"
+  ptrace 3 "ac=1 lowpower=0"; expect "power trace: short" "$(check_power "$P" $PF $PT 60)" "INVALID 3 power readings for 60 s"
+  ptrace 11 "ac=1 lowpower=0"; echo "2026-11-21T10:00:59Z ac=0 lowpower=0" >>"$P"
+  expect "power trace: unplugged once" "$(check_power "$P" $PF $PT 60)" "INVALID on battery at*"
+  ptrace 11 "ac=1 lowpower=0"; echo "2026-11-21T10:00:59Z ac=1 lowpower=1" >>"$P"
+  expect "power trace: Low Power once" "$(check_power "$P" $PF $PT 60)" "INVALID Low Power Mode on at*"
+  ptrace 12 "ac=1 lowpower=?"; expect "power trace: unknown" "$(check_power "$P" $PF $PT 60)" "INVALID Low Power Mode unknown*"
+  ptrace 12 "ac=? lowpower=0"; expect "power trace: source unknown" "$(check_power "$P" $PF $PT 60)" "INVALID power source unknown*"
+  : >"$P"; for i in $(seq 1 12); do echo "2026-11-21T10:00:30Z ac=1 lowpower=0" >>"$P"; done
+  expect "power trace: twelve identical rows" "$(check_power "$P" $PF $PT 60)" "INVALID power readings out of order or repeated*"
+  : >"$P"; for i in $(seq 1 12); do echo "0Z ac=1 lowpower=0" >>"$P"; done
+  expect "power trace: zero stamps" "$(check_power "$P" $PF $PT 60)" "INVALID a power reading with a malformed stamp*"
+  ptrace 12 "ac=1 lowpower=0"; sed -i '' '6s/^2026-11-21T10:00:26Z/2026-11-21T10:00:21Z/' "$P"
+  expect "power trace: a stamp going back" "$(check_power "$P" $PF $PT 60)" "INVALID power readings out of order*"
+  ptrace 12 "ac=1 lowpower=0"; echo "2026-11-21T10:05:00Z ac=1 lowpower=0" >>"$P"
+  expect "power trace: a stamp after the window" "$(check_power "$P" $PF $PT 60)" "INVALID a power reading at 2026-11-21T10:05:00Z, outside*"
+  : >"$P"; for i in $(seq 0 11); do echo "2026-11-21T10:00:$(printf %02d $((i * 2)))Z ac=1 lowpower=0" >>"$P"; done
+  expect "power trace: twelve rows bunched at the start" "$(check_power "$P" $PF $PT 60)" "INVALID the power readings do not cover*"
+  ptrace 12 "ac=1 lowpower=0"; expect "power trace: a malformed window" "$(check_power "$P" 0Z $PT 60)" "INVALID the sampled window is not two UTC stamps"
 
   L="$RUN/log.txt"
+  LID=0a1b2c3d4e5f6789
   rd() { # $1 stamp, then field overrides as k=v ...; prints one reading in EnergyLog.reading's shape
     local s="$1"; shift
-    local pid=501 mode=live30 setting=30 habitat=meadow count=7 attached=2 drawn=2 displays=1:b:29.8,2:e:29.6 lowPower=false battery=false thermal=nominal kv
+    local pid=501 launch=$LID mode=live30 setting=30 habitat=meadow count=7 attached=2 drawn=2 displays=1:b:29.8,2:e:29.6 lowPower=false battery=false thermal=nominal kv
     for kv in "$@"; do eval "${kv%%=*}=\"\${kv#*=}\""; done
-    echo "$s energy: pid=$pid mode=$mode setting=$setting habitat=$habitat count=$count attached=$attached drawn=$drawn displays=$displays lowPower=$lowPower battery=$battery thermal=$thermal"
+    echo "$s energy: pid=$pid launch=$launch mode=$mode setting=$setting habitat=$habitat count=$count attached=$attached drawn=$drawn displays=$displays lowPower=$lowPower battery=$battery thermal=$thermal"
   }
   minute() { local i; for i in $(seq 0 12); do rd "2026-11-21T10:$(printf %02d $((i * 5 / 60))):$(printf %02d $((i * 5 % 60)))Z" "$@"; done; }
   # The exact line OceanChecks pins (identityEnergyLogShapes):
-  expect "the reading shape" "$(rd 2026-11-21T10:00:00Z)" "2026-11-21T10:00:00Z energy: pid=501 mode=live30 setting=30 habitat=meadow count=7 attached=2 drawn=2 displays=1:b:29.8,2:e:29.6 lowPower=false battery=false thermal=nominal"
+  expect "the reading shape" "$(rd 2026-11-21T10:00:00Z)" "2026-11-21T10:00:00Z energy: pid=501 launch=0a1b2c3d4e5f6789 mode=live30 setting=30 habitat=meadow count=7 attached=2 drawn=2 displays=1:b:29.8,2:e:29.6 lowPower=false battery=false thermal=nominal"
   F=2026-11-21T10:00:00Z; TO=2026-11-21T10:01:00Z
   minute >"$L"
-  out="$(check_readings "$L" 501 $F $TO measure 30 meadow 7)"
+  out="$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)"
   expect "measure: a full minute, two displays" "$out" "*display 1 (built-in): 29.8 fps mean*display 2 (external): 29.6 fps mean*OK 13 readings, 2 displays, count=7"
-  minute >"$L"; echo "2026-11-21T10:00:30Z energy: pid=501 mode=live30" >>"$L"
-  expect "measure: a truncated reading" "$(check_readings "$L" 501 $F $TO measure 30 meadow 7)" "INVALID a reading with 2 fields*"
+  minute >"$L"; echo "2026-11-21T10:00:30Z energy: pid=501 launch=$LID mode=live30" >>"$L"
+  expect "measure: a truncated reading" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID a reading with 3 fields*"
   { rd 2026-11-21T10:00:00Z; rd 2026-11-21T10:00:05Z; rd 2026-11-21T10:00:05Z; } >"$L"
-  expect "measure: duplicate readings" "$(check_readings "$L" 501 $F $TO measure 30 meadow 7)" "INVALID two readings at*"
+  expect "measure: duplicate readings" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID two readings at*"
   rd 2026-11-21T10:00:30Z >"$L"
-  expect "measure: one reading for a minute" "$(check_readings "$L" 501 $F $TO measure 30 meadow 7)" "INVALID the readings do not cover the window"
+  expect "measure: one reading for a minute" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID the readings do not cover the window"
   { rd 2026-11-21T10:00:00Z; rd 2026-11-21T10:00:20Z; } >"$L"
-  expect "measure: a gap" "$(check_readings "$L" 501 $F $TO measure 30 meadow 7)" "INVALID no reading for 20 s*"
+  expect "measure: a gap" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID no reading for 20 s*"
   minute >"$L"; sed -i '' '5s/ thermal=nominal$//' "$L"
-  expect "measure: a reading missing a field" "$(check_readings "$L" 501 $F $TO measure 30 meadow 7)" "INVALID a reading with 10 fields*"
+  expect "measure: a reading missing a field" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID a reading with 11 fields*"
   minute >"$L"; sed -i '' '5s/count=7/count=/' "$L"
-  expect "measure: an empty field" "$(check_readings "$L" 501 $F $TO measure 30 meadow 7)" "INVALID a reading with a malformed field*"
+  expect "measure: an empty field" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID a reading with a malformed field*"
   minute >"$L"; sed -i '' '5s/count=7 attached/attached=2 count/' "$L"
-  expect "measure: fields out of order" "$(check_readings "$L" 501 $F $TO measure 30 meadow 7)" "INVALID a reading out of shape*"
+  expect "measure: fields out of order" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID a reading out of shape*"
   minute battery=true >"$L"
-  expect "measure: on battery" "$(check_readings "$L" 501 $F $TO measure 30 meadow 7)" "INVALID on battery at*"
+  expect "measure: on battery" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID on battery at*"
   minute lowPower=true >"$L"
-  expect "measure: Low Power Mode" "$(check_readings "$L" 501 $F $TO measure 30 meadow 7)" "INVALID Low Power Mode on at*"
+  expect "measure: Low Power Mode" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID Low Power Mode on at*"
   minute mode=live15 >"$L"
-  expect "measure: held at 15 (heat)" "$(check_readings "$L" 501 $F $TO measure 30 meadow 7)" "INVALID mode live15*"
+  expect "measure: held at 15 (heat)" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID mode live15*"
   minute drawn=1 displays=1:b:29.8 >"$L"
-  expect "measure: one of two displays drawn" "$(check_readings "$L" 501 $F $TO measure 30 meadow 7)" "INVALID 1 of 2 displays drawn*"
+  expect "measure: one of two displays drawn" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID 1 of 2 displays drawn*"
   minute displays=1:b:29.8 >"$L"
-  expect "measure: drawn and the list disagree" "$(check_readings "$L" 501 $F $TO measure 30 meadow 7)" "INVALID drawn=2 but 1 displays listed*"
+  expect "measure: drawn and the list disagree" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID drawn=2 but 1 displays listed*"
   minute displays=1:b:29.8,2:e:21.0 >"$L"
-  expect "measure: one display slow (covered)" "$(check_readings "$L" 501 $F $TO measure 30 meadow 7)" "INVALID display 2 at 21.0 fps*"
+  expect "measure: one display slow (covered)" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID display 2 at 21.0 fps*"
   minute displays=1:b:29.8,1:e:29.6 >"$L"
-  expect "measure: a display twice" "$(check_readings "$L" 501 $F $TO measure 30 meadow 7)" "INVALID display 1 twice*"
+  expect "measure: a display twice" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID display 1 twice*"
   minute displays=1:b:29.8,2:e:29.6x >"$L"
-  expect "measure: a malformed display entry" "$(check_readings "$L" 501 $F $TO measure 30 meadow 7)" "INVALID a malformed display entry*"
+  expect "measure: a malformed display entry" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID a malformed display entry*"
   minute >"$L"; sed -i '' '7s/attached=2 drawn=2 displays=1:b:29.8,2:e:29.6/attached=1 drawn=1 displays=1:b:29.8/' "$L"
-  expect "measure: a display detached mid-run" "$(check_readings "$L" 501 $F $TO measure 30 meadow 7)" "INVALID the displays changed*"
+  expect "measure: a display detached mid-run" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID the displays changed*"
   minute count=5 >"$L"
-  expect "measure: another count" "$(check_readings "$L" 501 $F $TO measure 30 meadow 7)" "INVALID count 5*"
+  expect "measure: another count" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID count 5*"
   minute pid=777 >"$L"
-  expect "measure: another process's readings" "$(check_readings "$L" 501 $F $TO measure 30 meadow 7)" "INVALID no readings in the window"
+  expect "measure: another process's readings" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID no readings in the window"
+  minute launch=ffffffffffffffff >"$L"
+  expect "measure: the same pid, another launch's readings" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID no readings in the window"
+  minute launch=none >"$L"
+  expect "measure: readings with no launch id (a probe, a hand launch)" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID no readings in the window"
+  minute >"$L"; sed -i '' '7s/displays=1:b:29.8,2:e:29.6/displays=1:b:29.8,3:e:29.6/' "$L"
+  expect "measure: a display swapped mid-run (same count)" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "INVALID the displays changed during the run at*"
+  minute displays=2:e:29.6,1:b:29.8 >"$L"
+  expect "measure: the same displays listed in another order" "$(check_readings "$L" 501 $LID $F $TO measure 30 meadow 7)" "*OK 13 readings, 2 displays*"
   minute >"$L"
-  expect "measure: web asked, meadow logged" "$(check_readings "$L" 501 $F $TO measure 30 web "")" "INVALID set to meadow at 30 fps*"
+  expect "measure: web asked, meadow logged" "$(check_readings "$L" 501 $LID $F $TO measure 30 web "")" "INVALID set to meadow at 30 fps*"
   minute attached=1 drawn=1 displays=1:b:29.9 >"$L"
-  expect "calibrate: the built-in alone" "$(check_readings "$L" 501 $F $TO calibrate 30 meadow "")" "*display 1 (built-in)*OK 13 readings, 1 displays, count=7"
+  expect "calibrate: the built-in alone" "$(check_readings "$L" 501 $LID $F $TO calibrate 30 meadow "")" "*display 1 (built-in)*OK 13 readings, 1 displays, count=7"
   minute attached=2 drawn=1 displays=2:e:29.9 >"$L"
-  expect "calibrate: an external drawn" "$(check_readings "$L" 501 $F $TO calibrate 30 meadow "")" "INVALID not the built-in display alone*"
+  expect "calibrate: an external drawn" "$(check_readings "$L" 501 $LID $F $TO calibrate 30 meadow "")" "INVALID not the built-in display alone*"
   minute attached=1 drawn=0 displays=none >"$L"
-  expect "calibrate: nothing drawn (lid closed)" "$(check_readings "$L" 501 $F $TO calibrate 30 meadow "")" "INVALID not the built-in display alone*"
+  expect "calibrate: nothing drawn (lid closed)" "$(check_readings "$L" 501 $LID $F $TO calibrate 30 meadow "")" "INVALID not the built-in display alone*"
   minute attached=1 drawn=1 displays=1:b:0.0 mode=paused >"$L"
-  expect "calibrate: no frame drawn" "$(check_readings "$L" 501 $F $TO calibrate 30 meadow "")" "INVALID no built-in display drew a frame"
+  expect "calibrate: no frame drawn" "$(check_readings "$L" 501 $LID $F $TO calibrate 30 meadow "")" "INVALID no built-in display drew a frame"
   minute >"$L"
-  expect "preview: a built-in display drawn" "$(check_readings "$L" 501 $F $TO preview 30 meadow "")" "*OK 13 readings*"
+  expect "preview: a built-in display drawn" "$(check_readings "$L" 501 $LID $F $TO preview 30 meadow "")" "*OK 13 readings*"
   minute displays=1:e:29.8,2:e:29.6 >"$L"
-  expect "preview: no built-in display" "$(check_readings "$L" 501 $F $TO preview 30 meadow "")" "INVALID no built-in display drew a frame"
+  expect "preview: no built-in display" "$(check_readings "$L" 501 $LID $F $TO preview 30 meadow "")" "INVALID no built-in display drew a frame"
 
   # Typed confirmations, from a file standing in for the terminal (fd 3); the log answers at once.
   CONFIRM_FIXTURE=1
   rd 2099-01-01T00:00:00Z attached=1 drawn=1 displays=1:b:29.9 count=9 >"$L"
-  out="$(printf '9\n' | { exec 3<&0; confirm_count "$L" 501 2 2>/dev/null; })"; rc=$?
+  out="$(printf '9\n' | { exec 3<&0; confirm_count "$L" 501 $LID 2 2>/dev/null; })"; rc=$?
   expect "calibrate: the count typed is the count shown" "$rc $out" "0 9"
-  out="$(printf 'nine\n13\n7\n9\n' | { exec 3<&0; confirm_count "$L" 501 2 2>&1; })"; rc=$?
+  out="$(printf 'nine\n13\n7\n9\n' | { exec 3<&0; confirm_count "$L" 501 $LID 2 2>&1; })"; rc=$?
   expect "calibrate: words, out of range and a wrong count ask again" "$rc $(echo "$out" | grep -c 'please\|not 7')" "0 3"
-  out="$(printf '' | { exec 3<&0; confirm_count "$L" 501 2 2>/dev/null; })"; rc=$?
+  out="$(printf '' | { exec 3<&0; confirm_count "$L" 501 $LID 2 2>/dev/null; })"; rc=$?
   expect "calibrate: end of input is no answer" "$rc" "1"
-  out="$(printf '7\n' | { exec 3<&0; confirm_count "$L" 501 2 2>/dev/null; })"; rc=$?
+  out="$(printf '7\n' | { exec 3<&0; confirm_count "$L" 501 $LID 2 2>/dev/null; })"; rc=$?
   expect "calibrate: a wrong count then end of input fails" "$rc" "1"
   rd 2000-01-01T00:00:00Z count=9 >"$L"
-  out="$(printf '9\n' | { exec 3<&0; confirm_count "$L" 501 2 2>&1; })"; rc=$?
+  out="$(printf '9\n' | { exec 3<&0; confirm_count "$L" 501 $LID 2 2>&1; })"; rc=$?
   expect "calibrate: no reading after the answer fails" "$rc $out" "1 *no reading after*"
+  # The re-check's case: it drew at 7, then shows 9 while paused. 9 is never confirmed by a paused reading.
+  { rd 2000-01-01T00:00:00Z attached=1 drawn=1 displays=1:b:29.9 count=7; rd 2099-01-01T00:00:00Z attached=1 drawn=1 displays=1:b:0.0 mode=paused count=9; } >"$L"
+  out="$(printf '9\n' | { exec 3<&0; confirm_count "$L" 501 $LID 2 2>&1; })"; rc=$?
+  expect "calibrate: a fresh but paused reading at the count does not confirm" "$rc $(echo "$out" | grep -c 'did not draw it live')" "1 1"
+  rd 2099-01-01T00:00:00Z attached=2 drawn=1 displays=2:e:29.9 count=9 >"$L"
+  out="$(printf '9\n' | { exec 3<&0; confirm_count "$L" 501 $LID 2 2>/dev/null; })"; rc=$?
+  expect "calibrate: a reading drawn on an external display does not confirm" "$rc" "1"
+  rd 2099-01-01T00:00:00Z attached=1 drawn=0 displays=none mode=still count=9 >"$L"
+  out="$(printf '9\n' | { exec 3<&0; confirm_count "$L" 501 $LID 2 2>/dev/null; })"; rc=$?
+  expect "calibrate: a reading with nothing drawn does not confirm" "$rc" "1"
+  rd 2099-01-01T00:00:00Z attached=1 drawn=1 displays=1:b:29.9 count=9 launch=ffffffffffffffff >"$L"
+  out="$(printf '9\n' | { exec 3<&0; confirm_count "$L" 501 $LID 2 2>&1; })"; rc=$?
+  expect "calibrate: another launch's reading does not confirm" "$rc $out" "1 *no reading after*"
   out="$(printf 'yes\nseen\n' | { exec 3<&0; confirm_seen 2>/dev/null; })"; rc=$?
   expect "preview: seen (after a wrong word)" "$rc" "0"
   out="$(printf '' | { exec 3<&0; confirm_seen 2>/dev/null; })"; rc=$?
   expect "preview: end of input is not seen" "$rc" "1"
   out="$(printf 'no\n' | { exec 3<&0; confirm_seen 2>/dev/null; })"; rc=$?
   expect "preview: no" "$rc" "1"
-  printf '2026-11-21T10:00:01Z energy-plan: pid=501 greeting=quiet builtInOnly=0\n2026-11-21T10:00:02Z energy-card: pid=501 shown\n' >"$L"
-  expect "the plan line" "$(plan_of "$L" 501)" "greeting=quiet builtInOnly=0"
-  expect "no plan line for another pid" "$(plan_of "$L" 777)" ""
+  printf '2026-11-21T10:00:01Z energy-plan: pid=501 launch=%s greeting=quiet builtInOnly=0\n2026-11-21T10:00:02Z energy-card: pid=501 launch=%s shown\n' "$LID" "$LID" >"$L"
+  expect "the plan line" "$(plan_of "$L" 501 $LID)" "greeting=quiet builtInOnly=0"
+  expect "no plan line for another pid" "$(plan_of "$L" 777 $LID)" ""
+  expect "no plan line for another launch (a reused pid)" "$(plan_of "$L" 501 ffffffffffffffff)" ""
+  printf '2026-11-21T10:00:01Z energy-plan: pid=501 launch=none greeting=preview builtInOnly=0\n' >"$L"
+  expect "a plan with no launch id never counts for a launch" "$(plan_of "$L" 501 $LID)" ""
+  printf '2026-11-21T10:00:02Z energy-card: pid=501 shown\n2026-11-21T10:00:03Z energy-card: pid=501 launch=none shown\n2026-11-21T10:00:04Z energy-card: pid=501 launch=ffffffffffffffff shown\n' >"$L"
+  card_shown "$L" 501 $LID; expect "an old, unbound or other launch's card line does not count" "$?" "1"
+  printf '2026-11-21T10:00:05Z energy-card: pid=501 launch=%s shown\n' "$LID" >>"$L"
+  card_shown "$L" 501 $LID; expect "this launch's card line counts" "$?" "0"
   sampled_ok "11.00 25.00 60.8 120.0"; expect "a sample line passes" "$?" "0"
   sampled_ok ""; expect "an empty sample (a parser failure) does not" "$?" "1"
   sampled_ok "INVALID 3 of 4 samples"; expect "an invalid sample does not" "$?" "1"
@@ -706,7 +803,7 @@ cleanup() {
   [ "$CLEANING" = 1 ] && return; CLEANING=1
   trap '' INT TERM HUP
   set +e
-  exec 3<&- 2>/dev/null
+  { exec 3<&-; } 2>/dev/null   # closes the terminal answers; stderr stays, so every warning below is seen
   if [ "$DRY" != 1 ] && { [ "$LAUNCHED" = 1 ] || [ "$MODE" = recover ]; }; then
     # A launch still registering: give it time to appear, so it is not left behind.
     if [ "$LAUNCHED" = 1 ] && [ -z "$TEST_PID" ]; then
@@ -756,26 +853,28 @@ find_launched() { # sets TEST_PID and TEST_START when exactly one of this checko
 launch_test() { # $1 quiet, $2 preview, $3 built-in only (each 1 or 0); $4 the greeting the plan must show
   local want plan i
   preflight_processes refuse
+  LAUNCH_ID="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+  [[ "$LAUNCH_ID" =~ ^[0-9a-f]{16}$ ]] || die "could not make a launch id"
   LAUNCHED=1
   LAUNCH_AT="$(utc)"
   # open runs with Ctrl-C ignored, so a launch is never half done; the trap runs once it returns.
   ( trap '' INT TERM
-    exec open --env ASCII_ANIMALS_NO_HANDOVER=1 --env "ASCII_ANIMALS_QUIET_LAUNCH=$1" \
+    exec open --env ASCII_ANIMALS_NO_HANDOVER=1 --env "ASCII_ANIMALS_ENERGY_LAUNCH=$LAUNCH_ID" --env "ASCII_ANIMALS_QUIET_LAUNCH=$1" \
       --env "ASCII_ANIMALS_PREVIEW_WHATSNEW=$2" --env "ASCII_ANIMALS_BUILTIN_DISPLAY_ONLY=$3" "$APP" ) \
     || die "could not open the test copy"
   for i in $(seq 1 20); do find_launched && break; sleep 1; done
   [ -n "$TEST_PID" ] || die "the test copy did not start (or more than one is running)"
-  echo "test copy running (pid $TEST_PID, $REAL_TEST_EXEC)"
+  echo "test copy running (pid $TEST_PID, launch $LAUNCH_ID, $REAL_TEST_EXEC)"
   want="greeting=$4 builtInOnly=$3"
-  for i in $(seq 1 15); do plan="$(plan_of "$APPLOG" "$TEST_PID")"; [ -n "$plan" ] && break; sleep 1; done
-  [ "$plan" = "$want" ] || die "the test copy started as '${plan:-no plan logged}', not '$want' -- stopped"
+  for i in $(seq 1 15); do plan="$(plan_of "$APPLOG" "$TEST_PID" "$LAUNCH_ID")"; [ -n "$plan" ] && break; sleep 1; done
+  [ "$plan" = "$want" ] || die "the test copy started as '${plan:-no plan logged for launch $LAUNCH_ID}', not '$want' -- stopped"
   echo "test copy plan: $plan"
 }
 still_ours() { is_our_test_copy "$TEST_PID" "$TEST_START" || die "the test copy (pid $TEST_PID) quit or changed during the run -- results invalid"; }
 wait_for_reading() { # $1 kind; waits up to 15 s for a reading that passes it, from the launch on
   local i out
   for i in $(seq 1 15); do
-    out="$(check_readings "$APPLOG" "$TEST_PID" "$LAUNCH_AT" "$(utc)" "$1" "$FPS" "${HABITAT:-meadow}" "")"
+    out="$(check_readings "$APPLOG" "$TEST_PID" "$LAUNCH_ID" "$LAUNCH_AT" "$(utc)" "$1" "$FPS" "${HABITAT:-meadow}" "")"
     readings_ok "$out" && return 0
     sleep 1
   done
@@ -785,17 +884,33 @@ wait_for_reading() { # $1 kind; waits up to 15 s for a reading that passes it, f
 
 # ---- Sampling: top for exact pids, the power state every 5 s alongside ----
 
-sample() { # $1 app pid or "", $2 WindowServer pid; prints parse_top's line; the power trace goes to $RUN/power.txt
-  local args=(-l "$((SECS + 1))" -s 1 -stats pid,cpu,mem -pid "$2") top_pid
+# Any wallpaper app other than the test copy being measured ($1, or "" at the baseline): ASCII Animals, ASCII Sharks,
+# another test copy. One line, or nothing.
+others_running() {
+  local t
+  { real_apps_running; for t in $(test_candidates); do [ "$t" = "$1" ] || echo "$t test copy"; done; } | tr '\n' ';'
+}
+sample() { # $1 app pid or "", $2 WindowServer pid; prints parse_top's line (or "INVALID <why>"); the power trace goes
+           # to $RUN/power.txt; a look every 3 s for another wallpaper app goes to $RUN/apps.txt
+  local args=(-l "$((SECS + 1))" -s 1 -stats pid,cpu,mem -pid "$2") top_pid watch_pid
   [ -n "$1" ] && args+=(-pid "$1")
-  : >"$RUN/power.txt"
+  : >"$RUN/power.txt"; : >"$RUN/apps.txt"
   top "${args[@]}" >"$RUN/top.txt" 2>/dev/null &
   top_pid=$!
+  ( set +e; trap - EXIT
+    while kill -0 "$top_pid" 2>/dev/null && kill -0 $$ 2>/dev/null; do
+      seen="$(others_running "$1")"
+      [ -z "$seen" ] || echo "$(utc) $seen" >>"$RUN/apps.txt"
+      sleep 3
+    done ) >/dev/null &
+  watch_pid=$!
   while kill -0 "$top_pid" 2>/dev/null; do
     echo "$(utc) $(power_now)" >>"$RUN/power.txt"
     sleep 5
   done
   wait "$top_pid" || die "top failed"
+  wait "$watch_pid" 2>/dev/null || true
+  if [ -s "$RUN/apps.txt" ]; then echo "INVALID a wallpaper app was running during the sampling: $(head -1 "$RUN/apps.txt")"; return 0; fi
   parse_top "$RUN/top.txt" "$1" "$2" "$((SECS + 1))"
 }
 window_server() {
@@ -841,9 +956,11 @@ case "$MODE" in
     WS="$(window_server)"
     echo "baseline: no wallpaper app; settling ${SETTLE}s, sampling WindowServer (pid $WS) ${SECS}s"
     sleep "$SETTLE"
+    FROM="$(utc)"
     S="$(sample "" "$WS")"
+    TO="$(utc)"
     sampled_ok "$S" || die "sampling: ${S#INVALID } -- results invalid, rerun"
-    P="$(check_power "$RUN/power.txt" "$SECS")"
+    P="$(check_power "$RUN/power.txt" "$FROM" "$TO" "$SECS")"
     power_ok "$P" || die "power: ${P#INVALID } -- results invalid"
     [ -z "$(real_apps_running)$(test_candidates)" ] || die "a wallpaper app started during the baseline -- results invalid"
     read -r _ WSCPU _ _ <<<"$S"
@@ -864,8 +981,8 @@ case "$MODE" in
     still_ours
     [ -z "$(real_apps_running)" ] || die "ASCII Animals or ASCII Sharks started during the run -- results invalid"
     sleep 1   # the log is written off the main thread
-    R="$(check_readings "$APPLOG" "$TEST_PID" "$FROM" "$TO" measure "$FPS" "$HABITAT" "$COUNT")"
-    P="$(check_power "$RUN/power.txt" "$SECS")"
+    R="$(check_readings "$APPLOG" "$TEST_PID" "$LAUNCH_ID" "$FROM" "$TO" measure "$FPS" "$HABITAT" "$COUNT")"
+    P="$(check_power "$RUN/power.txt" "$FROM" "$TO" "$SECS")"
     read -r APPCPU WSCPU MEM MEMPK <<<"$S"
     echo "habitat=$HABITAT fps=$FPS seconds=$SECS count=$(printf '%s\n' "$R" | sed -n 's/.*count=\([0-9]*\)$/\1/p')"
     echo "  test copy CPU (mean):    ${APPCPU}%"
@@ -885,8 +1002,8 @@ case "$MODE" in
     launch_test 0 1 0 preview
     echo "the card appears under the test copy's menu bar icon in a second or two. Its buttons and Esc only close it;"
     echo "a click outside closes it AND reaches whatever was clicked."
-    for i in $(seq 1 30); do grep -q "energy-card: pid=$TEST_PID shown" "$APPLOG" 2>/dev/null && break; sleep 1; done
-    grep -q "energy-card: pid=$TEST_PID shown" "$APPLOG" 2>/dev/null || die "the test copy logged no card on screen in 30 s -- preview failed"
+    for i in $(seq 1 30); do card_shown "$APPLOG" "$TEST_PID" "$LAUNCH_ID" && break; sleep 1; done
+    card_shown "$APPLOG" "$TEST_PID" "$LAUNCH_ID" || die "the test copy logged no card on screen in 30 s -- preview failed"
     echo "the test copy put the card on screen"
     exec 3</dev/tty
     confirm_seen || die "the card was not confirmed seen -- preview failed"
@@ -902,11 +1019,11 @@ case "$MODE" in
     echo "the Meadow is on the built-in display alone. Open Settings from the test copy's menu bar icon (its menu starts"
     echo "with \"$TEST_NAME: energy test copy\") and move the butterfly count until it looks right."
     exec 3</dev/tty
-    N="$(confirm_count "$APPLOG" "$TEST_PID" 8)" || die "the count was not confirmed -- calibration failed"
+    N="$(confirm_count "$APPLOG" "$TEST_PID" "$LAUNCH_ID" 8)" || die "the count was not confirmed -- calibration failed"
     still_ours
-    R="$(check_readings "$APPLOG" "$TEST_PID" "$LAUNCH_AT" "$(utc)" calibrate 30 meadow "")"
+    R="$(check_readings "$APPLOG" "$TEST_PID" "$LAUNCH_ID" "$LAUNCH_AT" "$(utc)" calibrate 30 meadow "")"
     readings_ok "$R" || die "calibration: $(printf '%s' "$R" | tail -1) -- failed"
-    echo "count used: $N (the test copy showed $N on the built-in display; it is not saved anywhere else)"
+    echo "count used: $N (the test copy drew $N live on the built-in display alone; it is not saved anywhere else)"
     echo "  next: Tools/energy.sh meadow 30 60 $N   and   Tools/energy.sh meadow 15 60 $N"
     record "calibrate: count $N on the built-in display"
     ;;

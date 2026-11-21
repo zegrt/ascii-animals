@@ -92,27 +92,43 @@ func identityChecks() {
 
     check("identityEnergyLogShapes") {
         // energy.sh's selftest parses these exact lines; a change here must change it too.
-        let quiet = LaunchPlan(bundleID: test, environment: [LaunchPlan.quietFlag: "1", LaunchPlan.previewFlag: "0", LaunchPlan.builtInOnlyFlag: "0"])
-        try expect(EnergyLog.plan(pid: 501, quiet) == "energy-plan: pid=501 greeting=quiet builtInOnly=0", EnergyLog.plan(pid: 501, quiet))
+        let quiet = LaunchPlan(bundleID: test, environment: [LaunchPlan.quietFlag: "1", LaunchPlan.previewFlag: "0", LaunchPlan.builtInOnlyFlag: "0",
+                                                             LaunchPlan.launchFlag: "0a1b2c3d4e5f6789"])
+        try expect(EnergyLog.plan(pid: 501, quiet) == "energy-plan: pid=501 launch=0a1b2c3d4e5f6789 greeting=quiet builtInOnly=0", EnergyLog.plan(pid: 501, quiet))
+        let noID = LaunchPlan(bundleID: test, environment: [LaunchPlan.quietFlag: "1"])
+        try expect(EnergyLog.plan(pid: 501, noID) == "energy-plan: pid=501 launch=none greeting=quiet builtInOnly=0", EnergyLog.plan(pid: 501, noID))
         var inputs = PowerInputs()
         inputs.lowPowerMode = false
         inputs.onBattery = false
         let displays: [EnergyLog.Display] = [EnergyLog.Display(id: 1, builtIn: true, fps: 29.84),
                                              EnergyLog.Display(id: 2, builtIn: false, fps: 29.6)]
-        let line: String = EnergyLog.reading(pid: 501, mode: .live(fps: 30), setting: 30, habitat: "meadow", count: 7,
+        let line: String = EnergyLog.reading(pid: 501, launch: "0a1b2c3d4e5f6789", mode: .live(fps: 30), setting: 30, habitat: "meadow", count: 7,
                                              attached: 2, displays: displays, inputs: inputs)
-        let want: String = "energy: pid=501 mode=live30 setting=30 habitat=meadow count=7 attached=2 drawn=2 "
+        let want: String = "energy: pid=501 launch=0a1b2c3d4e5f6789 mode=live30 setting=30 habitat=meadow count=7 attached=2 drawn=2 "
             + "displays=1:b:29.8,2:e:29.6 lowPower=false battery=false thermal=nominal"
         try expect(line == want, line)
-        let none: String = EnergyLog.reading(pid: 501, mode: .still, setting: 30, habitat: "meadow", count: 7,
+        let none: String = EnergyLog.reading(pid: 501, launch: nil, mode: .still, setting: 30, habitat: "meadow", count: 7,
                                              attached: 2, displays: [], inputs: inputs)
-        try expect(none.contains(" mode=still ") && none.contains(" drawn=0 displays=none "), none)
-        try expect(EnergyLog.cardShown(pid: 501) == "energy-card: pid=501 shown", "the preview card's line")
+        try expect(none.contains(" launch=none mode=still ") && none.contains(" drawn=0 displays=none "), none)
+        try expect(EnergyLog.cardShown(pid: 501, launch: "0a1b2c3d4e5f6789") == "energy-card: pid=501 launch=0a1b2c3d4e5f6789 shown", "the preview card's line")
+        try expect(EnergyLog.cardShown(pid: 501, launch: nil) == "energy-card: pid=501 launch=none shown", "a card with no launch id")
         let root: URL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let energy: String = (try? String(contentsOf: root.appendingPathComponent("Tools/energy.sh"), encoding: .utf8)) ?? ""
         try expect(energy.contains("displays=1:b:29.8,2:e:29.6 lowPower=false battery=false thermal=nominal"),
                    "energy.sh's selftest uses the same reading shape")
         try expect(energy.contains("energy-plan: pid=") && energy.contains("energy-card: pid="), "energy.sh reads the plan and card lines")
+        try expect(energy.contains("energy: pid=$pid launch=$launch mode=") && energy.contains("--env \"\(LaunchPlan.launchFlag)=$LAUNCH_ID\""),
+                   "energy.sh passes a launch id and its selftest reads it back")
+    }
+
+    check("identityLaunchID") {
+        // Each energy.sh launch passes its own id; only the energy-test copy takes it, and only a plain one.
+        let env: (String) -> [String: String] = { (v: String) -> [String: String] in [LaunchPlan.launchFlag: v] }
+        try expect(LaunchPlan(bundleID: test, environment: env("0a1b2c3d4e5f6789")).launchID == "0a1b2c3d4e5f6789", "the test copy takes a plain id")
+        try expect(LaunchPlan(bundleID: real, environment: env("0a1b2c3d4e5f6789")).launchID == nil, "the app people install never takes one")
+        try expect(LaunchPlan(bundleID: test, environment: [:]).launchID == nil, "no id: none")
+        let bad: [String] = ["", "short", "has space x", "a=b-c-d-e", "0a1b2c3d\n4e5f", String(repeating: "a", count: 65), "élan-élan"]
+        for b in bad { try expect(LaunchPlan(bundleID: test, environment: env(b)).launchID == nil, "refused id '\(b)'") }
     }
 
     check("identityToolsAgree") {

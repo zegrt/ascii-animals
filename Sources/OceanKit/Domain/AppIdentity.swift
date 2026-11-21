@@ -60,6 +60,9 @@ public struct LaunchPlan: Equatable, Sendable {
     public static let quietFlag = "ASCII_ANIMALS_QUIET_LAUNCH"
     public static let previewFlag = "ASCII_ANIMALS_PREVIEW_WHATSNEW"
     public static let builtInOnlyFlag = "ASCII_ANIMALS_BUILTIN_DISPLAY_ONLY"
+    /// This launch's id, made by Tools/energy.sh for each launch and written in every energy log line, so a plan,
+    /// card or reading from another launch (a reused pid, an old log, a probe) never counts.
+    public static let launchFlag = "ASCII_ANIMALS_ENERGY_LAUNCH"
 
     public let identity: AppIdentity
     public let greeting: Greeting
@@ -69,6 +72,9 @@ public struct LaunchPlan: Equatable, Sendable {
     public let builtInDisplayOnly: Bool
     /// Log the actual frame rate and power mode every few seconds (energy.sh reads it).
     public let reportsFrameRate: Bool
+    /// The id energy.sh gave this launch (`launchFlag`): the energy-test copy only, 8 to 64 letters, digits or
+    /// dashes; anything else is no id ("none" in the log, which energy.sh never accepts).
+    public let launchID: String?
     public let startsUpdates: Bool
     public let runsHandover: Bool
     public let matchesSystemWallpaper: Bool
@@ -92,6 +98,7 @@ public struct LaunchPlan: Equatable, Sendable {
         transientSettings = greeting == .whatsNewPreview
         builtInDisplayOnly = test && environment[LaunchPlan.builtInOnlyFlag] == "1"
         reportsFrameRate = test
+        launchID = test ? LaunchPlan.validLaunchID(environment[LaunchPlan.launchFlag]) : nil
         startsUpdates = identity.runsUpdates
         runsHandover = identity.runsHandover && environment["ASCII_ANIMALS_NO_HANDOVER"] == nil
         matchesSystemWallpaper = identity.matchesSystemWallpaper
@@ -101,6 +108,15 @@ public struct LaunchPlan: Equatable, Sendable {
 
     public init(bundleID: String?, environment: [String: String]) {
         self.init(identity: AppIdentity(bundleID: bundleID), environment: environment)
+    }
+
+    /// `value` when it is 8 to 64 ASCII letters, digits or dashes; else nil.
+    public static func validLaunchID(_ value: String?) -> String? {
+        guard let v = value, (8...64).contains(v.utf8.count) else { return nil }
+        let ok: Bool = v.utf8.allSatisfy { (c: UInt8) -> Bool in
+            (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 45
+        }
+        return ok ? v : nil
     }
 }
 
@@ -155,16 +171,19 @@ public enum EnergyLog {
         }
     }
 
-    /// `energy-plan: pid=<pid> greeting=<quiet|preview> builtInOnly=<0|1>`
+    /// The launch id as logged: the id, or "none" (never accepted by energy.sh).
+    public static func launchWord(_ id: String?) -> String { id ?? "none" }
+
+    /// `energy-plan: pid=<pid> launch=<id> greeting=<quiet|preview> builtInOnly=<0|1>`
     public static func plan(pid: Int32, _ p: LaunchPlan) -> String {
         let only: String = p.builtInDisplayOnly ? "1" : "0"
-        return "energy-plan: pid=\(pid) greeting=\(p.greeting.word) builtInOnly=\(only)"
+        return "energy-plan: pid=\(pid) launch=\(launchWord(p.launchID)) greeting=\(p.greeting.word) builtInOnly=\(only)"
     }
 
-    /// `energy: pid=<pid> mode=<live30|still|paused> setting=<fps> habitat=<h> count=<n> attached=<n> drawn=<n>
+    /// `energy: pid=<pid> launch=<id> mode=<live30|still|paused> setting=<fps> habitat=<h> count=<n> attached=<n> drawn=<n>
     /// displays=<id>:<b|e>:<fps>,... lowPower=<bool> battery=<bool> thermal=<state>` (`b` built-in, `e` external;
     /// `displays=none` when nothing is drawn).
-    public static func reading(pid: Int32, mode: RunMode, setting: Int, habitat: String, count: Int, attached: Int,
+    public static func reading(pid: Int32, launch: String?, mode: RunMode, setting: Int, habitat: String, count: Int, attached: Int,
                                displays: [Display], inputs: PowerInputs) -> String {
         let modeWord: String
         switch mode {
@@ -177,13 +196,15 @@ public enum EnergyLog {
             return "\(d.id):\(kind):" + String(format: "%.1f", d.fps)
         }
         let shown: String = list.isEmpty ? "none" : list.joined(separator: ",")
-        let fields: [String] = ["pid=\(pid)", "mode=\(modeWord)", "setting=\(setting)", "habitat=\(habitat)",
+        let fields: [String] = ["pid=\(pid)", "launch=\(launchWord(launch))", "mode=\(modeWord)", "setting=\(setting)", "habitat=\(habitat)",
                                 "count=\(count)", "attached=\(attached)", "drawn=\(displays.count)", "displays=\(shown)",
                                 "lowPower=\(inputs.lowPowerMode)", "battery=\(inputs.onBattery)",
                                 "thermal=\(inputs.thermal)"]
         return "energy: " + fields.joined(separator: " ")
     }
 
-    /// The preview card reached the screen.
-    public static func cardShown(pid: Int32) -> String { "energy-card: pid=\(pid) shown" }
+    /// The preview card reached the live screen (written by the live presenter only, never by a probe).
+    public static func cardShown(pid: Int32, launch: String?) -> String {
+        "energy-card: pid=\(pid) launch=\(launchWord(launch)) shown"
+    }
 }

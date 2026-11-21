@@ -6,7 +6,17 @@ import OceanKit
 /// the system wallpaper and the login item.
 enum Launch {
     static let identity = AppIdentity(bundleID: Bundle.main.bundleIdentifier)
-    static let plan = LaunchPlan(identity: identity, environment: ProcessInfo.processInfo.environment)
+    /// A `--snapshot-*` run (a probe or a picture): never a launch energy.sh made, so it never carries a launch id.
+    static let snapshotRun: Bool = CommandLine.arguments.contains { (a: String) -> Bool in a.hasPrefix("--snapshot-") }
+    static let plan = LaunchPlan(identity: identity, environment: launchEnvironment)
+
+    /// The environment the plan reads; a snapshot run drops the launch id, so its log lines never pass as a live
+    /// launch's evidence.
+    static var launchEnvironment: [String: String] {
+        var env: [String: String] = ProcessInfo.processInfo.environment
+        if snapshotRun { env[LaunchPlan.launchFlag] = nil }
+        return env
+    }
 
     /// The energy-test copy's one folder (`EnergyTestFolder`): `build/energy-test` next to its bundle. Nil in any other
     /// copy.

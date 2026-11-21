@@ -35,11 +35,11 @@ enum WhatsNewCard {
         preview ? previewShown : UserDefaults.standard.bool(forKey: Handover.meadowCardKey)
     }
 
-    /// Marks the card shown once it reached the screen: the saved flag, or (previewing) this run only.
+    /// Marks the card shown once it reached the screen: the saved flag, or (previewing) this run only. It writes no
+    /// energy evidence: the offscreen probe calls it too, and only the live presenter logs the card (`showWhenSeen`).
     static func markShown(preview: Bool) {
         if preview {
             previewShown = true
-            Log.write(EnergyLog.cardShown(pid: getpid()))   // Tools/energy.sh preview waits for it
         } else {
             UserDefaults.standard.set(true, forKey: Handover.meadowCardKey)
         }
@@ -52,7 +52,11 @@ enum WhatsNewCard {
         stopLooking()
         let previewing: Bool = preview
         let p = WhatsNew.Presenter(moment: { moment(app) }, open: { open(app) },
-                                   mark: { markShown(preview: previewing) })
+                                   mark: {
+                                       markShown(preview: previewing)
+                                       // Tools/energy.sh preview waits for this line, bound to its launch id.
+                                       if previewing { Log.write(EnergyLog.cardShown(pid: getpid(), launch: Launch.plan.launchID)) }
+                                   })
         presenter = p
         looker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             if p.look() != .keepWaiting { stopLooking() }
@@ -363,6 +367,10 @@ enum WhatsNewCard {
         let flagSame: Bool = (flag == nil) == (flagAfter == nil) && (flag as? Bool) == (flagAfter as? Bool)
         expect(!wasShown && shownBefore(preview: true) && flagSame,
                "preview: shown once, kept in memory only (the saved flag untouched: \(flagAfter.map { "\($0)" } ?? "absent"))")
+        // The probe is offscreen: it never writes the live card evidence energy.sh waits for, and has no launch id.
+        let cardLine: String = "energy-card: pid=\(getpid()) "
+        let logged: Bool = Log.tail(4000).contains { (l: String) -> Bool in l.contains(cardLine) }
+        expect(!logged && Launch.plan.launchID == nil, "probe: no live card line logged, no launch id")
 
         lines.append("\(lines.count) probes, \(failed) failed")
         try? (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)

@@ -45,6 +45,7 @@ enum IdentityProbe {
             && !plan.matchesSystemWallpaper && !plan.changesLoginItem
         expect(allOff, "the plan: no updates, hand-over, uninstall, system wallpaper or login item")
         expect(plan.greeting != .asSaved, "no welcome or card from saved flags (greeting \(plan.greeting))")
+        expect(Launch.snapshotRun && plan.launchID == nil, "a snapshot run carries no launch id (its log lines never count as a launch's)")
 
         // The updater: every way in does nothing.
         let updates = UpdateService()

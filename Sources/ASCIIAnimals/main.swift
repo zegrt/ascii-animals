@@ -100,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var last: [CGDirectDisplayID: Int] = director?.framesByDisplay ?? [:]
         var lastTime: TimeInterval = ProcessInfo.processInfo.systemUptime
         let pid: Int32 = getpid()
+        let launch: String? = Launch.plan.launchID
         frameMeter = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             guard let self, let d = self.director else { return }
             let now: TimeInterval = ProcessInfo.processInfo.systemUptime
@@ -115,7 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             last = counts
             lastTime = now
             let s: OceanKit.Settings = self.store.settings
-            Log.write(EnergyLog.reading(pid: pid, mode: d.mode, setting: s.fps, habitat: s.habitat.rawValue,
+            Log.write(EnergyLog.reading(pid: pid, launch: launch, mode: d.mode, setting: s.fps, habitat: s.habitat.rawValue,
                                         count: s.meadowCount, attached: NSScreen.screens.count, displays: displays,
                                         inputs: self.signals.inputs))
         }
