@@ -45,6 +45,11 @@ Director's profile: none
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Corrections
+- 2026-11-21: "aslo we have to rework docs and customer facing stuff since now with meadows this is just not a port
+  of stackeds works but have proprietary work too but its also like mit open with creditation thing". Applies: new
+  (t10's words: README, About, LICENSE notice, DEVELOPING, CHANGELOG say the Ocean and Web are ports of @stackedlol's
+  MIT projects, credited, and the Meadow is XERO WORKS' own original work). Pending: whether the Meadow stays under
+  the repo's MIT licence or is reserved (asked the director; outward-facing and legal, so nothing changes first).
 - 2026-11-21: "?shold the mac be plugged inw hen doign the tests" (answered: plugged in, Low Power Mode off; 15 fps is
   set directly), then "so i have access to a different display now". Applies: new (t8 re-measures every habitat in
   one session on the current setup, recorded as a new setup; the manager reads the displays itself).
