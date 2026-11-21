@@ -95,7 +95,7 @@ private let desktopSpot: CGPoint = CGPoint(x: 100, y: 500)
 /// Finder's desktop window (desktop-icon level).
 private let finderDesktop: PointerWindow = PointerWindow(number: 5, pid: 300, layer: -2147483603, bounds: PointerDesk.screen1)
 /// One of ASCII Animals' own desktop windows (the habitat on screen 1).
-private let habitatWindow: PointerWindow = PointerWindow(number: 10, pid: 42, own: true, wallpaper: true,
+private let habitatWindow: PointerWindow = PointerWindow(number: 10, pid: 42, own: true, clickThrough: true,
                                                          layer: -2147483623, bounds: PointerDesk.screen1)
 /// Another app's window, and a spot on it.
 private let foreignWindow: PointerWindow = PointerWindow(number: 60, pid: 500, layer: 0,
@@ -185,6 +185,17 @@ private func pointerEligibilityChecks() {
         try expect(d.target == t1(100, 500), "the habitat's own window blocked it: \(d.out)")
     }
     check("pointerOwnWindowBlocks", ownWindowBlocks)
+
+    // The welcome dims the other displays with own windows that take no mouse events: the pointer goes through them.
+    func ownClickThroughWindowPasses() throws {
+        let dim = PointerWindow(number: 43, pid: 42, own: true, clickThrough: true, layer: 24, alpha: 0.55,
+                                bounds: PointerDesk.screen2)
+        let d = PointerDesk(windows: [dim])
+        d.click(at: CGPoint(x: 2000, y: 500))
+        try expect(d.downs == [PointerTarget(viewportID: 2, local: CGPoint(x: 560, y: 500))],
+                   "an own window that takes no mouse events blocked the desktop: \(d.out)")
+    }
+    check("pointerOwnClickThroughWindowPasses", ownClickThroughWindowPasses)
 
     // A display-sized foreign surface whose pixels are clear: the window server hands the click to the desktop.
     func clickThroughSurface() throws {
@@ -316,11 +327,23 @@ private func pointerFreshnessChecks() {
                    "a display rearranged, the old layout routed: \(d.out)")
     }
     check("pointerInvalidationRejudges", invalidationRejudges)
+
+    // Fresh scenes (a display change) learn a resting pointer: an invalidation tells it again, once.
+    func invalidationRetells() throws {
+        let d = PointerDesk(windows: [habitatWindow])
+        d.move(to: desktopSpot)
+        d.tick()
+        d.out.removeAll()
+        d.pointer.invalidate()
+        d.ticks(for: 1.5 * DesktopPointer.minRefetch)
+        try expect(d.out == [.moved(t1(100, 500))], "after an invalidation the resting pointer was told \(d.out)")
+    }
+    check("pointerInvalidationRetells", invalidationRetells)
 }
 
 // MARK: Budget: window-list reads (audit a2's hot path)
 
-/// `n` foreign moves at 120 Hz over screen 1 (around the windows), a tick each 1/60 s; the window-list reads.
+/// `seconds` of foreign moves at 120 Hz over screen 1 (around the windows), a step each 1/60 s; the reads.
 private func burstReads(seconds: Double) -> (moves: Int, reads: Int, viewportReads: Int) {
     let w2 = PointerWindow(number: 61, pid: 501, layer: 0, bounds: CGRect(x: 1000, y: 100, width: 300, height: 200))
     let menuBar = PointerWindow(number: 3, pid: 100, layer: 24, bounds: CGRect(x: 0, y: 0, width: 1440, height: 24))
@@ -330,8 +353,9 @@ private func burstReads(seconds: Double) -> (moves: Int, reads: Int, viewportRea
         let a: Double = Double(i) * 0.05
         let x: CGFloat = CGFloat(720.0 + 600.0 * cos(a))
         let y: CGFloat = CGFloat(450.0 + 380.0 * sin(a))
+        d.now += 1.0 / 120.0
         d.move(to: CGPoint(x: x, y: y))
-        if i % 2 == 1 { d.tick() } else { d.now += 1.0 / 240.0 }
+        if i % 2 == 1 { d.tick(0) }
     }
     return (moves, d.pointer.fetches, d.pointer.viewportReads)
 }
@@ -340,8 +364,7 @@ private func pointerBudgetChecks() {
     func burstBudget() throws {
         let r = burstReads(seconds: 2)
         print("INFO pointer burst: \(r.moves) moves in 2 s, \(r.reads) window-list reads, \(r.viewportReads) screen reads")
-        let bound: Int = Int(2.0 / DesktopPointer.moveLife) + 2
-        try expect(r.reads <= 10, "\(r.reads) window-list reads for 2 s of moves (bound 10, \(bound) from moveLife)")
+        try expect(r.reads <= 10, "\(r.reads) window-list reads for 2 s of moves (at most 10)")
         try expect(r.viewportReads <= 1, "\(r.viewportReads) screen reads for 2 s of moves (no display changed)")
     }
     check("pointerBurstReadBudget", burstBudget)
@@ -392,17 +415,17 @@ private func pointerBudgetChecks() {
              kCGWindowBounds as String: CGRect(x: 10, y: 20, width: 300, height: 200).dictionaryRepresentation],
             [kCGWindowNumber as String: NSNumber(value: 14), kCGWindowOwnerPID as String: NSNumber(value: 9)],
         ]
-        let parsed: [PointerWindow] = PointerWindow.parse(canned, ownPID: 42, wallpaper: [12])
+        let parsed: [PointerWindow] = PointerWindow.parse(canned, ownPID: 42, clickThrough: [12])
         try expect(parsed.count == 2, "an entry without bounds kept: \(parsed)")
-        try expect(parsed[0].wallpaper && parsed[0].own && parsed[0].isDesktop, "the habitat window: \(parsed[0])")
-        try expect(parsed[1].own && !parsed[1].wallpaper && parsed[1].bounds == CGRect(x: 10, y: 20, width: 300, height: 200),
+        try expect(parsed[0].clickThrough && parsed[0].own && parsed[0].letsPointerThrough, "the habitat window: \(parsed[0])")
+        try expect(parsed[1].own && !parsed[1].clickThrough && parsed[1].bounds == CGRect(x: 10, y: 20, width: 300, height: 200),
                    "an own window: \(parsed[1])")
         let n: Int = 50
         let start: Double = ProcessInfo.processInfo.systemUptime
         var count: Int = 0
         for _ in 0..<n {
             let raw = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-            count = PointerWindow.parse(raw, ownPID: getpid(), wallpaper: []).count
+            count = PointerWindow.parse(raw, ownPID: getpid(), clickThrough: []).count
         }
         let ms: Double = (ProcessInfo.processInfo.systemUptime - start) * 1000 / Double(n)
         print("INFO pointer window-list read + parse: " + String(format: "%.3f", ms) + " ms each (\(count) windows)")

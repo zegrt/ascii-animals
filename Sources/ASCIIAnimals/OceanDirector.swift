@@ -17,8 +17,8 @@ final class OceanDirector {
     private var theme: ThemeParams
     private lazy var pointer = PointerMonitor(
         viewports: { [weak self] in self?.viewports ?? [] },
-        onMove: { [weak self] t in self?.pointerMoved(t) },
-        onDown: { [weak self] t in self?.pointerDown(t) })
+        frames: { [weak self] in self?.framesDrawn ?? 0 },
+        apply: { [weak self] outputs in self?.pointerOutputs(outputs) })
     /// Called after the first frame on every screen, and after looks change.
     var onLooksSettled: (() -> Void)?
     private(set) var lastError: String?
@@ -37,7 +37,10 @@ final class OceanDirector {
         signals.setLowPowerAnimates(store.settings.lowPowerAnimates)
     }
 
-    var viewports: [Viewport] { screens.map { Viewport(id: Int($0.displayID), rect: $0.viewportRect) } }
+    /// The habitat screens for the pointer; a covered one (its window occluded once shown) is not exposed.
+    var viewports: [Viewport] {
+        screens.map { Viewport(id: Int($0.displayID), rect: $0.viewportRect, exposed: $0.visible || !$0.presented) }
+    }
 
     func start() {
         screensChanged()
@@ -76,12 +79,13 @@ final class OceanDirector {
         updatePointer()
     }
 
+    /// The pointer runs while a habitat is live, interaction is on and some screen is exposed; any call here (a
+    /// mode, visibility, display or settings change) makes it read the screens and windows again.
     private func updatePointer() {
-        if case .live = mode, store.settings.interaction {
-            pointer.setRunning(true)
-        } else {
-            pointer.setRunning(false)
-        }
+        var on: Bool = false
+        if case .live = mode, store.settings.interaction { on = screens.contains { $0.visible || !$0.presented } }
+        pointer.setRunning(on)
+        pointer.invalidate()
     }
 
     private func visibilityChanged() {
@@ -100,6 +104,7 @@ final class OceanDirector {
             if f.swap { rebuildScenes() }
             reveal = f.reveal
         }
+        pointer.tick()   // once a step whichever screen ticks first; before the step, so a move lands in it
         let sim = s.scene.sim
         let drawable: CAMetalDrawable
         if s.stillPending {
@@ -275,6 +280,17 @@ final class OceanDirector {
     private func locate(_ t: PointerTarget) -> (HabitatScene, Double, Double)? {
         guard let s = screens.first(where: { Int($0.displayID) == t.viewportID }) else { return nil }
         return (s.scene, Double(s.oceanRect.minX + t.local.x), Double(s.oceanRect.minY + t.local.y))
+    }
+
+    /// What the desktop pointer tells (`DesktopPointer`): only changes, and clicks.
+    private func pointerOutputs(_ outputs: [DesktopPointer.Output]) {
+        for o in outputs {
+            switch o {
+            case .moved(let t): pointerMoved(t)
+            case .left: pointerMoved(nil)
+            case .down(let t): pointerDown(t)
+            }
+        }
     }
 
     private func pointerMoved(_ t: PointerTarget?) {
