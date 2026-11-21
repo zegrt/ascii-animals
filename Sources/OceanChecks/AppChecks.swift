@@ -210,6 +210,79 @@ func handoverChecks() {
         try expect(welcome(onboarded: true, handedOver: true, habitat: .web) == .nothing, "already on the Web")
         try expect(Handover.webCardKey == "whatsNew.web.v1", "the flag's name")
     }
+
+    // 3.1's Meadow card (t9): what a launch shows, from what is saved. Each launch below is a fresh decision, as at a
+    // real launch, with the flags the earlier launches left.
+    struct Saved {
+        var onboarded: Bool
+        var handedOver: Bool
+        var webShown = false
+        var meadowShown = false
+        var habitat: HabitatKind = .ocean
+        var meadowTried = false
+        var arrival: Arrival
+    }
+    func launch(_ s: Saved) -> LaunchWelcome {
+        Handover.launchWelcome(onboarded: s.onboarded, handedOver: s.handedOver, webCardShown: s.webShown, habitat: s.habitat,
+                               arrival: s.arrival, meadowCardShown: s.meadowShown, meadowTried: s.meadowTried)
+    }
+    func meadowCardOnceForUpgraders() throws {
+        // A 3.0 user: the welcome seen, settings saved.
+        let arrival: Arrival = Arrival.decide(stored: nil, savedSettings: true, onboarded: true, handedOver: false)
+        try expect(arrival == .before31, "a 3.0 user is an upgrade")
+        var s = Saved(onboarded: true, handedOver: false, arrival: arrival)
+        try expect(launch(s) == .meadowCard, "first 3.1 launch: the card")
+        s.meadowShown = true
+        try expect(launch(s) == .nothing, "shown once, never again")
+        var picked = Saved(onboarded: true, handedOver: false, arrival: .before31)
+        picked.habitat = .meadow
+        picked.meadowTried = true
+        try expect(launch(picked) == .nothing, "on the Meadow already")
+        picked.habitat = .ocean
+        try expect(launch(picked) == .nothing, "picked the Meadow once, then went back: never")
+        var web = Saved(onboarded: true, handedOver: false, arrival: .before31)
+        web.habitat = .web
+        try expect(launch(web) == .meadowCard, "someone on the Web gets it too")
+        try expect(Handover.meadowCardKey == "whatsNew.meadow.v1", "the flag's name (d1)")
+        try expect(Handover.meadowCardKey != Handover.webCardKey, "its own flag")
+    }
+    check("meadowCardOnceForUpgraders", meadowCardOnceForUpgraders)
+    func meadowCardNeverForNewUsers() throws {
+        let fresh: Arrival = Arrival.decide(stored: nil, savedSettings: false, onboarded: false, handedOver: false)
+        try expect(fresh == .since31, "a fresh install")
+        var s = Saved(onboarded: false, handedOver: false, arrival: fresh)
+        try expect(launch(s) == .tour, "a new user gets the tour")
+        // The tour marks itself and both cards seen (OnboardingController); and even if the Meadow flag were lost,
+        // a fresh install's arrival is kept, so saved settings since never make it an upgrade.
+        s.onboarded = true
+        s.webShown = true
+        try expect(launch(s) == .nothing, "after the tour")
+        let later: Arrival = Arrival.decide(stored: fresh.rawValue, savedSettings: true, onboarded: true, handedOver: false)
+        let lost = Saved(onboarded: true, handedOver: false, arrival: later)
+        try expect(launch(lost) == .nothing, "a new user never gets the card, flag or not")
+    }
+    check("meadowCardNeverForNewUsers", meadowCardNeverForNewUsers)
+    func meadowCardLeavesTheSharksHandoverIntact() throws {
+        // Someone coming from ASCII Sharks straight to 3.1: the hand-over skips the tour, then the Web card as ever;
+        // the Meadow card waits for the next launch, so only one card shows at a time.
+        let steps: [HandoverStep] = Handover.plan(facts(app: url, running: true, settings: Data("{}".utf8)))
+        try expect(steps.contains(.skipWelcome) && steps.contains(.quitSharks) && steps.contains(.importSettings), "plan \(steps)")
+        let arrival: Arrival = Arrival.decide(stored: nil, savedSettings: true, onboarded: true, handedOver: true)
+        try expect(arrival == .before31, "a Sharks user is an upgrade")
+        var s = Saved(onboarded: true, handedOver: true, arrival: arrival)
+        try expect(launch(s) == .webCard, "the Web card first, unchanged")
+        s.webShown = true
+        try expect(launch(s) == .meadowCard, "the Meadow card on the next launch")
+        s.meadowShown = true
+        try expect(launch(s) == .nothing, "then nothing")
+        var tried = Saved(onboarded: true, handedOver: true, arrival: arrival)
+        tried.habitat = .web
+        try expect(launch(tried) == .meadowCard, "found the Web already: straight to the Meadow card")
+        // The old entry point (no arrival) still decides exactly as before 3.1.
+        try expect(welcome(onboarded: true, handedOver: true) == .webCard && welcome(onboarded: true, handedOver: false) == .nothing,
+                   "the four-argument decision is unchanged")
+    }
+    check("meadowCardLeavesTheSharksHandoverIntact", meadowCardLeavesTheSharksHandoverIntact)
     check("handoverLoginItemOnlyFromAnInstalledCopy") {
         try expect(Handover.canAddLoginItem(bundlePath: "/Applications/ASCII Animals.app", onReadOnlyVolume: false), "Applications")
         try expect(Handover.canAddLoginItem(bundlePath: "/Users/x/Applications/ASCII Animals.app", onReadOnlyVolume: false), "~/Applications")

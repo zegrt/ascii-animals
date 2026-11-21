@@ -100,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func settingsChanged(_ old: OceanKit.Settings, _ new: OceanKit.Settings) {
         director?.settingsChanged(old: old, new: new)
+        WhatsNewCard.settingsChanged(new)
         settingsModel.refresh()
         menu?.apply(new)
         if old.pauseShortcut != new.pauseShortcut { hotKey.setEnabled(new.pauseShortcut) }
@@ -182,8 +183,9 @@ if CommandLine.arguments.contains("--uninstall") {
     exit(0)
 }
 
-// Debug: render the welcome or About screen to a PNG, or write the menu's outline, and exit.
+// Debug: render the welcome, the what's-new card or About to a PNG, or write the menu's outline, and exit.
 let snapshots: [(String, (URL) -> Void)] = [("--snapshot-onboarding", OnboardingController.snapshot(to:)),
+                                            ("--snapshot-whatsnew", WhatsNewCard.snapshot(to:)),
                                             ("--snapshot-about", AboutWindow.snapshot(to:)),
                                             ("--snapshot-menu", StatusMenu.snapshot(to:))]
 for (flag, render) in snapshots {
