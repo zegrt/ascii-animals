@@ -66,15 +66,17 @@ enum WhatsNewCard {
         update(preview: preview) { $0.shown() }
     }
 
-    /// A card that reached the screen: when its showing counts. PROOF STUB (fix round 3): at once, as the presenter's
-    /// mark did.
+    /// A card that reached the screen: its showing counts, and is saved, once its content is reached
+    /// (`WhatsNewSession.contentReached`), not when the panel opens; quitting before that spends nothing.
     static func track(_ session: WhatsNewSession, preview: Bool) {
-        markShown(preview: preview)
+        session.onContentReached = { markShown(preview: preview) }
     }
 
     /// A card went (`reason`), its content reached or not (`WhatsNewSession.contentReached`): what its showing comes
-    /// to. Cut short before its content, it is owed again (`WhatsNew.Showings.closed`).
+    /// to, saved at once. Cut short before its content, it never counted (`track`) and stays owed; an answer is an
+    /// answer, reached or not.
     static func cardWent(_ reason: WhatsNew.CloseReason, reached: Bool, preview: Bool) {
+        guard reached || reason.endsForGood else { return }
         update(preview: preview) { $0.closed(reason, reached: reached) }
     }
 

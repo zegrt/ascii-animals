@@ -358,6 +358,8 @@ final class OnboardingSession: NSObject {
     private var travelled: CGFloat = 0
     private var lastPointer: NSPoint?
     private var finishing = false
+    /// It counted as seen (`markSeen`): its 3 s mark in front, or an answer.
+    private var acknowledged = false
     private var tornDown = false
     private var typingPause = 0
     private let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -497,19 +499,20 @@ final class OnboardingSession: NSObject {
         case otherWindow
         /// The displays changed.
         case screens
+        /// Nobody can see the screen (asleep, locked, the screensaver) before it counted as seen.
+        case hidden
     }
 
     /// Its 3 s mark: in front, key and on a screen that can be seen, it counts as seen; otherwise it goes, still owed.
-    /// PROOF STUB (fix round 3): `seeable` not read yet.
     func deadlineReached(active: Bool, key: Bool, seeable: Bool) {
         guard !finishing else { return }
-        if active, key { markSeen() } else { finish(fast: false, seen: false) }
+        if active, key, seeable { markSeen() } else { finish(fast: false, seen: false) }
     }
 
     func interrupted(_ by: Interruption) {
         switch by {
         case .leftApp: finish(fast: false, seen: false)
-        case .otherWindow, .screens: finish(fast: true, seen: false)
+        case .otherWindow, .screens, .hidden: finish(fast: true, seen: false)
         }
     }
 
@@ -530,6 +533,11 @@ final class OnboardingSession: NSObject {
     /// The machine's state changed: the habitat behind follows the previews' policy.
     func powerChanged(_ i: PowerInputs) {
         guard !finishing else { return }
+        // Before its 3 s mark, a screen nobody can see cuts it short, still owed (as a display change does).
+        if !acknowledged, PowerPolicy.preview(i) == .paused {
+            interrupted(.hidden)
+            return
+        }
         ocean.run(habitatMode(i))
     }
 
@@ -707,6 +715,7 @@ final class OnboardingSession: NSObject {
 
     /// The dissolve: the words go first, then the ocean melts into the desktop's own.
     private func markSeen() {
+        acknowledged = true
         onSeen?()
         onSeen = nil
     }

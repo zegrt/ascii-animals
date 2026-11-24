@@ -63,35 +63,44 @@ public enum WhatsNew {
         case stop
     }
 
-    /// The waiting card, looked at once a second from about a second after launch. Clear at the first look, it opens
-    /// at once; after a wait (a locked or sleeping screen after a night-time update) it opens only once the screen has
-    /// stayed clear for a full second, so a wake that relocks at once doesn't spend it. Every look reads the live
-    /// state, so the look that opens it is the latest word.
+    /// The waiting card, looked at from about a second after launch. Clear at the first look, it opens at once; after
+    /// a wait (a locked or sleeping screen after a night-time update) it opens only once the screen has stayed clear
+    /// for a full second (`clearFor`), timed from its first clear look, so a burst of wake notifications or a wake that
+    /// relocks at once doesn't spend it. Every look reads the live state, so the look that opens it is the latest word.
     public struct Waiter: Equatable, Sendable {
+        /// How long the screen stays clear before a card that waited opens.
+        public static let clearFor: Double = 1
         private var first = true
-        private var clear = 0
+        /// When the screen was first seen clear since the last wait, on the presenter's clock.
+        private var clearSince: Double?
 
         public init() {}
 
-        public mutating func look(_ v: Verdict) -> Step {
+        public mutating func look(_ v: Verdict, at now: Double) -> Step {
             defer { first = false }
             switch v {
             case .drop:
                 return .stop
             case .wait:
-                clear = 0
+                clearSince = nil
                 return .keepWaiting
             case .show:
                 if first { return .open }
-                clear += 1
-                return clear >= 2 ? .open : .keepWaiting
+                let since: Double = clearSince ?? now
+                clearSince = since
+                return now - since >= Waiter.clearFor ? .open : .keepWaiting
             }
+        }
+
+        /// Seconds until the screen has been clear for `clearFor`; nil when it isn't clear.
+        public func confirmIn(at now: Double) -> Double? {
+            clearSince.map { (since: Double) -> Double in max(0, since + Waiter.clearFor - now) }
         }
 
         /// The card couldn't be put on a usable display after all: it waits again, unmarked.
         public mutating func openFailed() {
             first = false
-            clear = 0
+            clearSince = nil
         }
     }
 
@@ -103,12 +112,12 @@ public enum WhatsNew {
     public final class Presenter {
         private var waiter = Waiter()
         public private(set) var finished = false
-        /// The last look was clear but not yet for a full second: look again in one.
-        private var confirming = false
+        /// The last look was clear but not yet for a full second: look again when it will have been (seconds).
+        private var confirming: Double?
         private let moment: () -> Moment
         private let open: () -> Bool
         private let mark: () -> Void
-        /// Seconds on a steady clock (the checks fake it). PROOF STUB (fix round 3): not read yet.
+        /// Seconds on a steady clock (the checks fake it).
         private let clock: () -> Double
 
         public init(moment: @escaping () -> Moment, open: @escaping () -> Bool, mark: @escaping () -> Void,
@@ -123,10 +132,12 @@ public enum WhatsNew {
         public func look() -> Step {
             guard !finished else { return .stop }
             let v: Verdict = verdict(moment())
-            confirming = false
-            switch waiter.look(v) {
+            let now: Double = clock()
+            confirming = nil
+            switch waiter.look(v, at: now) {
             case .keepWaiting:
-                confirming = v == .show
+                // Never sooner than a twentieth of a second: a timer that fires a hair early looks once more.
+                confirming = v == .show ? waiter.confirmIn(at: now).map { (s: Double) -> Double in max(0.05, s) } : nil
                 return .keepWaiting
             case .stop:
                 finished = true
@@ -148,11 +159,12 @@ public enum WhatsNew {
         /// The longest a waiting card goes without a look of its own, so a missed notification can't strand it.
         public static let backstop: Double? = 60
 
-        /// When the app should look again on its own, in seconds: 1 to confirm a clear look, else `backstop`; nil when
-        /// finished. Any change in between looks at once.
+        /// When the app should look again on its own, in seconds: when the screen will have been clear for a full
+        /// second, to confirm it, else `backstop`; nil when finished. Any change in between looks at once, and doesn't
+        /// move the confirmation.
         public var nextLook: Double? {
             if finished { return nil }
-            return confirming ? 1 : Presenter.backstop
+            return confirming ?? Presenter.backstop
         }
     }
 

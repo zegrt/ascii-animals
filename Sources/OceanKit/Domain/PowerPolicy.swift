@@ -90,14 +90,19 @@ public enum Tour {
         public var asksForEffect: Bool { self == .pointer || self == .splash }
     }
 
-    /// The habitat behind the tour. PROOF STUB (fix round 3): the previews' rule as it stands.
+    /// The habitat behind the tour: the previews' rule, except that Low Power Mode alone keeps it live (at the
+    /// economy rate) while the tour is up: it is short, comes once, and asks for movement. Reduce Motion (the person
+    /// asked for none) and heat still hold a still.
     public static func mode(_ i: PowerInputs) -> RunMode {
-        PowerPolicy.preview(i)
+        var c = i
+        c.lowPowerAnimates = true
+        return PowerPolicy.preview(c)
     }
 
-    /// The steps shown. PROOF STUB (fix round 3): all of them.
+    /// The steps shown: a step that asks for an effect only while the habitat behind can show one (not a still).
     public static func steps(_ i: PowerInputs) -> [Step] {
-        Step.allCases
+        let moves: Bool = mode(i) != .still
+        return Step.allCases.filter { (s: Step) -> Bool in moves || !s.asksForEffect }
     }
 
     /// The step after `s` for the machine's state now; nil after the last.
