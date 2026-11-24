@@ -3,18 +3,15 @@ import OceanKit
 
 /// Shows a still of the ocean as the system wallpaper (lock screen, Mission
 /// Control, menu-bar tint) and puts the user's own wallpaper back on quit.
-/// The rules live in WallpaperMemory.
+/// The rules live in WallpaperKeeper and WallpaperMemory; this renders the stills and is their desktop.
 final class SystemWallpaper {
     static let memoryKey = "wallpaperMemory.v1"
-    static let keepStills = 3
     /// The hand-over's copy of ASCII Sharks' wallpaper memory, taken before its uninstaller removes it.
     static let sharksMemoryCopyKey = "handover.sharksWallpaperMemory"
 
     let stillsFolder: URL
     private let renderer: OceanRenderer
-    private var memory: WallpaperMemory
-    /// ASCII Sharks' stills: one left up (Sharks force-quit) is never taken for the user's wallpaper.
-    private let sharks: ForeignStills
+    private let keeper: WallpaperKeeper
     private var pending: DispatchWorkItem?
     /// Bumped by restoreAll(); a still that finishes rendering after a restore is dropped.
     private var generation = 0
@@ -28,17 +25,22 @@ final class SystemWallpaper {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         stillsFolder = support.appendingPathComponent("ASCII Animals/Stills", isDirectory: true)
         try? FileManager.default.createDirectory(at: stillsFolder, withIntermediateDirectories: true)
-        if let data = UserDefaults.standard.data(forKey: SystemWallpaper.memoryKey),
-           let m = try? JSONDecoder().decode(WallpaperMemory.self, from: data) {
-            memory = m
-        } else {
-            memory = WallpaperMemory()
-        }
+        let memory: WallpaperMemory = UserDefaults.standard.data(forKey: SystemWallpaper.memoryKey)
+            .flatMap { try? JSONDecoder().decode(WallpaperMemory.self, from: $0) } ?? WallpaperMemory()
         let sharksMemory = (UserDefaults(suiteName: Handover.sharksBundleID)?.data(forKey: Handover.sharksWallpaperKey)
             ?? UserDefaults.standard.data(forKey: SystemWallpaper.sharksMemoryCopyKey))
             .flatMap { try? JSONDecoder().decode(WallpaperMemory.self, from: $0) }
-        sharks = ForeignStills(folder: support.appendingPathComponent(Handover.sharksStillsFolder, isDirectory: true),
-                               memory: sharksMemory ?? WallpaperMemory())
+        // ASCII Sharks' stills: one left up (Sharks force-quit) is never taken for the user's wallpaper.
+        let sharks = ForeignStills(folder: support.appendingPathComponent(Handover.sharksStillsFolder, isDirectory: true),
+                                   memory: sharksMemory ?? WallpaperMemory())
+        keeper = WallpaperKeeper(memory: memory, stillsFolder: stillsFolder, foreign: sharks,
+                                 desktop: Desktop(stillsFolder: stillsFolder),
+                                 save: { m in
+                                     if let data = try? JSONEncoder().encode(m) {
+                                         UserDefaults.standard.set(data, forKey: SystemWallpaper.memoryKey)
+                                     }
+                                 },
+                                 log: { Log.write($0) })
     }
 
     /// Debounced: looks changes come in bursts (sliders, appearance switches).
@@ -53,11 +55,9 @@ final class SystemWallpaper {
         guard settings.matchSystemWallpaper else { return }
         for screen in NSScreen.screens {
             let key = SystemWallpaper.key(for: screen)
-            guard let current = SystemWallpaper.entry(for: screen) else { continue }
-            guard memory.decide(screen: key, current: current, stillsFolder: stillsFolder, foreign: sharks) == .apply else { continue }
-            save() // the original is on disk before anything changes
+            guard keeper.mayApply(on: key) else { continue }   // the original is on disk before anything changes
             let size = screen.frame.size, scale = screen.backingScaleFactor
-            let url = stillsFolder.appendingPathComponent("still-\(key)-\(Int(Date().timeIntervalSince1970 * 1000)).png")
+            let url = keeper.newStill(for: key)
             let gen = generation
             work.async { [weak self, renderer] in
                 do {
@@ -65,7 +65,7 @@ final class SystemWallpaper {
                                                        systemIsDark: systemIsDark, accent: accent,
                                                        seed: UInt64.random(in: 1...UInt64.max), renderer: renderer)
                     try StillRenderer.writePNG(img, to: url)
-                    DispatchQueue.main.async { self?.set(url, on: screen, key: key, generation: gen) }
+                    DispatchQueue.main.async { self?.set(url, key: key, generation: gen) }
                 } catch {
                     Log.write("still failed: \(error)")
                 }
@@ -73,62 +73,30 @@ final class SystemWallpaper {
         }
     }
 
-    private func set(_ url: URL, on screen: NSScreen, key: String, generation gen: Int) {
-        // Re-check: a restore may have happened, or the wallpaper changed, while the still rendered.
-        guard gen == generation, NSScreen.screens.contains(screen), let current = SystemWallpaper.entry(for: screen),
-              memory.decide(screen: key, current: current, stillsFolder: stillsFolder, foreign: sharks) == .apply else {
+    private func set(_ url: URL, key: String, generation gen: Int) {
+        // A restore may have happened while the still rendered.
+        guard gen == generation else {
             try? FileManager.default.removeItem(at: url)
             return
         }
-        do {
-            try NSWorkspace.shared.setDesktopImageURL(url, for: screen, options: [
-                .imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue,
-                .allowClipping: true,
-                .fillColor: NSColor.black,
-            ])
-        } catch {
-            Log.write("could not set wallpaper: \(error)")
-        }
-        prune(key: key, keep: url)
-    }
-
-    /// Keep the newest few stills per screen; never the one in use.
-    private func prune(key: String, keep: URL) {
-        let fm = FileManager.default
-        let mine = ((try? fm.contentsOfDirectory(at: stillsFolder, includingPropertiesForKeys: nil)) ?? [])
-            .filter { $0.lastPathComponent.hasPrefix("still-\(key)-") }
-            .sorted { $0.lastPathComponent > $1.lastPathComponent }
-        for old in mine.dropFirst(SystemWallpaper.keepStills) where old != keep {
-            try? fm.removeItem(at: old)
-        }
+        keeper.commit(url, on: key)
     }
 
     /// Put each screen's own wallpaper back wherever our still is showing.
-    func restoreAll() {
+    @discardableResult
+    func restoreAll() -> RestoreOutcome {
         pending?.cancel()
         generation += 1
-        for screen in NSScreen.screens {
-            let key = SystemWallpaper.key(for: screen)
-            guard let current = SystemWallpaper.entry(for: screen),
-                  let target = memory.restoreTarget(screen: key, current: current, stillsFolder: stillsFolder, foreign: sharks) else { continue }
-            var options: [NSWorkspace.DesktopImageOptionKey: Any] = [:]
-            if let s = target.scaling { options[.imageScaling] = s }
-            if let c = target.allowClipping { options[.allowClipping] = c }
-            if let f = target.fillColor, f.count == 4 {
-                options[.fillColor] = NSColor(srgbRed: f[0], green: f[1], blue: f[2], alpha: f[3])
-            }
-            do {
-                try NSWorkspace.shared.setDesktopImageURL(target.url, for: screen, options: options)
-                memory.forget(screen: key)
-            } catch {
-                Log.write("could not restore wallpaper: \(error)")
-            }
-        }
-        save()
+        return keeper.restoreAll()
     }
 
-    private func save() {
-        if let data = try? JSONEncoder().encode(memory) { UserDefaults.standard.set(data, forKey: SystemWallpaper.memoryKey) }
+    /// A display came back, the Space changed or the Mac woke.
+    func reconcile(matching: Bool) {
+        if !matching {
+            pending?.cancel()
+            generation += 1
+        }
+        keeper.reconcile(matching: matching)
     }
 
     static func key(for screen: NSScreen) -> String {
@@ -145,5 +113,39 @@ final class SystemWallpaper {
         }
         return WallpaperEntry(url: url, scaling: (o[.imageScaling] as? NSNumber)?.intValue,
                               allowClipping: (o[.allowClipping] as? NSNumber)?.boolValue, fillColor: fill)
+    }
+
+    /// The real desktop: NSWorkspace on the attached screens, and the stills folder on disk. Main thread only.
+    private final class Desktop: DesktopImages {
+        let stillsFolder: URL
+        init(stillsFolder: URL) { self.stillsFolder = stillsFolder }
+
+        struct NoScreen: Error, CustomStringConvertible {
+            let key: String
+            var description: String { "display \(key) is not attached" }
+        }
+
+        var displays: [String] { NSScreen.screens.map { SystemWallpaper.key(for: $0) } }
+
+        private func screen(_ key: String) -> NSScreen? { NSScreen.screens.first { SystemWallpaper.key(for: $0) == key } }
+
+        func current(on display: String) -> WallpaperEntry? { screen(display).flatMap { SystemWallpaper.entry(for: $0) } }
+
+        func set(_ entry: WallpaperEntry, on display: String) throws {
+            guard let s = screen(display) else { throw NoScreen(key: display) }
+            var options: [NSWorkspace.DesktopImageOptionKey: Any] = [:]
+            if let v = entry.scaling { options[.imageScaling] = v }
+            if let c = entry.allowClipping { options[.allowClipping] = c }
+            if let f = entry.fillColor, f.count == 4 {
+                options[.fillColor] = NSColor(srgbRed: f[0], green: f[1], blue: f[2], alpha: f[3])
+            }
+            try NSWorkspace.shared.setDesktopImageURL(entry.url, for: s, options: options)
+        }
+
+        func stillFiles() -> [URL] {
+            (try? FileManager.default.contentsOfDirectory(at: stillsFolder, includingPropertiesForKeys: nil)) ?? []
+        }
+
+        func removeFile(_ url: URL) throws { try FileManager.default.removeItem(at: url) }
     }
 }

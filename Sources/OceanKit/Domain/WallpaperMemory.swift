@@ -93,3 +93,124 @@ public struct WallpaperMemory: Codable, Equatable, Sendable {
 
     public mutating func forget(screen: String) { originals[screen] = nil }
 }
+
+/// The desktop-image API as the wallpaper keeper sees it: NSWorkspace and the stills folder in the app, a fake with
+/// Spaces in the checks. Displays are named by `SystemWallpaper.key(for:)`; each call reads or changes the Space in view.
+public protocol DesktopImages: AnyObject {
+    /// The displays attached now.
+    var displays: [String] { get }
+    /// What the display shows on the Space in view; nil when it can't be read.
+    func current(on display: String) -> WallpaperEntry?
+    /// Shows `entry` on the display's Space in view.
+    func set(_ entry: WallpaperEntry, on display: String) throws
+    /// The files in the stills folder.
+    func stillFiles() -> [URL]
+    func removeFile(_ url: URL) throws
+}
+
+/// What a restore did.
+public struct RestoreOutcome: Equatable, Sendable {
+    /// Displays whose own picture went back.
+    public var restored: [String] = []
+    /// Displays where it couldn't be put back.
+    public var failed: [String] = []
+    public init() {}
+    /// Whether uninstall keeps the stills and the memory of the user's wallpaper.
+    public var keepsRecovery: Bool { false }
+    /// What uninstall says about the wallpaper, if anything.
+    public func uninstallNote(stillsFolder: URL) -> String? { nil }
+}
+
+/// Changes and restores the system wallpaper through `DesktopImages`, keeping `WallpaperMemory` on disk (`save`).
+/// The app renders the stills; this decides where they go, what they cover and what comes back.
+public final class WallpaperKeeper {
+    public static let keepStills = 3
+    /// How a still is shown: scale proportionally up or down (NSImageScaling 3), clipping allowed, black fill.
+    public static func stillEntry(_ url: URL) -> WallpaperEntry {
+        WallpaperEntry(url: url, scaling: 3, allowClipping: true, fillColor: [0, 0, 0, 1])
+    }
+
+    public private(set) var memory: WallpaperMemory
+    public let stillsFolder: URL
+    public let foreign: ForeignStills
+    private let desktop: DesktopImages
+    private let save: (WallpaperMemory) -> Void
+    private let log: (String) -> Void
+
+    public init(memory: WallpaperMemory, stillsFolder: URL, foreign: ForeignStills = ForeignStills(folder: URL(fileURLWithPath: "/nonexistent")),
+                desktop: DesktopImages, save: @escaping (WallpaperMemory) -> Void = { _ in },
+                log: @escaping (String) -> Void = { _ in }) {
+        self.memory = memory
+        self.stillsFolder = stillsFolder
+        self.foreign = foreign
+        self.desktop = desktop
+        self.save = save
+        self.log = log
+    }
+
+    /// Before rendering: may a still replace what this display shows? The original is saved before anything changes.
+    public func mayApply(on display: String) -> Bool {
+        guard let current = desktop.current(on: display) else { return false }
+        let ok: Bool = memory.decide(screen: display, current: current, stillsFolder: stillsFolder, foreign: foreign) == .apply
+        if ok { save(memory) }
+        return ok
+    }
+
+    /// Where the next still for this display is written.
+    public func newStill(for display: String) -> URL {
+        stillsFolder.appendingPathComponent("still-\(display)-\(Int(Date().timeIntervalSince1970 * 1000)).png")
+    }
+
+    /// The still is written: put it up if it still may replace what the display shows. Returns whether it went up.
+    @discardableResult
+    public func commit(_ still: URL, on display: String) -> Bool {
+        // Re-check: the wallpaper may have changed, or the display gone, while the still rendered.
+        guard desktop.displays.contains(display), let current = desktop.current(on: display),
+              memory.decide(screen: display, current: current, stillsFolder: stillsFolder, foreign: foreign) == .apply else {
+            try? desktop.removeFile(still)
+            return false
+        }
+        do {
+            try desktop.set(WallpaperKeeper.stillEntry(still), on: display)
+        } catch {
+            log("could not set wallpaper: \(error)")
+        }
+        prune(display: display, keep: still)
+        return true
+    }
+
+    /// Keep the newest few stills per display; never the one in use.
+    private func prune(display: String, keep: URL) {
+        let mine: [URL] = desktop.stillFiles()
+            .filter { $0.lastPathComponent.hasPrefix("still-\(display)-") }
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+        for old in mine.dropFirst(WallpaperKeeper.keepStills) where old != keep {
+            try? desktop.removeFile(old)
+        }
+    }
+
+    /// Put each display's own wallpaper back wherever our still is showing.
+    @discardableResult
+    public func restoreAll() -> RestoreOutcome {
+        var out = RestoreOutcome()
+        for display in desktop.displays {
+            guard let current = desktop.current(on: display),
+                  let target = memory.restoreTarget(screen: display, current: current, stillsFolder: stillsFolder, foreign: foreign) else { continue }
+            do {
+                try desktop.set(target, on: display)
+                memory.forget(screen: display)
+                out.restored.append(display)
+            } catch {
+                log("could not restore wallpaper: \(error)")
+                out.failed.append(display)
+            }
+        }
+        save(memory)
+        return out
+    }
+
+    /// A display came back, the Space changed or the Mac woke. Nothing happens here today when matching is off;
+    /// when it's on, the app makes a fresh still.
+    @discardableResult
+    public func reconcile(matching: Bool) -> RestoreOutcome? { nil }
+}
