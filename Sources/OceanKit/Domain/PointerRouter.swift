@@ -67,14 +67,16 @@ public struct ListedWindow: Equatable, Sendable {
 /// Each event window number's verdict, remembered: the window list is read for a number not seen before (one read
 /// fills the map for every listed window), and forgotten on a Space or display change (`clear`). Moving over the
 /// desktop then costs a map lookup. A number the list does not have is not remembered, so a window listed late is
-/// found on a later event; after such a miss the list is read again at most once a second (`missRetry`), so misses
-/// that continue keep list reads off the per-move path.
+/// found on a later event; after such a miss the list is read again for that number at most once a second
+/// (`missRetry`), so misses that continue keep list reads off the per-move path. The wait is the missed number's own:
+/// any other number is looked up as before. Misses are dropped after their second and on a Space or display change.
 public final class EventWindowVerdicts {
     public private(set) var reads: Int = 0
     private var known: [Int: Int] = [:]
-    private var lastMiss: TimeInterval? = nil
+    /// Each missed number and when it missed.
+    private var misses: [Int: TimeInterval] = [:]
     /// Missed numbers waiting out their retry (for the checks).
-    public var missCount: Int { lastMiss == nil ? 0 : 1 }
+    public var missCount: Int { misses.count }
     private let read: () -> [ListedWindow]
     private let now: () -> TimeInterval
     /// A bound on the map; past it, it starts again (one more read).
@@ -92,22 +94,32 @@ public final class EventWindowVerdicts {
         guard number > 0 else { return (.unknown, nil) }
         if let layer = known[number] { return (EventWindowVerdicts.verdict(layer), layer) }
         let t: TimeInterval = now()
-        if let m = lastMiss, t - m < EventWindowVerdicts.missRetry { return (.unknown, nil) }
+        if let m = misses[number], t - m < EventWindowVerdicts.missRetry { return (.unknown, nil) }
         if known.count >= capacity { known.removeAll(keepingCapacity: true) }
         reads += 1
         for w in read() { known[w.number] = w.layer }
+        dropMisses(before: t)
         guard let layer = known[number] else {
-            lastMiss = t
+            misses[number] = t
             return (.unknown, nil)
         }
-        lastMiss = nil
         return (EventWindowVerdicts.verdict(layer), layer)
     }
 
-    /// A Space or display change: forget every verdict.
+    /// A Space or display change: forget every verdict and every miss.
     public func clear() {
         known.removeAll(keepingCapacity: true)
-        lastMiss = nil
+        misses.removeAll(keepingCapacity: true)
+    }
+
+    /// Runs only after a list read (at most once a second per missed number): drops misses whose second is up, and
+    /// those the read just found.
+    private func dropMisses(before t: TimeInterval) {
+        guard !misses.isEmpty else { return }
+        let retry: TimeInterval = EventWindowVerdicts.missRetry
+        misses = misses.filter { (entry: (key: Int, value: TimeInterval)) -> Bool in
+            t - entry.value < retry && known[entry.key] == nil
+        }
     }
 
     private static func verdict(_ layer: Int) -> EventWindow {
