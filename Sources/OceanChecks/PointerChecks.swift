@@ -109,4 +109,71 @@ func pointerChecks() {
         let want: [ListedWindow] = [ListedWindow(number: banner, layer: 21), ListedWindow(number: finderDesktop, layer: desktopIconLayer)]
         try expect(parsed == want, "parsed \(parsed)")
     }
+
+    // Right-size fix round 1 (review-r1b @ c74a9c6).
+
+    /// Finding 1: the point comes from the same event as the window number, not from the cursor when the callback runs.
+    func clickTakesTheEventsOwnPoint() throws {
+        let verdicts = EventWindowVerdicts(read: { listed })
+        // A click on bare desktop, banner up; by the time the callback runs the cursor is over the app window.
+        let overWindow: PointerEventFacts = PointerEventFacts(window: finderDesktop, location: bare, cursorAtCallback: inSafari)
+        let a: PointerTarget? = PointerRouter.route(overWindow, verdicts: verdicts, occluders: { withBanner }, viewports: viewports).target
+        try expect(a == PointerTarget(viewportID: 0, local: bare), "desktop click, cursor over a window at callback: \(String(describing: a))")
+        // A click near the right edge of the built-in screen; by the callback the cursor is on the other display.
+        let edge: CGPoint = CGPoint(x: 1700, y: 900)
+        let crossed: PointerEventFacts = PointerEventFacts(window: finderDesktop, location: edge, cursorAtCallback: CGPoint(x: 1900, y: 100))
+        let b: PointerTarget? = PointerRouter.route(crossed, verdicts: verdicts, occluders: { withBanner }, viewports: viewports).target
+        try expect(b == PointerTarget(viewportID: 0, local: edge), "desktop click, cursor on the other display at callback: \(String(describing: b))")
+    }
+    check("pointerClickTakesTheEventsOwnPoint", clickTakesTheEventsOwnPoint)
+
+    func downWithNoEventPointDoesNothing() throws {
+        let verdicts = EventWindowVerdicts(read: { listed })
+        let noPoint: PointerEventFacts = PointerEventFacts(window: finderDesktop, location: nil, cursorAtCallback: bare)
+        let a: PointerTarget? = PointerRouter.route(noPoint, verdicts: verdicts, occluders: { noBanner }, viewports: viewports).target
+        try expect(a == nil, "a down with no point of its own, cursor on bare desktop: \(String(describing: a))")
+        let noNumber: PointerEventFacts = PointerEventFacts(window: 0, location: nil, cursorAtCallback: bare)
+        let b: PointerTarget? = PointerRouter.route(noNumber, verdicts: verdicts, occluders: { noBanner }, viewports: viewports).target
+        try expect(b == nil, "no point and no window number: \(String(describing: b))")
+        try expect(verdicts.reads == 0, "an event with no point reads no list: \(verdicts.reads)")
+    }
+    check("pointerDownWithNoEventPointDoesNothing", downWithNoEventPointDoesNothing)
+
+    /// Finding 2 (the miss part): a window number not in the list is not remembered, so a desktop window that shows up
+    /// in the list late is found on a later event; the list is read for misses at most about once a second.
+    func missedDesktopWindowFoundLater() throws {
+        let late: Int = 140
+        var current: [ListedWindow] = listed
+        var t: TimeInterval = 100
+        let verdicts = EventWindowVerdicts(read: { current }, now: { t })
+        let want: PointerTarget = PointerTarget(viewportID: 0, local: bare)
+        let first: PointerTarget? = route(bare, late, verdicts, withBanner)
+        try expect(first == nil && verdicts.reads == 1, "not yet listed: rectangles (the banner's), one read: \(String(describing: first)), \(verdicts.reads)")
+        current = listed + [ListedWindow(number: late, layer: desktopLayer)]
+        t = 100.5
+        let soon: PointerTarget? = route(bare, late, verdicts, withBanner)
+        try expect(soon == nil && verdicts.reads == 1, "half a second later: no read on the move path: \(String(describing: soon)), \(verdicts.reads)")
+        t = 101.1
+        let later: PointerTarget? = route(bare, late, verdicts, withBanner)
+        try expect(later == want, "a second later, now listed at the desktop layer: \(String(describing: later))")
+        try expect(verdicts.reads == 2, "reads \(verdicts.reads)")
+        t = 101.2
+        let after: PointerTarget? = route(bare, late, verdicts, withBanner)
+        try expect(after == want && verdicts.reads == 2, "then remembered: \(String(describing: after)), \(verdicts.reads)")
+    }
+    check("pointerMissedDesktopWindowFoundLater", missedDesktopWindowFoundLater)
+
+    func missesReadAboutOnceASecond() throws {
+        // A minute of moves at 60 a second, each handed to a window number the list never has.
+        var t: TimeInterval = 100
+        let verdicts = EventWindowVerdicts(read: { listed }, now: { t })
+        for i in 0..<3600 {
+            t = 100 + Double(i) / 60
+            let v: EventWindow = verdicts.verdict(for: 777).0
+            try expect(v == .unknown, "move \(i): \(v)")
+        }
+        try expect(verdicts.reads >= 1 && verdicts.reads <= 61, "list reads in a minute of misses: \(verdicts.reads)")
+        print("  a minute of misses (3600 moves): \(verdicts.reads) list read(s)")
+    }
+    check("pointerMissesReadAboutOnceASecond", missesReadAboutOnceASecond)
 }

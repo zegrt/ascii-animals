@@ -71,10 +71,14 @@ public final class EventWindowVerdicts {
     public private(set) var reads: Int = 0
     private var known: [Int: Int?] = [:]
     private let read: () -> [ListedWindow]
+    private let now: () -> TimeInterval
     /// A bound on the map; past it, it starts again (one more read).
     private let capacity: Int = 512
 
-    public init(read: @escaping () -> [ListedWindow]) { self.read = read }
+    public init(read: @escaping () -> [ListedWindow], now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+        self.read = read
+        self.now = now
+    }
 
     /// The verdict for `number` (0 or less: the event carries none) and the listed layer, if any.
     public func verdict(for number: Int) -> (EventWindow, layer: Int?) {
@@ -108,5 +112,29 @@ extension PointerRouter {
         case .window: return nil
         case .unknown: return route(p, occluders: occluders(), viewports: viewports)
         }
+    }
+}
+
+/// One pointer event as the monitor read it: the window number and the location carried by the event itself (top-left
+/// global, nil when the event has none), and the cursor when the callback ran (for the trace).
+public struct PointerEventFacts: Equatable, Sendable {
+    public var window: Int
+    public var location: CGPoint?
+    public var cursorAtCallback: CGPoint?
+    public init(window: Int, location: CGPoint?, cursorAtCallback: CGPoint?) {
+        self.window = window
+        self.location = location
+        self.cursorAtCallback = cursorAtCallback
+    }
+}
+
+extension PointerRouter {
+    /// The ocean an event goes to, with the event window's verdict and listed layer (for the trace).
+    public static func route(_ e: PointerEventFacts, verdicts: EventWindowVerdicts, occluders: () -> [CGRect],
+                             viewports: [Viewport]) -> (target: PointerTarget?, verdict: EventWindow, layer: Int?) {
+        // 5db562e: the point is the cursor when the callback runs.
+        let (verdict, layer) = verdicts.verdict(for: e.window)
+        guard let p = e.cursorAtCallback ?? e.location else { return (nil, verdict, layer) }
+        return (route(p, eventWindow: verdict, occluders: occluders, viewports: viewports), verdict, layer)
     }
 }
