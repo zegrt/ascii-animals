@@ -78,3 +78,31 @@ public enum PowerPolicy {
         return r
     }
 }
+
+/// The welcome's tour (the full-screen first-launch welcome): how the habitat behind it runs, and which of its steps
+/// it shows. Its steps ask for effects only where the habitat can show them.
+public enum Tour {
+    /// The tour's steps in order (the app's `OnboardingBeat`, the same raw values).
+    public enum Step: Int, CaseIterable, Sendable {
+        case habitat, hello, pointer, splash, menu, choose, dive
+
+        /// Asks the person to make the habitat react: "Move your pointer", "Click for a splash".
+        public var asksForEffect: Bool { self == .pointer || self == .splash }
+    }
+
+    /// The habitat behind the tour. PROOF STUB (fix round 3): the previews' rule as it stands.
+    public static func mode(_ i: PowerInputs) -> RunMode {
+        PowerPolicy.preview(i)
+    }
+
+    /// The steps shown. PROOF STUB (fix round 3): all of them.
+    public static func steps(_ i: PowerInputs) -> [Step] {
+        Step.allCases
+    }
+
+    /// The step after `s` for the machine's state now; nil after the last.
+    public static func next(after s: Step, _ i: PowerInputs) -> Step? {
+        let shown: [Step] = steps(i)
+        return shown.first { (t: Step) -> Bool in t.rawValue > s.rawValue }
+    }
+}

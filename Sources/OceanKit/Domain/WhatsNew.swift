@@ -108,11 +108,15 @@ public enum WhatsNew {
         private let moment: () -> Moment
         private let open: () -> Bool
         private let mark: () -> Void
+        /// Seconds on a steady clock (the checks fake it). PROOF STUB (fix round 3): not read yet.
+        private let clock: () -> Double
 
-        public init(moment: @escaping () -> Moment, open: @escaping () -> Bool, mark: @escaping () -> Void) {
+        public init(moment: @escaping () -> Moment, open: @escaping () -> Bool, mark: @escaping () -> Void,
+                    clock: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime }) {
             self.moment = moment
             self.open = open
             self.mark = mark
+            self.clock = clock
         }
 
         /// `.open`: it is up and marked. `.stop`: nothing more this launch. Either way the app stops looking.

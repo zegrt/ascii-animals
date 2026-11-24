@@ -328,6 +328,8 @@ func whatsNewCardChecks() {
     func run(_ moments: [WhatsNew.Moment], opens: [Bool] = []) -> (steps: [WhatsNew.Step], opened: Int, marked: Int) {
         var i = 0, opened = 0, marked = 0, tries = 0
         var shown = false
+        // The app's looks are a second apart (`WhatsNew.Presenter.nextLook`).
+        var t: Double = 0
         let p = WhatsNew.Presenter(moment: {
             var m = moments[min(i, moments.count - 1)]
             m.shown = m.shown || shown
@@ -340,12 +342,13 @@ func whatsNewCardChecks() {
         }, mark: {
             marked += 1
             shown = true
-        })
+        }, clock: { t })
         var steps: [WhatsNew.Step] = []
         while i < moments.count + 2 {
             let st: WhatsNew.Step = p.look()
             steps.append(st)
             i += 1
+            t += 1
             if st != .keepWaiting { break }
         }
         return (steps, opened, marked)

@@ -66,8 +66,9 @@ enum WhatsNewCard {
         update(preview: preview) { $0.shown() }
     }
 
-    /// The presenter's mark, once a card is up: the showing is counted.
-    static func cardOpened(preview: Bool) {
+    /// A card that reached the screen: when its showing counts. PROOF STUB (fix round 3): at once, as the presenter's
+    /// mark did.
+    static func track(_ session: WhatsNewSession, preview: Bool) {
         markShown(preview: preview)
     }
 
@@ -102,7 +103,6 @@ enum WhatsNewCard {
         let previewing: Bool = preview
         let p = WhatsNew.Presenter(moment: { moment(app) }, open: { open(app) },
                                    mark: {
-                                       cardOpened(preview: previewing)
                                        // Tools/energy.sh preview waits for this line, bound to its launch id.
                                        if previewing { Log.write(EnergyLog.cardShown(pid: getpid(), launch: Launch.plan.launchID)) }
                                    })
@@ -207,6 +207,7 @@ enum WhatsNewCard {
                 DispatchQueue.main.async { showWhenSeen(app: app) }
             }
         }
+        track(session, preview: previewing)
         session.arm(power: app.signals.inputs)
         if preview { watchPreview(session) }
         return true
@@ -561,8 +562,8 @@ enum WhatsNewCard {
         expect(showings(preview: true).finished, "Keep: never again")
         save(WhatsNew.Showings(), preview: true)
         // Fix round 2 (trimmed). 1: a greeting cut short before its content stays owed.
-        cardOpened(preview: true)
         let cut = make(ProbeHost())
+        track(cut, preview: true)
         cut.arm(power: PowerInputs())
         cut.setHovering(false)
         run(cut, 0.5)
@@ -572,8 +573,8 @@ enum WhatsNewCard {
         expect(owed.due && owed.count == 0,
                "card: a display change 0.5 s in, before its content: still owed (count \(owed.count), due \(owed.due))")
         save(WhatsNew.Showings(), preview: true)
-        cardOpened(preview: true)
         let read = make(ProbeHost())
+        track(read, preview: true)
         read.arm(power: PowerInputs())
         read.setHovering(false)
         run(read, 5)
@@ -581,6 +582,44 @@ enum WhatsNewCard {
         read.close(trying: false, now: true)
         let spent: WhatsNew.Showings = showings(preview: true)
         expect(!spent.due && spent.count == 1, "card: a display change after 5 s seen: the showing counts (count \(spent.count))")
+        save(WhatsNew.Showings(), preview: true)
+
+        // Fix round 3, 2: quitting before the card is readable spends no showing. The card opened as the app opens it
+        // (`track`), seen for `seconds`, then the app quits (no close callback): what the relaunch reads.
+        func relaunchAfterQuit(_ seconds: Double, from start: WhatsNew.Showings) -> WhatsNew.Showings {
+            save(start, preview: true)
+            let quit = make(ProbeHost())
+            track(quit, preview: true)
+            quit.arm(power: PowerInputs())
+            quit.setHovering(false)
+            run(quit, seconds)
+            let saved: WhatsNew.Showings = showings(preview: true)
+            quit.close(trying: false, now: true)
+            return saved
+        }
+        let thirdDue = WhatsNew.Showings(count: 2, ended: false, awake: WhatsNew.Showings.returnAfter)
+        let firstUnread: WhatsNew.Showings = relaunchAfterQuit(0.5, from: WhatsNew.Showings())
+        expect(firstUnread.count == 0 && firstUnread.due,
+               "card: quit 0.5 s into the first showing: the relaunch still owes it (count \(firstUnread.count), due \(firstUnread.due))")
+        let thirdUnread: WhatsNew.Showings = relaunchAfterQuit(0.5, from: thirdDue)
+        expect(thirdUnread.count == 2 && thirdUnread.due && !thirdUnread.finished,
+               "card: quit 0.5 s into the third showing: not gone for good (count \(thirdUnread.count), due \(thirdUnread.due), finished \(thirdUnread.finished))")
+        let firstRead: WhatsNew.Showings = relaunchAfterQuit(5, from: WhatsNew.Showings())
+        expect(firstRead.count == 1 && !firstRead.due, "card: quit after 5 s seen: the showing counts (count \(firstRead.count))")
+        let thirdRead: WhatsNew.Showings = relaunchAfterQuit(5, from: thirdDue)
+        expect(thirdRead.count == 3 && thirdRead.finished, "card: the third read, then quit: never again (count \(thirdRead.count))")
+        save(WhatsNew.Showings(), preview: true)
+        let dismissed = make(ProbeHost())
+        track(dismissed, preview: true)
+        dismissed.onClose = { [weak dismissed] (r: WhatsNew.CloseReason, _: Double) in
+            cardWent(r, reached: dismissed?.contentReached ?? false, preview: true)
+        }
+        dismissed.arm(power: PowerInputs())
+        dismissed.setHovering(false)
+        run(dismissed, 0.5)
+        dismissed.pressCloseForProbe()
+        expect(showings(preview: true).finished, "card: closed 0.5 s in: saved as answered at once, before it has faded")
+        dismissed.close(trying: false, now: true)
         save(WhatsNew.Showings(), preview: true)
 
         // 3: nothing ticks for a card nobody can see.
@@ -633,6 +672,67 @@ enum WhatsNewCard {
             expect(!seen, "welcome: a display change before its content: still owed (not marked seen)")
             // 2: a finishing overlay doesn't eat clicks.
             expect(welcome.ignoresClicks, "welcome: once it is finishing, its overlay lets clicks through")
+
+            // Fix round 3, 1: a screen nobody can see before the 3 s mark cuts either welcome short, still owed; at
+            // the mark it is acknowledged only on a screen that can be seen.
+            var asleepNow = PowerInputs()
+            asleepNow.displaysAsleep = true
+            var saverNow = PowerInputs()
+            saverNow.screensaverRunning = true
+            var lockedNow = PowerInputs()
+            lockedNow.screenLocked = true
+            var batteryNow = PowerInputs()
+            batteryNow.onBattery = true
+            let hiddenStates: [(String, PowerInputs)] = [("the displays asleep", asleepNow), ("the screensaver", saverNow),
+                                                         ("the screen locked", lockedNow)]
+            for isCard in [false, true] {
+                let name: String = isCard ? "Sharks Web welcome" : "welcome"
+                for (what, inputs) in hiddenStates {
+                    let w = OnboardingSession(app: app, renderer: renderer, card: isCard)
+                    var wSeen = false
+                    w.onSeen = { wSeen = true }
+                    w.powerChanged(inputs)
+                    w.deadlineReached(active: true, key: true, seeable: true)
+                    expect(!wSeen && w.ignoresClicks, "\(name): \(what) before its 3 s mark: it goes, still owed (seen \(wSeen))")
+                }
+                let unseen = OnboardingSession(app: app, renderer: renderer, card: isCard)
+                var unseenSeen = false
+                unseen.onSeen = { unseenSeen = true }
+                unseen.deadlineReached(active: true, key: true, seeable: false)
+                expect(!unseenSeen, "\(name): at its 3 s mark on a screen that can't be seen: not acknowledged")
+                let fine = OnboardingSession(app: app, renderer: renderer, card: isCard)
+                var fineSeen = false
+                fine.onSeen = { fineSeen = true }
+                fine.powerChanged(batteryNow)
+                fine.deadlineReached(active: true, key: true, seeable: true)
+                expect(fineSeen && !fine.ignoresClicks, "\(name): on battery, in front at its 3 s mark: seen, and it stays")
+                fine.finish(fast: true)
+            }
+
+            // Fix round 3, 4: the tour never asks for an effect the habitat can't show. Low Power alone: live during
+            // the tour; Reduce Motion: the pointer and splash steps are skipped.
+            var lowPowerNow = PowerInputs()
+            lowPowerNow.lowPowerMode = true
+            var reduceNow = PowerInputs()
+            reduceNow.reduceMotion = true
+            let tour = OnboardingSession(app: app, renderer: renderer, card: false)
+            tour.powerChanged(lowPowerNow)
+            expect(tour.habitatFPS == 15, "tour in Low Power Mode: its habitat live at 15 fps (\(tour.habitatFPS) fps)")
+            tour.finish(fast: true)
+            let webCard = OnboardingSession(app: app, renderer: renderer, card: true)
+            webCard.powerChanged(lowPowerNow)
+            expect(webCard.habitatFPS == 0, "Sharks Web welcome in Low Power Mode: a still, as the previews (\(webCard.habitatFPS) fps)")
+            webCard.finish(fast: true)
+            func walk(_ i: PowerInputs) -> [OnboardingBeat] {
+                var beats: [OnboardingBeat] = [.habitat]
+                while let n = beats.last?.next(i) { beats.append(n) }
+                return beats
+            }
+            let stillWalk: [OnboardingBeat] = walk(reduceNow)
+            expect(!stillWalk.contains(.pointer) && !stillWalk.contains(.splash) && stillWalk.last == .dive,
+                   "tour with Reduce Motion: \(stillWalk.map { (b: OnboardingBeat) -> Int in b.rawValue }) (no pointer or splash step, ends at the dive)")
+            let lowWalk: [OnboardingBeat] = walk(lowPowerNow)
+            expect(lowWalk == OnboardingBeat.allCases, "tour in Low Power Mode: every step (\(lowWalk.count) of 7)")
             withExtendedLifetime(app) {}
         } else {
             expect(false, "welcome: run the probe with the preview flags (its settings in memory)")
@@ -882,7 +982,11 @@ final class WhatsNewSession {
     }
     /// Its content has been in front of the person: `WhatsNew.contentAfter` seconds of the countdown seen, or the
     /// pointer over the card.
-    private(set) var contentReached = false
+    private(set) var contentReached = false {
+        didSet { if contentReached, !oldValue { onContentReached?() } }
+    }
+    /// Told once, when its content is first reached.
+    var onContentReached: (() -> Void)?
 
     /// The Meadow at the person's look and line-up: what the card shows.
     static func meadow(_ s: OceanKit.Settings) -> OceanKit.Settings {

@@ -37,18 +37,98 @@ func greetingChecks() {
         var locked: WhatsNew.Moment = clear
         locked.seeable = false
         var now: WhatsNew.Moment = locked
-        let p = WhatsNew.Presenter(moment: { now }, open: { true }, mark: {})
+        var t: Double = 0
+        let p = WhatsNew.Presenter(moment: { now }, open: { true }, mark: {}, clock: { t })
         let first: WhatsNew.Step = p.look()
         let backstop: Double? = WhatsNew.Presenter.backstop
         try expect(first == .keepWaiting && p.nextLook == backstop && (backstop ?? 0) >= 60,
                    "locked: waits for a change, no 1 s look (\(first), next \(String(describing: p.nextLook)))")
+        t = 40
         now = clear
         let second: WhatsNew.Step = p.look()
         try expect(second == .keepWaiting && p.nextLook == 1, "unlocked: one look a second later (\(second), next \(String(describing: p.nextLook)))")
+        // Fix round 3: a second wake notification at the same moment is not a clear second (round 2 expected .open).
         let third: WhatsNew.Step = p.look()
-        try expect(third == .open && p.nextLook == nil, "clear for the second: opens, no more looks (\(third))")
+        try expect(third == .keepWaiting && p.nextLook == 1, "a second clear look at the same moment: still waiting (\(third))")
+        t = 41
+        let fourth: WhatsNew.Step = p.look()
+        try expect(fourth == .open && p.nextLook == nil, "clear for the second: opens, no more looks (\(fourth))")
     }
     check("greetingWaitingCardHasNoPoll", greetingWaitingCardHasNoPoll)
+
+    // Fix round 3, 3: only a full second of clear screen opens a greeting that waited; a lock cancels the pending
+    // confirmation.
+    func greetingWaitsAFullClearSecond() throws {
+        var locked: WhatsNew.Moment = clear
+        locked.seeable = false
+        var now: WhatsNew.Moment = locked
+        var t: Double = 0
+        var opened: Int = 0
+        let p = WhatsNew.Presenter(moment: { now }, open: { opened += 1; return true }, mark: {}, clock: { t })
+        _ = p.look()
+        t = 100
+        now = clear
+        let wake: WhatsNew.Step = p.look()
+        let burst: WhatsNew.Step = p.look()
+        try expect(wake == .keepWaiting && burst == .keepWaiting && opened == 0,
+                   "two clear events at the same moment: still waiting (\(wake), \(burst), opened \(opened))")
+        t = 100.4
+        let early: WhatsNew.Step = p.look()
+        let left: Double = p.nextLook ?? -1
+        try expect(early == .keepWaiting && abs(left - 0.6) < 1e-9,
+                   "a third event 0.4 s in: still waiting, the confirmation still due at the full second (next \(left))")
+        t = 100.5
+        now = locked
+        let relock: WhatsNew.Step = p.look()
+        try expect(relock == .keepWaiting && p.nextLook == WhatsNew.Presenter.backstop,
+                   "a lock 0.5 s in cancels the pending confirmation (next \(String(describing: p.nextLook)))")
+        t = 101
+        now = clear
+        let again: WhatsNew.Step = p.look()
+        t = 101.5
+        let half: WhatsNew.Step = p.look()
+        try expect(again == .keepWaiting && half == .keepWaiting && opened == 0,
+                   "clear again: half a second is not enough (\(again), \(half), opened \(opened))")
+        t = 102
+        let full: WhatsNew.Step = p.look()
+        try expect(full == .open && opened == 1, "a full clear second: opens, once (\(full), opened \(opened))")
+    }
+    check("greetingWaitsAFullClearSecond", greetingWaitsAFullClearSecond)
+
+    // Fix round 3, 4: the tour finishes in every power state without asking for an effect the habitat can't show.
+    func greetingTourShowsNoInvisibleStep() throws {
+        var lowPower = PowerInputs()
+        lowPower.lowPowerMode = true
+        var reduce = PowerInputs()
+        reduce.reduceMotion = true
+        var both: PowerInputs = reduce
+        both.lowPowerMode = true
+        var battery = PowerInputs()
+        battery.onBattery = true
+        var hot = PowerInputs()
+        hot.thermal = .critical
+        let states: [(String, PowerInputs)] = [("plugged in", PowerInputs()), ("on battery", battery),
+                                               ("Low Power Mode", lowPower), ("Reduce Motion", reduce),
+                                               ("Reduce Motion and Low Power", both), ("too hot", hot)]
+        for (name, i) in states {
+            var walked: [Tour.Step] = [.habitat]
+            while let n = Tour.next(after: walked[walked.count - 1], i) { walked.append(n) }
+            let mode: RunMode = Tour.mode(i)
+            let moves: Bool = mode != .still
+            let invisible: [Tour.Step] = walked.filter { (s: Tour.Step) -> Bool in s.asksForEffect && !moves }
+            let raw: [Int] = walked.map { (s: Tour.Step) -> Int in s.rawValue }
+            try expect(walked.last == .dive && invisible.isEmpty,
+                       "\(name): the tour \(raw) under \(mode) asks for no effect it can't show and ends at the dive")
+        }
+        try expect(Tour.mode(lowPower) == .live(fps: 15) && Tour.steps(lowPower) == Tour.Step.allCases,
+                   "Low Power Mode alone: the tour stays live at 15 fps, every step (\(Tour.mode(lowPower)))")
+        let reduced: [Tour.Step] = Tour.steps(reduce)
+        try expect(Tour.mode(reduce) == .still && !reduced.contains(.pointer) && !reduced.contains(.splash),
+                   "Reduce Motion: a still, no pointer or splash step (\(reduced.map { (s: Tour.Step) -> Int in s.rawValue }))")
+        try expect(Tour.mode(PowerInputs()) == .live(fps: 30) && Tour.steps(PowerInputs()) == Tour.Step.allCases,
+                   "plugged in: live at 30, every step")
+    }
+    check("greetingTourShowsNoInvisibleStep", greetingTourShowsNoInvisibleStep)
 
     // 4. Previews respect the person: Low Power and Reduce Motion as the desktop has them, at the desktop's rate.
     func greetingPreviewsFollowThePowerPolicy() throws {

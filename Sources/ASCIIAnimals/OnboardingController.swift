@@ -224,6 +224,13 @@ enum OnboardingBeat: Int, CaseIterable {
     /// The steps with chips: their clicks pick, they don't move on.
     var hasChoices: Bool { self == .habitat || self == .choose }
 
+    /// The step after this one for the machine's state now (`Tour.steps`: no step asks for an effect the habitat
+    /// can't show); nil after the last.
+    func next(_ i: PowerInputs) -> OnboardingBeat? {
+        guard let step = Tour.Step(rawValue: rawValue), let n = Tour.next(after: step, i) else { return nil }
+        return OnboardingBeat(rawValue: n.rawValue)
+    }
+
     /// Shown once the step's little task is done.
     func doneLine(habitat: HabitatKind) -> String {
         switch self {
@@ -355,6 +362,8 @@ final class OnboardingSession: NSObject {
     private var typingPause = 0
     private let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     private let card: Bool
+    /// The screen it is on: seeable at its 3 s mark, or it isn't acknowledged.
+    private let screen: NSScreen
     private var appearance: NSKeyValueObservation?
     var onFinish: (() -> Void)?
     /// Once, when the user has had the welcome in front of them: in front and key after 3 s, or
@@ -377,6 +386,7 @@ final class OnboardingSession: NSObject {
         let icon: CGRect? = app.store.settings.showMenuBarIcon ? app.menu?.iconScreenFrame : nil
         let placed = MenuBarIcon.place(icon: icon, screens: bars, focused: focused)
         let screen: NSScreen = NSScreen.screens[placed?.screen ?? 0]
+        self.screen = screen
         let iconFrame: CGRect? = placed?.icon
         let frame = screen.frame
 
@@ -438,8 +448,9 @@ final class OnboardingSession: NSObject {
     // MARK: Lifecycle
 
     func start() {
-        // Its live habitat as the previews' policy says (Reduce Motion and Low Power Mode hold a still).
-        ocean.run(PowerPolicy.preview(app.signals.inputs))
+        // Its live habitat as the previews' policy says (Reduce Motion and Low Power Mode hold a still; the tour's own
+        // rule: `Tour.mode`).
+        ocean.run(habitatMode(app.signals.inputs))
         for d in dims { d.orderFrontRegardless() }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -470,8 +481,9 @@ final class OnboardingSession: NSObject {
         })
         // If macOS didn't let the app come forward, keys can't reach the welcome: don't sit on top of everything.
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            guard let self, !self.finishing else { return }
-            if NSApp.isActive, self.window.isKeyWindow { self.markSeen() } else { self.finish(fast: false, seen: false) }
+            guard let self else { return }
+            self.deadlineReached(active: NSApp.isActive, key: self.window.isKeyWindow,
+                                 seeable: WhatsNewCard.seeable(self.app, self.screen))
         }
         blinker = Timer.scheduledTimer(withTimeInterval: 0.53, repeats: true) { [weak self] _ in self?.model.cursorOn.toggle() }
         after(reduceMotion ? 0.2 : 0.9) { [weak self] in self?.enter(.habitat) }
@@ -485,6 +497,13 @@ final class OnboardingSession: NSObject {
         case otherWindow
         /// The displays changed.
         case screens
+    }
+
+    /// Its 3 s mark: in front, key and on a screen that can be seen, it counts as seen; otherwise it goes, still owed.
+    /// PROOF STUB (fix round 3): `seeable` not read yet.
+    func deadlineReached(active: Bool, key: Bool, seeable: Bool) {
+        guard !finishing else { return }
+        if active, key { markSeen() } else { finish(fast: false, seen: false) }
     }
 
     func interrupted(_ by: Interruption) {
@@ -511,8 +530,16 @@ final class OnboardingSession: NSObject {
     /// The machine's state changed: the habitat behind follows the previews' policy.
     func powerChanged(_ i: PowerInputs) {
         guard !finishing else { return }
-        ocean.run(PowerPolicy.preview(i))
+        ocean.run(habitatMode(i))
     }
+
+    /// The habitat behind: the Web card as the previews' policy says; the tour by its own rule (`Tour.mode`).
+    private func habitatMode(_ i: PowerInputs) -> RunMode {
+        card ? PowerPolicy.preview(i) : Tour.mode(i)
+    }
+
+    /// The habitat behind's live rate (0 when it holds a still or draws nothing).
+    var habitatFPS: Int { ocean.fps }
 
     var isLight: Bool { model.light }
 
@@ -570,7 +597,7 @@ final class OnboardingSession: NSObject {
             return
         }
         if card { finish(fast: false); return }
-        guard let next = OnboardingBeat(rawValue: model.beat.rawValue + 1) else {
+        guard let next = model.beat.next(app.signals.inputs) else {
             finish(fast: false)
             return
         }
