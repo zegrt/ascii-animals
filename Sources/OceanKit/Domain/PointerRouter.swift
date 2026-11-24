@@ -64,29 +64,49 @@ public struct ListedWindow: Equatable, Sendable {
     }
 }
 
-/// Each event window number's verdict. 971a216's model: it never looked at the event's window (a list read per look).
+/// Each event window number's verdict, remembered: the window list is read only for a number not seen before (one
+/// read fills the map for every listed window), and forgotten on a Space or display change (`clear`). Moving over
+/// the desktop then costs a map lookup.
 public final class EventWindowVerdicts {
     public private(set) var reads: Int = 0
+    private var known: [Int: Int?] = [:]
     private let read: () -> [ListedWindow]
+    /// A bound on the map; past it, it starts again (one more read).
+    private let capacity: Int = 512
 
     public init(read: @escaping () -> [ListedWindow]) { self.read = read }
 
     /// The verdict for `number` (0 or less: the event carries none) and the listed layer, if any.
     public func verdict(for number: Int) -> (EventWindow, layer: Int?) {
+        guard number > 0 else { return (.unknown, nil) }
+        if let layer = known[number] { return (EventWindowVerdicts.verdict(layer), layer) }
+        if known.count >= capacity { known.removeAll(keepingCapacity: true) }
         reads += 1
-        _ = read()
-        return (.unknown, nil)
+        for w in read() { known[w.number] = .some(w.layer) }
+        if known[number] == nil { known[number] = .some(nil) }
+        let layer: Int? = known[number] ?? nil
+        return (EventWindowVerdicts.verdict(layer), layer)
     }
 
     /// A Space or display change: forget every verdict.
-    public func clear() {}
+    public func clear() { known.removeAll(keepingCapacity: true) }
+
+    private static func verdict(_ layer: Int?) -> EventWindow {
+        guard let layer else { return .unknown }
+        return layer < 0 ? .desktop : .window
+    }
 }
 
 extension PointerRouter {
-    /// The ocean under `p` for an event the window server handed to a window with verdict `eventWindow`.
-    /// 971a216: always the rectangles.
+    /// The ocean under `p` for an event the window server handed to a window with verdict `eventWindow`: a
+    /// desktop-level window routes to the screen under `p`, whatever lies over it in the list (Notification Center's
+    /// full-screen banner window, layer 21); any other window blocks; unknown falls back to the rectangles.
     public static func route(_ p: CGPoint, eventWindow: EventWindow, occluders: () -> [CGRect],
                              viewports: [Viewport]) -> PointerTarget? {
-        route(p, occluders: occluders(), viewports: viewports)
+        switch eventWindow {
+        case .desktop: return route(p, occluders: [], viewports: viewports)
+        case .window: return nil
+        case .unknown: return route(p, occluders: occluders(), viewports: viewports)
+        }
     }
 }
