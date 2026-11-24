@@ -9,9 +9,10 @@ enum Diagnostics {
         sysctlbyname("hw.model", nil, &size, nil, 0)
         var model = [CChar](repeating: 0, count: max(1, size))
         sysctlbyname("hw.model", &model, &size, nil, 0)
-        let displays = NSScreen.screens.map {
-            "\($0.localizedName) \(Int($0.frame.width))x\(Int($0.frame.height)) @\(Int($0.backingScaleFactor))x \($0.maximumFramesPerSecond) Hz"
+        let sizes: [String] = NSScreen.screens.map {
+            "\(Int($0.frame.width))x\(Int($0.frame.height)) @\(Int($0.backingScaleFactor))x \($0.maximumFramesPerSecond) Hz"
         }
+        let displays: [String] = zip(NSScreen.screens, sizes).map { "\($0.localizedName) \($1)" }
         let i = app.signals.inputs
         var power = [i.onBattery ? "battery" : "AC power"]
         if i.lowPowerMode { power.append("Low Power Mode") }
@@ -26,10 +27,19 @@ enum Diagnostics {
             model: String(cString: model),
             displays: displays, power: power.joined(separator: ", "), mode: mode,
             settingsJSON: String(decoding: SettingsCodec.encode(app.store.settings), as: UTF8.self),
-            crashedLastTime: app.crashedLastTime, logTail: Log.tail(60))
+            crashedLastTime: app.crashedLastTime, logTail: Log.tail(60),
+            displaySizes: sizes)
     }
 
     static func body(app: AppDelegate) -> String {
         IssueReport.body(facts(app: app), homePath: NSHomeDirectory(), userName: NSUserName())
+    }
+
+    static let reportTitle = "Problem: "
+
+    /// What Report a Problem puts into the GitHub form.
+    static func form(app: AppDelegate) -> String {
+        IssueReport.form(facts(app: app), includeLog: true, homePath: NSHomeDirectory(), userName: NSUserName(),
+                         fullName: NSFullUserName(), base: AppInfo.issuesURL, title: reportTitle)
     }
 }

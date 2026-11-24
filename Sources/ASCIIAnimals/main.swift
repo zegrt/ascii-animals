@@ -141,7 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     /// Opens a prefilled GitHub issue in the browser (nothing is sent until the user submits it).
     func reportProblem() {
-        NSWorkspace.shared.open(IssueReport.url(base: AppInfo.issuesURL, title: "Problem: ", body: Diagnostics.body(app: self)))
+        NSWorkspace.shared.open(IssueReport.url(base: AppInfo.issuesURL, title: Diagnostics.reportTitle, body: Diagnostics.form(app: self)))
     }
 
     /// Copies the diagnostics summary to the clipboard.
