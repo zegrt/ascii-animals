@@ -49,9 +49,10 @@ public enum UpdateFeed {
     public enum Reading: Equatable, Sendable {
         /// A published release (newer or not).
         case release(LatestRelease)
-        /// A readable answer with nothing to install (a draft, a pre-release, a tag that isn't a version).
+        /// A readable answer with nothing to install (a draft, a pre-release).
         case nothing
-        /// Not a release at all (an error page, a rate-limit answer, cut-off JSON): the check failed.
+        /// Not a release at all (an error page, a rate-limit answer, cut-off JSON), or a published release whose tag
+        /// isn't a version or whose page isn't an absolute URL: the check failed.
         case garbled
     }
 
@@ -72,7 +73,8 @@ public enum UpdateFeed {
             let assets: [Asset]?
         }
         guard let r = try? JSONDecoder().decode(Release.self, from: data) else { return .garbled }
-        guard r.draft != true, r.prerelease != true, let v = AppVersion(r.tag_name) else { return .nothing }
+        guard r.draft != true, r.prerelease != true else { return .nothing }
+        guard let v = AppVersion(r.tag_name), r.html_url.scheme != nil, r.html_url.host != nil else { return .garbled }
         let dmg = r.assets?.first { $0.name.lowercased().hasSuffix(".dmg") }
         let zip = r.assets?.first { $0.name.lowercased().hasSuffix(".zip") }
         return .release(LatestRelease(version: v, tag: r.tag_name, pageURL: r.html_url, dmgURL: dmg?.browser_download_url,
@@ -205,7 +207,15 @@ public enum IssueReport {
     /// The home folder becomes `~`; the account's short and full names, other accounts' folders and volume names go.
     static func scrub(_ text: String, homePath: String, userName: String, fullName: String = "") -> String {
         var t = text
-        if !homePath.isEmpty { t = t.replacingOccurrences(of: homePath, with: "~") }
+        if !homePath.isEmpty {
+            t = t.replacingOccurrences(of: homePath, with: "~")
+            // As a file URL writes it ("/Users/jane%20doe").
+            if let encoded = homePath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed), encoded != homePath {
+                t = t.replacingOccurrences(of: encoded, with: "~")
+            }
+        }
+        // An error keeps only its domain and code: its message and details can name files, folders and volumes.
+        t = t.replacingOccurrences(of: #"(Error Domain=\S+ Code=-?\d+).*"#, with: "$1", options: .regularExpression)
         if fullName.count >= 2 { t = t.replacingOccurrences(of: fullName, with: "<user>", options: .caseInsensitive) }
         if userName.count >= 2 { t = t.replacingOccurrences(of: userName, with: "<user>", options: .caseInsensitive) }
         t = t.replacingOccurrences(of: #"/Users/[^/\s]+"#, with: "/Users/<user>", options: .regularExpression)
@@ -222,6 +232,8 @@ public enum IssueReport {
     private static func make(_ base: URL, _ title: String, _ body: String) -> URL {
         var c = URLComponents(url: base, resolvingAgainstBaseURL: false)!
         c.queryItems = [URLQueryItem(name: "title", value: title), URLQueryItem(name: "body", value: body)]
+        // Foundation leaves "+" as is, and a web form reads it as a space.
+        c.percentEncodedQuery = c.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         return c.url!
     }
 
@@ -276,10 +288,26 @@ extension IssueReport {
                 for ch in line { run = ch == "`" ? run + 1 : 0; longest = max(longest, run) }
             }
             let fence: String = String(repeating: "`", count: max(3, longest + 1))
-            lines += ["", "<details><summary>Recent log</summary>", "", fence] + d.logTail + [fence, "</details>"]
+            lines += ["", "<details><summary>Recent log</summary>", "", fence] + withoutErrorDetails(d.logTail) + [fence, "</details>"]
         }
         let text: String = scrub(lines.joined(separator: "\n"), homePath: homePath, userName: userName, fullName: fullName)
         return fitted(base: base, title: title, body: text)
+    }
+}
+
+extension IssueReport {
+    /// An error written into the log can run over several lines (its details); everything after the line that names
+    /// it goes, up to the next stamped line. (`scrub` then keeps only the error's domain and code.)
+    static func withoutErrorDetails(_ log: [String]) -> [String] {
+        var kept: [String] = []
+        var inError: Bool = false
+        for line in log {
+            let stamped: Bool = line.range(of: #"^\d{4}-\d\d-\d\dT"#, options: .regularExpression) != nil
+            if inError && !stamped { continue }
+            inError = line.contains("Error Domain=")
+            kept.append(line)
+        }
+        return kept
     }
 }
 
@@ -415,6 +443,12 @@ public final class UpdateEngine {
     private unowned let host: UpdateHost
     /// Installed, but the new copy couldn't be started: this copy runs on and doesn't install it again.
     private var restartPending: LatestRelease?
+    /// Which install is running: only the one that started a download may swap it in.
+    private var installID: Int = 0
+    /// A checked download whose automatic install waits because the app is in use: the next try swaps it in
+    /// instead of downloading again. It goes when it no longer applies.
+    private var held: StagedUpdate?
+    static let inUse = "the app is in use"
 
     public init(store: UpdateStore, host: UpdateHost) {
         self.store = store
@@ -433,7 +467,10 @@ public final class UpdateEngine {
     }
 
     /// A setting changed: the timers run only while checks are on (Check for Updates works either way).
-    public func settingsChanged() { host.setSchedule(host.checking) }
+    public func settingsChanged() {
+        host.setSchedule(host.checking)
+        if !host.checking || !host.autoInstall { dropHeld() }
+    }
 
     /// The hourly tick: checks when due, else installs a release that waited.
     public func tick() {
@@ -441,8 +478,8 @@ public final class UpdateEngine {
         let last = store.object(forKey: Self.lastCheckKey) as? Date
         if UpdatePolicy.shouldCheck(lastCheck: last, now: host.now) {
             check(userInitiated: false)
-        } else {
-            autoInstallIfAllowed()
+        } else if !autoInstallIfAllowed(), let r = available {
+            notifyOnce(r)
         }
     }
 
@@ -460,6 +497,7 @@ public final class UpdateEngine {
         inFlight = false
         var body: Data? = nil
         var why: String? = nil
+        var logged: String? = nil
         if response.status == 304 {
             // An unreadable answer kept by an earlier version doesn't count either; dropping it asks afresh next time.
             body = store.data(forKey: Self.cachedKey).flatMap { UpdateFeed.read($0) == .garbled ? nil : $0 }
@@ -477,11 +515,13 @@ public final class UpdateEngine {
             }
         } else {
             why = response.error ?? "GitHub answered \(response.status ?? 0)."
+            logged = response.errorCode
         }
         guard let body, why == nil else {
             let reason: String = why ?? "No answer."
-            host.log("update check failed: \(reason)")
-            state = .failed(reason)
+            host.log("update check failed: \(logged ?? reason)")
+            // An install under way stays: only its own download decides how it ends.
+            if installing == nil { state = .failed(reason) }
             if userInitiated { host.tell(.couldNotCheck(reason)) }
             return
         }
@@ -496,7 +536,10 @@ public final class UpdateEngine {
             if userInitiated { host.tell(.restartFailed(pending)) }
             return
         }
-        guard let r = UpdateFeed.parse(data), UpdatePolicy.isNewer(r.version, than: host.runningVersion) else {
+        let running: String = host.runningVersion
+        let latest: LatestRelease? = UpdateFeed.parse(data).flatMap { UpdatePolicy.isNewer($0.version, than: running) ? $0 : nil }
+        if held?.release != latest { dropHeld() }
+        guard let r = latest else {
             state = .upToDate
             if userInitiated { host.tell(.upToDate(version: host.runningVersion)) }
             return
@@ -528,15 +571,27 @@ public final class UpdateEngine {
         guard let r = available else { return }
         if !automatic, let why = host.installBlocker { return host.tell(.couldNotInstall(r, why)) }
         state = .installing(r)
+        installID += 1
+        let id: Int = installID
         host.log("installing \(r.tag)\(automatic ? " (automatic)" : "")")
-        host.stage(r) { [weak self] staged in
+        let ready: (Result<StagedUpdate, UpdateFailure>) -> Void = { [weak self] staged in
             guard let self else { return }
+            guard self.installID == id, self.installing == r else {
+                if case .success(let s) = staged { self.host.discard(s) }
+                return
+            }
             // Automatic: look again right before replacing; the person may have opened Settings or a menu, or turned
-            // automatic installs off, while it downloaded. Then the download goes and the release waits.
+            // automatic installs off, while it downloaded. In use: the checked download waits for the next try and
+            // the notice says the update is there. Turned off or failed before: the download goes.
             if automatic, case .success(let s) = staged, let why = self.automaticBlocker(r) {
-                self.host.discard(s)
                 self.host.log("update \(r.tag) waits: \(why)")
                 self.state = .available(r)
+                if why == Self.inUse {
+                    self.held = s
+                    self.notifyOnce(r)
+                } else {
+                    self.host.discard(s)
+                }
                 return
             }
             switch staged.flatMap({ s in self.host.commit(s) }) {
@@ -553,7 +608,7 @@ public final class UpdateEngine {
                     self.host.tell(.restartFailed(r))
                 }
             case .failure(let why):
-                self.host.log("update install failed: \(why)")
+                self.host.log("update install failed: \(why.logText)")
                 self.state = .available(r)
                 if automatic {
                     self.store.set(r.tag, forKey: Self.autoFailedKey)
@@ -563,13 +618,27 @@ public final class UpdateEngine {
                 }
             }
         }
+        if let kept = held, kept.release == r {
+            held = nil
+            ready(.success(kept))
+        } else {
+            dropHeld()
+            host.stage(r, done: ready)
+        }
+    }
+
+    /// Throws away a kept download.
+    private func dropHeld() {
+        guard let kept = held else { return }
+        held = nil
+        host.discard(kept)
     }
 
     /// Why an automatic install of `r` can't replace the app right now, read fresh, or nil when it can.
     private func automaticBlocker(_ r: LatestRelease) -> String? {
         if !host.checking { return "checks are off" }
         if !host.autoInstall { return "automatic installs are off" }
-        if host.surfaces.busy { return "the app is in use" }
+        if host.surfaces.busy { return Self.inUse }
         if r.tag == store.string(forKey: Self.autoFailedKey) { return "it failed before" }
         return nil
     }

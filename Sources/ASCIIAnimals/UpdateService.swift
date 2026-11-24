@@ -113,7 +113,7 @@ final class UpdateService: NSObject, UNUserNotificationCenterDelegate, UpdateHos
         URLSession.shared.dataTask(with: req) { data, response, error in
             let http = response as? HTTPURLResponse
             let answer = FeedResponse(status: http?.statusCode, body: data, etag: http?.value(forHTTPHeaderField: "ETag"),
-                                      error: error?.localizedDescription)
+                                      error: error?.localizedDescription, errorCode: error.map { UpdateFailure.code(of: $0) })
             DispatchQueue.main.async { done(answer) }
         }.resume()
     }

@@ -47,7 +47,8 @@ enum SelfUpdater {
             temp = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask,
                                                appropriateFor: Bundle.main.bundleURL, create: true)
         } catch {
-            return finish(.failure(Failure("Couldn't make a folder for the download: \(error.localizedDescription)")))
+            return finish(.failure(Failure("Couldn't make a folder for the download: \(error.localizedDescription)",
+                                           log: "Couldn't make a folder for the download: \(Failure.code(of: error))")))
         }
         var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 60)
         req.setValue("ASCIIAnimals/\(AppInfo.version)", forHTTPHeaderField: "User-Agent")
@@ -58,12 +59,13 @@ enum SelfUpdater {
             guard let file, status == 200, (try? FileManager.default.moveItem(at: file, to: zip)) != nil else {
                 try? FileManager.default.removeItem(at: temp)
                 let why = error?.localizedDescription ?? "GitHub answered \(status)."
-                return finish(.failure(Failure("The download failed: \(why)")))
+                let logged = error.map { Failure.code(of: $0) } ?? why
+                return finish(.failure(Failure("The download failed: \(why)", log: "The download failed: \(logged)")))
             }
             work.async {
                 let result = Result { try checkDownloaded(zip, sha256: sha, release: r, in: temp) }
                     .map { StagedUpdate(release: r, app: $0, folder: temp) }
-                    .mapError { $0 as? Failure ?? Failure($0.localizedDescription) }
+                    .mapError { $0 as? Failure ?? Failure($0.localizedDescription, log: Failure.code(of: $0)) }
                 if case .failure = result { try? FileManager.default.removeItem(at: temp) }
                 finish(result)
             }
@@ -84,7 +86,8 @@ enum SelfUpdater {
             }
             return .success(installed)
         } catch {
-            return .failure(Failure("Couldn't replace the app: \(error.localizedDescription)"))
+            return .failure(Failure("Couldn't replace the app: \(error.localizedDescription)",
+                                    log: "Couldn't replace the app: \(Failure.code(of: error))"))
         }
     }
 
@@ -136,8 +139,11 @@ enum SelfUpdater {
         let flags = SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate | kSecCSCheckNestedCode)
         var err: Unmanaged<CFError>?
         guard SecStaticCodeCheckValidityWithErrors(code, flags, nil, &err) == errSecSuccess else {
-            let why = (err?.takeRetainedValue()).map { CFErrorCopyDescription($0) as String } ?? "invalid"
-            throw Failure("The new version's signature doesn't check out (\(why)).")
+            let cf: CFError? = err?.takeRetainedValue()
+            let why = cf.map { CFErrorCopyDescription($0) as String } ?? "invalid"
+            let logged = cf.map { Failure.code(of: $0) } ?? "invalid"
+            throw Failure("The new version's signature doesn't check out (\(why)).",
+                          log: "The new version's signature doesn't check out (\(logged)).")
         }
         var info: CFDictionary?
         SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &info)
