@@ -64,16 +64,21 @@ public struct ListedWindow: Equatable, Sendable {
     }
 }
 
-/// Each event window number's verdict, remembered: the window list is read only for a number not seen before (one
-/// read fills the map for every listed window), and forgotten on a Space or display change (`clear`). Moving over
-/// the desktop then costs a map lookup.
+/// Each event window number's verdict, remembered: the window list is read for a number not seen before (one read
+/// fills the map for every listed window), and forgotten on a Space or display change (`clear`). Moving over the
+/// desktop then costs a map lookup. A number the list does not have is not remembered, so a window listed late is
+/// found on a later event; after such a miss the list is read again at most once a second (`missRetry`), so misses
+/// that continue keep list reads off the per-move path.
 public final class EventWindowVerdicts {
     public private(set) var reads: Int = 0
-    private var known: [Int: Int?] = [:]
+    private var known: [Int: Int] = [:]
+    private var lastMiss: TimeInterval? = nil
     private let read: () -> [ListedWindow]
     private let now: () -> TimeInterval
     /// A bound on the map; past it, it starts again (one more read).
     private let capacity: Int = 512
+    /// After a read that missed, the next read waits this long (seconds).
+    public static let missRetry: TimeInterval = 1
 
     public init(read: @escaping () -> [ListedWindow], now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.read = read
@@ -84,20 +89,27 @@ public final class EventWindowVerdicts {
     public func verdict(for number: Int) -> (EventWindow, layer: Int?) {
         guard number > 0 else { return (.unknown, nil) }
         if let layer = known[number] { return (EventWindowVerdicts.verdict(layer), layer) }
+        let t: TimeInterval = now()
+        if let m = lastMiss, t - m < EventWindowVerdicts.missRetry { return (.unknown, nil) }
         if known.count >= capacity { known.removeAll(keepingCapacity: true) }
         reads += 1
-        for w in read() { known[w.number] = .some(w.layer) }
-        if known[number] == nil { known[number] = .some(nil) }
-        let layer: Int? = known[number] ?? nil
+        for w in read() { known[w.number] = w.layer }
+        guard let layer = known[number] else {
+            lastMiss = t
+            return (.unknown, nil)
+        }
+        lastMiss = nil
         return (EventWindowVerdicts.verdict(layer), layer)
     }
 
     /// A Space or display change: forget every verdict.
-    public func clear() { known.removeAll(keepingCapacity: true) }
+    public func clear() {
+        known.removeAll(keepingCapacity: true)
+        lastMiss = nil
+    }
 
-    private static func verdict(_ layer: Int?) -> EventWindow {
-        guard let layer else { return .unknown }
-        return layer < 0 ? .desktop : .window
+    private static func verdict(_ layer: Int) -> EventWindow {
+        layer < 0 ? .desktop : .window
     }
 }
 
@@ -116,7 +128,8 @@ extension PointerRouter {
 }
 
 /// One pointer event as the monitor read it: the window number and the location carried by the event itself (top-left
-/// global, nil when the event has none), and the cursor when the callback ran (for the trace).
+/// global, nil when the event has none), and the cursor when the callback ran (only for the trace: it can be later
+/// than the event, over another window or on another display).
 public struct PointerEventFacts: Equatable, Sendable {
     public var window: Int
     public var location: CGPoint?
@@ -129,12 +142,12 @@ public struct PointerEventFacts: Equatable, Sendable {
 }
 
 extension PointerRouter {
-    /// The ocean an event goes to, with the event window's verdict and listed layer (for the trace).
+    /// The ocean an event goes to, with the event window's verdict and listed layer (for the trace). The point is the
+    /// event's own location, from the same event as the window number; an event without one goes nowhere.
     public static func route(_ e: PointerEventFacts, verdicts: EventWindowVerdicts, occluders: () -> [CGRect],
                              viewports: [Viewport]) -> (target: PointerTarget?, verdict: EventWindow, layer: Int?) {
-        // 5db562e: the point is the cursor when the callback runs.
+        guard let p = e.location else { return (nil, .unknown, nil) }
         let (verdict, layer) = verdicts.verdict(for: e.window)
-        guard let p = e.cursorAtCallback ?? e.location else { return (nil, verdict, layer) }
         return (route(p, eventWindow: verdict, occluders: occluders, viewports: viewports), verdict, layer)
     }
 }
