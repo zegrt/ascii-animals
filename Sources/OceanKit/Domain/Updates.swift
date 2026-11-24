@@ -45,8 +45,23 @@ public struct LatestRelease: Equatable, Sendable {
 }
 
 public enum UpdateFeed {
+    /// What an answer from the feed says.
+    public enum Reading: Equatable, Sendable {
+        /// A published release (newer or not).
+        case release(LatestRelease)
+        /// A readable answer with nothing to install (a draft, a pre-release, a tag that isn't a version).
+        case nothing
+        /// Not a release at all (an error page, a rate-limit answer, cut-off JSON): the check failed.
+        case garbled
+    }
+
     /// GitHub `releases/latest` JSON.
     public static func parse(_ data: Data) -> LatestRelease? {
+        if case .release(let r) = read(data) { return r }
+        return nil
+    }
+
+    public static func read(_ data: Data) -> Reading {
         struct Asset: Decodable { let name: String; let browser_download_url: URL; let digest: String? }
         struct Release: Decodable {
             let tag_name: String
@@ -56,13 +71,13 @@ public enum UpdateFeed {
             let prerelease: Bool?
             let assets: [Asset]?
         }
-        guard let r = try? JSONDecoder().decode(Release.self, from: data),
-              r.draft != true, r.prerelease != true,
-              let v = AppVersion(r.tag_name) else { return nil }
+        guard let r = try? JSONDecoder().decode(Release.self, from: data) else { return .garbled }
+        guard r.draft != true, r.prerelease != true, let v = AppVersion(r.tag_name) else { return .nothing }
         let dmg = r.assets?.first { $0.name.lowercased().hasSuffix(".dmg") }
         let zip = r.assets?.first { $0.name.lowercased().hasSuffix(".zip") }
-        return LatestRelease(version: v, tag: r.tag_name, pageURL: r.html_url, dmgURL: dmg?.browser_download_url,
-                             zipURL: zip?.browser_download_url, zipSHA256: zip?.digest.flatMap(sha256), notes: r.body ?? "")
+        return .release(LatestRelease(version: v, tag: r.tag_name, pageURL: r.html_url, dmgURL: dmg?.browser_download_url,
+                                      zipURL: zip?.browser_download_url, zipSHA256: zip?.digest.flatMap(sha256),
+                                      notes: r.body ?? ""))
     }
 
     /// "sha256:<64 hex>" → the hex, lowercased; anything else → nil.
@@ -162,7 +177,7 @@ extension DiagnosticFacts {
 public enum IssueReport {
     /// Markdown for a GitHub issue. The home folder becomes `~` and the user's
     /// name is removed everywhere, so nothing personal leaves the Mac.
-    public static func body(_ d: DiagnosticFacts, homePath: String, userName: String) -> String {
+    public static func body(_ d: DiagnosticFacts, homePath: String, userName: String, fullName: String = "") -> String {
         var lines = [
             "**What happened**",
             "",
@@ -184,48 +199,87 @@ public enum IssueReport {
         if !d.logTail.isEmpty {
             lines += ["", "<details><summary>Recent log</summary>", "", "```"] + d.logTail + ["```", "</details>"]
         }
-        return scrub(lines.joined(separator: "\n"), homePath: homePath, userName: userName)
+        return scrub(lines.joined(separator: "\n"), homePath: homePath, userName: userName, fullName: fullName)
     }
 
-    static func scrub(_ text: String, homePath: String, userName: String) -> String {
+    /// The home folder becomes `~`; the account's short and full names, other accounts' folders and volume names go.
+    static func scrub(_ text: String, homePath: String, userName: String, fullName: String = "") -> String {
         var t = text
         if !homePath.isEmpty { t = t.replacingOccurrences(of: homePath, with: "~") }
+        if fullName.count >= 2 { t = t.replacingOccurrences(of: fullName, with: "<user>", options: .caseInsensitive) }
         if userName.count >= 2 { t = t.replacingOccurrences(of: userName, with: "<user>", options: .caseInsensitive) }
+        t = t.replacingOccurrences(of: #"/Users/[^/\s]+"#, with: "/Users/<user>", options: .regularExpression)
+        t = t.replacingOccurrences(of: #"/Volumes/[^/\n]+"#, with: "/Volumes/<volume>", options: .regularExpression)
         return t
     }
 
     /// A "new issue" link prefilled with `title` and `body`, at most `limit`
     /// characters: the oldest log lines go first, the facts stay.
     public static func url(base: URL, title: String, body: String, limit: Int = 6000) -> URL {
-        func make(_ b: String) -> URL {
-            var c = URLComponents(url: base, resolvingAgainstBaseURL: false)!
-            c.queryItems = [URLQueryItem(name: "title", value: title), URLQueryItem(name: "body", value: b)]
-            return c.url!
-        }
+        make(base, title, fitted(base: base, title: title, body: body, limit: limit))
+    }
+
+    private static func make(_ base: URL, _ title: String, _ body: String) -> URL {
+        var c = URLComponents(url: base, resolvingAgainstBaseURL: false)!
+        c.queryItems = [URLQueryItem(name: "title", value: title), URLQueryItem(name: "body", value: body)]
+        return c.url!
+    }
+
+    /// `body` cut to fit the link: log lines (inside the log's fence) oldest first, then lines from the end.
+    static func fitted(base: URL, title: String, body: String, limit: Int = 6000) -> String {
         var lines = body.components(separatedBy: "\n")
-        var u = make(body)
-        // Drop log lines (between the log fence) oldest first, then cut hard.
-        while u.absoluteString.count > limit {
+        var b = body
+        while make(base, title, b).absoluteString.count > limit {
             if let open = lines.firstIndex(of: "<details><summary>Recent log</summary>"),
-               let fence = lines[open...].firstIndex(of: "```"), fence + 1 < lines.count, lines[fence + 1] != "```" {
+               let fence = lines[open...].firstIndex(where: { $0.hasPrefix("```") }), fence + 1 < lines.count,
+               lines[fence + 1] != lines[fence] {
                 lines.remove(at: fence + 1)
             } else if lines.count > 1 {
                 lines.removeLast()
             } else {
                 break
             }
-            u = make(lines.joined(separator: "\n"))
+            b = lines.joined(separator: "\n")
         }
-        return u
+        return b
     }
 }
 
 extension IssueReport {
-    /// The text that goes into the GitHub form (`base`, `title`) from Report a Problem. `includeLog`: the person chose
-    /// to add log lines.
+    /// The text that goes into the GitHub form (`base`, `title`) from Report a Problem, exactly: the person reviews
+    /// this before anything leaves the Mac, and it already fits the link, so nothing is cut after. Only the app version,
+    /// macOS, the displays' sizes and the settings; the recent log only when the person chose it (`includeLog`), with
+    /// the home folder, the account's names, other accounts' folders and volume names removed.
     public static func form(_ d: DiagnosticFacts, includeLog: Bool, homePath: String, userName: String, fullName: String,
                             base: URL, title: String) -> String {
-        body(d, homePath: homePath, userName: userName)
+        let displays: String = "\(d.displaySizes.count): " + d.displaySizes.joined(separator: "<br>")
+        var lines: [String] = [
+            "**What happened**",
+            "",
+            "<!-- Describe what you saw and what you expected. -->",
+            "",
+            "**Diagnostics**",
+            "",
+            "| | |",
+            "|---|---|",
+            "| App | \(d.appVersion) |",
+            "| macOS | \(d.macOS) |",
+            "| Displays | \(displays) |",
+            "",
+            "<details><summary>Settings</summary>", "", "```json", d.settingsJSON, "```", "</details>",
+        ]
+        if includeLog && !d.logTail.isEmpty {
+            // A fence longer than any run of backticks in the log, so no line can close it.
+            var longest: Int = 0
+            for line in d.logTail {
+                var run: Int = 0
+                for ch in line { run = ch == "`" ? run + 1 : 0; longest = max(longest, run) }
+            }
+            let fence: String = String(repeating: "`", count: max(3, longest + 1))
+            lines += ["", "<details><summary>Recent log</summary>", "", fence] + d.logTail + [fence, "</details>"]
+        }
+        let text: String = scrub(lines.joined(separator: "\n"), homePath: homePath, userName: userName, fullName: fullName)
+        return fitted(base: base, title: title, body: text)
     }
 }
 
@@ -275,6 +329,8 @@ public struct UpdateSurfaces: Equatable, Sendable {
     public init(appActive: Bool = false, windowUp: Bool = false, menuOpen: Bool = false) {
         self.appActive = appActive; self.windowUp = windowUp; self.menuOpen = menuOpen
     }
+    /// The person is using the app: no automatic install now.
+    public var busy: Bool { appActive || windowUp || menuOpen }
 }
 
 /// What the updater tells the person directly.
@@ -347,21 +403,27 @@ public final class UpdateEngine {
 
     private let store: UpdateStore
     private unowned let host: UpdateHost
+    /// Installed, but the new copy couldn't be started: this copy runs on and doesn't install it again.
+    private var restartPending: LatestRelease?
 
     public init(store: UpdateStore, host: UpdateHost) {
         self.store = store
         self.host = host
     }
 
-    /// At launch: says an automatic update happened, shows a release found earlier and arms the timers.
+    /// At launch: says an automatic update happened, shows a release found earlier (installing it waits for the
+    /// first tick, after the welcome or the card has had its moment) and arms the timers if checks are on.
     public func start() {
         announceAutoInstall()
-        if let data = store.data(forKey: Self.cachedKey) { apply(data, userInitiated: false) }
-        host.setSchedule(true)
+        if let data = store.data(forKey: Self.cachedKey), case .release(let r) = UpdateFeed.read(data),
+           UpdatePolicy.isNewer(r.version, than: host.runningVersion) {
+            state = .available(r)
+        }
+        host.setSchedule(host.checking)
     }
 
-    /// A setting changed.
-    public func settingsChanged() {}
+    /// A setting changed: the timers run only while checks are on (Check for Updates works either way).
+    public func settingsChanged() { host.setSchedule(host.checking) }
 
     /// The hourly tick: checks when due, else installs a release that waited.
     public func tick() {
@@ -382,28 +444,48 @@ public final class UpdateEngine {
         host.fetchFeed(etag: etag) { [weak self] response in self?.finish(response, userInitiated: userInitiated) }
     }
 
+    /// Only a readable answer counts as a check (and is kept for a 304). A failure says so when the person asked,
+    /// and the next hourly tick tries again.
     private func finish(_ response: FeedResponse, userInitiated: Bool) {
         inFlight = false
-        store.set(host.now, forKey: Self.lastCheckKey)
-        var body = response.body
+        var body: Data? = nil
+        var why: String? = nil
         if response.status == 304 {
-            body = store.data(forKey: Self.cachedKey)
+            // An unreadable answer kept by an earlier version doesn't count either; dropping it asks afresh next time.
+            body = store.data(forKey: Self.cachedKey).flatMap { UpdateFeed.read($0) == .garbled ? nil : $0 }
+            if body == nil {
+                store.removeObject(forKey: Self.cachedKey)
+                why = "GitHub said nothing changed, but no readable earlier answer is kept."
+            }
         } else if response.status == 200, let data = response.body {
-            store.set(data, forKey: Self.cachedKey)
-            if let etag = response.etag { store.set(etag, forKey: Self.etagKey) }
+            if UpdateFeed.read(data) == .garbled {
+                why = "GitHub's answer couldn't be read."
+            } else {
+                body = data
+                store.set(data, forKey: Self.cachedKey)
+                if let etag = response.etag { store.set(etag, forKey: Self.etagKey) }
+            }
         } else {
-            let why: String = response.error ?? "GitHub answered \(response.status ?? 0)."
-            host.log("update check failed: \(why)")
-            state = .failed(why)
-            if userInitiated { host.tell(.couldNotCheck(why)) }
+            why = response.error ?? "GitHub answered \(response.status ?? 0)."
+        }
+        guard let body, why == nil else {
+            let reason: String = why ?? "No answer."
+            host.log("update check failed: \(reason)")
+            state = .failed(reason)
+            if userInitiated { host.tell(.couldNotCheck(reason)) }
             return
         }
-        guard let body else { return }
+        store.set(host.now, forKey: Self.lastCheckKey)
         apply(body, userInitiated: userInitiated)
     }
 
     private func apply(_ data: Data, userInitiated: Bool) {
         if installing != nil { return }
+        if let pending = restartPending {
+            state = .idle
+            if userInitiated { host.tell(.restartFailed(pending)) }
+            return
+        }
         guard let r = UpdateFeed.parse(data), UpdatePolicy.isNewer(r.version, than: host.runningVersion) else {
             state = .upToDate
             if userInitiated { host.tell(.upToDate(version: host.runningVersion)) }
@@ -425,7 +507,7 @@ public final class UpdateEngine {
             checking: host.checking, autoInstall: host.autoInstall,
             installable: r.zipURL != nil && r.zipSHA256 != nil && host.installBlocker == nil,
             tag: r.tag, failedTag: store.string(forKey: Self.autoFailedKey),
-            userBusy: host.surfaces.appActive)
+            userBusy: host.surfaces.busy)
         if go { install(automatic: true) }
         return go
     }
@@ -439,12 +521,27 @@ public final class UpdateEngine {
         host.log("installing \(r.tag)\(automatic ? " (automatic)" : "")")
         host.stage(r) { [weak self] staged in
             guard let self else { return }
+            // Automatic: look again right before replacing; the person may have opened Settings or a menu, or turned
+            // automatic installs off, while it downloaded. Then the download goes and the release waits.
+            if automatic, case .success(let s) = staged, let why = self.automaticBlocker(r) {
+                self.host.discard(s)
+                self.host.log("update \(r.tag) waits: \(why)")
+                self.state = .available(r)
+                return
+            }
             switch staged.flatMap({ s in self.host.commit(s) }) {
             case .success(let app):
-                self.host.log("installed \(r.tag), restarting")
                 if automatic { self.store.set(r.version.description, forKey: Self.autoInstalledKey) }
-                _ = self.host.startNewCopy(app)
-                self.host.quit()
+                if self.host.startNewCopy(app) {
+                    self.host.log("installed \(r.tag), restarting")
+                    self.host.quit()
+                } else {
+                    // Nothing would open the new copy: this one keeps running and says so.
+                    self.host.log("installed \(r.tag), but the restart couldn't be started; still running \(self.host.runningVersion)")
+                    self.restartPending = r
+                    self.state = .idle
+                    self.host.tell(.restartFailed(r))
+                }
             case .failure(let why):
                 self.host.log("update install failed: \(why)")
                 self.state = .available(r)
@@ -456,6 +553,15 @@ public final class UpdateEngine {
                 }
             }
         }
+    }
+
+    /// Why an automatic install of `r` can't replace the app right now, read fresh, or nil when it can.
+    private func automaticBlocker(_ r: LatestRelease) -> String? {
+        if !host.checking { return "checks are off" }
+        if !host.autoInstall { return "automatic installs are off" }
+        if host.surfaces.busy { return "the app is in use" }
+        if r.tag == store.string(forKey: Self.autoFailedKey) { return "it failed before" }
+        return nil
     }
 
     /// After an automatic update restarts the app: a quiet "now on 2.4".

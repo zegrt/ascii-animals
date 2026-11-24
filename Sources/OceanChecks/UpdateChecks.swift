@@ -275,8 +275,8 @@ private func updateTimerChecks() {
         e.settingsChanged()
         try expect(!host.scheduled, "turning checks off left them running")
         // Check for Updates still works by hand.
-        e.check(userInitiated: true)
         host.feed = FeedResponse(status: 200, body: releaseJSON("v3.0"))
+        e.check(userInitiated: true)
         host.release()
         try expect(host.fetches == 1 && host.said(isUpToDate), "the manual check: \(host.fetches), \(host.told)")
     }

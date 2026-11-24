@@ -22,6 +22,9 @@ final class UpdateService: NSObject, UNUserNotificationCenterDelegate, UpdateHos
     private var engine: UpdateEngine?
     private var timer: Timer?
     private var firstLook: Timer?
+    private var observers: [NSObjectProtocol] = []
+    /// Menus being tracked right now (NSMenu's begin/end notifications).
+    private var menusOpen = 0
     private var enabled: () -> Bool = { false }
     private var autoInstallSetting: () -> Bool = { false }
 
@@ -41,6 +44,16 @@ final class UpdateService: NSObject, UNUserNotificationCenterDelegate, UpdateHos
         let e = UpdateEngine(store: UserDefaults.standard, host: self)
         e.onChange = onChange
         engine = e
+        let nc = NotificationCenter.default
+        observers.append(nc.addObserver(forName: SettingsStore.didChange, object: nil, queue: .main) { [weak self] _ in
+            self?.engine?.settingsChanged()
+        })
+        observers.append(nc.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.menusOpen += 1
+        })
+        observers.append(nc.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+            if let self { self.menusOpen = max(0, self.menusOpen - 1) }
+        })
         e.start()
     }
 
@@ -59,7 +72,20 @@ final class UpdateService: NSObject, UNUserNotificationCenterDelegate, UpdateHos
     var now: Date { Date() }
     var checking: Bool { enabled() }
     var autoInstall: Bool { autoInstallSetting() }
-    var surfaces: UpdateSurfaces { UpdateSurfaces(appActive: NSApp.isActive) }
+    /// Read from the app's real state each time it's asked: frontmost; one of its own windows up, focused or not
+    /// (Settings, About, the welcome, the what's-new card, an alert), not the wallpaper windows at the desktop level or
+    /// the menu-bar icon's; a menu open (being tracked).
+    var surfaces: UpdateSurfaces {
+        let menuOpen: Bool = menusOpen > 0 || RunLoop.main.currentMode == .eventTracking
+        return UpdateSurfaces(appActive: NSApp.isActive, windowUp: Self.windowUp(), menuOpen: menuOpen)
+    }
+
+    private static func windowUp() -> Bool {
+        if NSApp.modalWindow != nil || OnboardingController.isShowing { return true }
+        return NSApp.windows.contains { w in
+            w.isVisible && w.level.rawValue >= NSWindow.Level.normal.rawValue && !w.className.hasPrefix("NSStatusBar")
+        }
+    }
     var runningVersion: String { AppInfo.version }
     var installBlocker: String? { SelfUpdater.blocker() }
     /// The app bundle can post notifications; a bare debug binary can't.

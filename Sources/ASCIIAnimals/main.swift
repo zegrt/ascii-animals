@@ -139,9 +139,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         OnboardingController.show(app: self)
     }
-    /// Opens a prefilled GitHub issue in the browser (nothing is sent until the user submits it).
+    /// Shows exactly what goes into the GitHub issue first (`Diagnostics.review`); only if the person goes ahead does
+    /// the prefilled form open in the browser (nothing is posted until they submit it).
     func reportProblem() {
-        NSWorkspace.shared.open(IssueReport.url(base: AppInfo.issuesURL, title: Diagnostics.reportTitle, body: Diagnostics.form(app: self)))
+        guard let body = Diagnostics.review(app: self) else { return }
+        NSWorkspace.shared.open(IssueReport.url(base: AppInfo.issuesURL, title: Diagnostics.reportTitle, body: body))
     }
 
     /// Copies the diagnostics summary to the clipboard.

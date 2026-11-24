@@ -4,6 +4,8 @@ import OceanKit
 /// Settings persisted in UserDefaults as tolerant JSON.
 final class SettingsStore {
     static let key = "settings.v2"
+    /// Posted after a change, for those besides `onChange` that follow a setting (the updater's timers).
+    static let didChange = Notification.Name("SettingsStore.didChange")
     private let defaults = UserDefaults.standard
     var onChange: ((_ old: Settings, _ new: Settings) -> Void)?
 
@@ -71,5 +73,6 @@ final class SettingsStore {
         settings = s
         if persists { defaults.set(SettingsCodec.encode(s), forKey: SettingsStore.key) }
         onChange?(old, s)
+        NotificationCenter.default.post(name: SettingsStore.didChange, object: self)
     }
 }
