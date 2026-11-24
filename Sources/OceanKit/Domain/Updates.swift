@@ -300,14 +300,24 @@ public struct FeedResponse: Sendable {
     public var body: Data?
     public var etag: String?
     public var error: String?
-    public init(status: Int?, body: Data? = nil, etag: String? = nil, error: String? = nil) {
-        self.status = status; self.body = body; self.etag = etag; self.error = error
+    /// The transport error's domain and code, for the log (`UpdateFailure.code(of:)`).
+    public var errorCode: String?
+    public init(status: Int?, body: Data? = nil, etag: String? = nil, error: String? = nil, errorCode: String? = nil) {
+        self.status = status; self.body = body; self.etag = etag; self.error = error; self.errorCode = errorCode
     }
 }
 
 public struct UpdateFailure: Error, Equatable, CustomStringConvertible, Sendable {
+    /// For the person.
     public let description: String
-    public init(_ d: String) { description = d }
+    /// For the log: an error only by its domain and code, never its free-form text.
+    public let logText: String
+    public init(_ d: String, log: String? = nil) { description = d; logText = log ?? d }
+    /// "Error Domain=NSCocoaErrorDomain Code=513": what the log keeps of an error.
+    public static func code(of error: Error) -> String {
+        let ns = error as NSError
+        return "Error Domain=\(ns.domain) Code=\(ns.code)"
+    }
 }
 
 /// A release downloaded and checked, ready to swap in. `app` is the checked copy; `folder` holds the download.

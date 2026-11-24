@@ -28,6 +28,8 @@ private final class FakeHost: UpdateHost {
     /// What the next feed request answers.
     var feed: FeedResponse = FeedResponse(status: 200, body: releaseJSON("v3.1"), etag: "\"a\"")
     var startAnswer: Bool = true
+    /// What the swap answers when it fails (nil: it works).
+    var commitFailure: UpdateFailure? = nil
     var offerAnswer: Bool = true
 
     var scheduled: Bool = false
@@ -58,6 +60,7 @@ private final class FakeHost: UpdateHost {
         pending.append { done(.success(s)) }
     }
     func commit(_ staged: StagedUpdate) -> Result<URL, UpdateFailure> {
+        if let commitFailure { return .failure(commitFailure) }
         committed.append(staged.release.tag)
         return .success(URL(fileURLWithPath: "/fake/ASCII Animals.app"))
     }
@@ -89,14 +92,17 @@ private func releaseJSON(_ tag: String) -> Data {
 
 /// An engine whose store already knows release `tag` from a check an hour ago (so the next tick isn't a check and
 /// tries the waiting release instead). Started while the person is in the app (so nothing installs at the start),
-/// then with nothing up, and the host's notices and counts cleared.
-private func engineKnowing(_ tag: String, _ host: FakeHost) -> UpdateEngine {
+/// then with nothing up, and the host's notices and counts cleared. `noticeSent: false`: the earlier check's notice
+/// didn't go (the release is known from the cache, as after a restart).
+private func engineKnowing(_ tag: String, _ host: FakeHost, noticeSent: Bool = true) -> UpdateEngine {
     let store = MemoryStore()
     let warm = UpdateEngine(store: store, host: host)
     host.autoInstall = false
+    host.canNotify = noticeSent
     host.feed = FeedResponse(status: 200, body: releaseJSON(tag), etag: "\"a\"")
     warm.check(userInitiated: false)
     host.release()
+    host.canNotify = true
     host.autoInstall = true
     host.now = host.now.addingTimeInterval(3600)
     let e = UpdateEngine(store: store, host: host)
@@ -117,7 +123,9 @@ func updateChecks() {
     updateFeedChecks()
     updateRestartChecks()
     updateTimerChecks()
+    updateRound1Checks()
     reportFormChecks()
+    reportRound1Checks()
     // Last: on 971a216 an extreme saved fps traps (overflow), which ends the run.
     settingsExtremeChecks()
 }
@@ -170,7 +178,10 @@ private func updateBusyChecks() {
             }
             host.release()
             try expect(host.committed.isEmpty && host.quits == 0, "\(change): replaced the app anyway")
-            try expect(host.discarded == ["v3.1"], "\(change): the download wasn't thrown away: \(host.discarded)")
+            // In use: the checked download is kept for the next try. Turned off: it goes.
+            let inUse: Bool = change == "Settings opens" || change == "a menu opens"
+            let wantDiscarded: [String] = inUse ? [] : ["v3.1"]
+            try expect(host.discarded == wantDiscarded, "\(change): discarded \(host.discarded), want \(wantDiscarded)")
             try expect(e.available?.tag == "v3.1", "\(change): the release isn't offered any more: \(e.state)")
         }
     }
@@ -366,4 +377,205 @@ private func settingsExtremeChecks() {
         let sharks: Settings = SettingsCodec.decode(Data(#"{"sharks":["tiger"],"fps":60,"speed":1.4}"#.utf8))
         try expect(sharks.fps == 60 && sharks.sharks == [.tiger], "Sharks: \(sharks)")
     }
+}
+
+// MARK: - Fix round 1 (review-r3 @ 04a9e42, findings 3, 4, 5 and the updater's own log lines from 1)
+
+private func updateRound1Checks() {
+    // Finding 3: a published stable release whose tag isn't a version, or whose page isn't an absolute URL, is a
+    // failed check, never "up to date". A draft or a prerelease still offers nothing.
+    func malformedStableReleaseFails() throws {
+        let page: String = "https://github.com/zegrt/ascii-animals/releases/tag/v3.1"
+        let cases: [(String, String)] = [
+            ("tag isn't a version", #"{"tag_name":"latest-build","html_url":"\#(page)","body":"x"}"#),
+            ("relative page URL", #"{"tag_name":"v3.1","html_url":"releases/tag/v3.1","body":"x"}"#),
+        ]
+        for (name, json) in cases {
+            let host = FakeHost()
+            let e = UpdateEngine(store: MemoryStore(), host: host)
+            host.feed = FeedResponse(status: 200, body: Data(json.utf8), etag: "\"m\"")
+            e.check(userInitiated: true)
+            host.release()
+            try expect(!host.said(isUpToDate), "\(name): said you're up to date: \(host.told)")
+            try expect(host.said(isCouldNotCheck), "\(name): the person wasn't told the check failed: \(host.told)")
+            if case .failed = e.state {} else { try expect(false, "\(name): state \(e.state)") }
+        }
+        let excluded: [(String, String)] = [
+            ("draft", #"{"tag_name":"nightly","html_url":"x","draft":true}"#),
+            ("prerelease", #"{"tag_name":"v9.0-beta","html_url":"https://github.com/o/r/releases/tag/b","prerelease":true}"#),
+        ]
+        for (name, json) in excluded {
+            let host = FakeHost()
+            let e = UpdateEngine(store: MemoryStore(), host: host)
+            host.feed = FeedResponse(status: 200, body: Data(json.utf8))
+            e.check(userInitiated: true)
+            host.release()
+            try expect(e.available == nil && host.staged.isEmpty, "\(name): offered an install: \(e.state)")
+            try expect(!host.said(isCouldNotCheck), "\(name): reported as a failed check: \(host.told)")
+        }
+    }
+    check("updateMalformedStableReleaseIsAFailedCheck", malformedStableReleaseFails)
+
+    // Finding 4: a scheduled check is out when the person installs; the check then fails. The install stays in
+    // progress, so a second check and a second install can't start, and only one download is swapped in.
+    func feedFailureKeepsTheInstall() throws {
+        let host = FakeHost()
+        let e = engineKnowing("v3.1", host)
+        host.now = host.now.addingTimeInterval(21 * 3600)
+        host.surfaces = UpdateSurfaces(appActive: true)
+        host.feed = FeedResponse(status: 502)
+        e.tick()                       // the scheduled check, still out
+        e.install()                    // the person picks the release from the menu
+        try expect(host.staged == ["v3.1"], "the install didn't start: \(host.staged)")
+        let feedAnswer: () -> Void = host.pending.removeFirst()
+        feedAnswer()                   // the check fails while the download runs
+        try expect(e.installing?.tag == "v3.1", "the failed check replaced the install: \(e.state)")
+        host.feed = FeedResponse(status: 200, body: releaseJSON("v3.1"))
+        e.check(userInitiated: true)   // the person checks again and accepts, before the first download is in
+        if host.pending.count > 1 {
+            let second: () -> Void = host.pending.removeLast()
+            second()
+        }
+        host.release()
+        try expect(host.staged == ["v3.1"], "a second download started: \(host.staged)")
+        try expect(host.committed == ["v3.1"], "swapped in \(host.committed.count) times: \(host.committed)")
+    }
+    check("updateFeedFailureKeepsTheInstall", feedFailureKeepsTheInstall)
+
+    // Finding 5: an automatic update held because the app is in use says so once, and its checked download waits
+    // for the next try instead of being fetched again.
+    func heldAtTheTick() throws {
+        let host = FakeHost()
+        let e = engineKnowing("v3.1", host, noticeSent: false)
+        host.surfaces = UpdateSurfaces(windowUp: true)
+        for _ in 0..<3 {
+            host.now = host.now.addingTimeInterval(3600)
+            e.tick()
+            host.release()
+        }
+        try expect(host.notified == ["update-v3.1"], "notices while held: \(host.notified)")
+        try expect(host.committed.isEmpty, "replaced the app while in use")
+    }
+    check("updateHeldAtTheTickNotifiesOnce", heldAtTheTick)
+
+    func heldAtTheSwap() throws {
+        let host = FakeHost()
+        let e = engineKnowing("v3.1", host, noticeSent: false)
+        e.tick()
+        host.surfaces = UpdateSurfaces(menuOpen: true)   // a menu opens as the download is ready
+        host.release()
+        for surfaces in [UpdateSurfaces(menuOpen: true), UpdateSurfaces(windowUp: true)] {
+            host.now = host.now.addingTimeInterval(3600)
+            host.surfaces = surfaces                      // still in use at the next tries
+            e.tick()
+            host.release()
+        }
+        try expect(host.staged == ["v3.1"], "downloaded \(host.staged.count) times: \(host.staged)")
+        try expect(host.discarded.isEmpty, "the checked download was thrown away: \(host.discarded)")
+        try expect(host.notified == ["update-v3.1"], "notices while held: \(host.notified)")
+        try expect(host.committed.isEmpty, "replaced the app with a menu open")
+        // Nothing up: the kept download goes in, without a new one.
+        host.now = host.now.addingTimeInterval(3600)
+        host.surfaces = UpdateSurfaces()
+        e.tick()
+        host.release()
+        try expect(host.staged == ["v3.1"] && host.committed == ["v3.1"], "staged \(host.staged), swapped \(host.committed)")
+    }
+    check("updateHeldAtTheSwapKeepsTheDownload", heldAtTheSwap)
+
+    // Finding 5: the kept download goes when it no longer applies (automatic installs off, or a newer release).
+    func heldDownloadDropped() throws {
+        for change in ["automatic installs off", "a newer release"] {
+            let host = FakeHost()
+            let e = engineKnowing("v3.1", host)
+            e.tick()
+            host.surfaces = UpdateSurfaces(menuOpen: true)
+            host.release()
+            try expect(host.discarded.isEmpty, "\(change): not kept in the first place")
+            if change == "automatic installs off" {
+                host.autoInstall = false
+                e.settingsChanged()
+            } else {
+                host.now = host.now.addingTimeInterval(21 * 3600)
+                host.feed = FeedResponse(status: 200, body: releaseJSON("v3.2"))
+                e.tick()
+                host.release()
+            }
+            try expect(host.discarded == ["v3.1"], "\(change): the kept v3.1 download stayed: \(host.discarded)")
+        }
+    }
+    check("updateHeldDownloadDroppedWhenItNoLongerApplies", heldDownloadDropped)
+
+    // Finding 1, the updater's own lines: an error is logged by its domain and code only.
+    func updaterLogsCodes() throws {
+        let host = FakeHost()
+        let e = engineKnowing("v3.1", host)
+        host.commitFailure = UpdateFailure("Couldn't replace the app: You can’t save the file “ASCII Animals” because the volume “Jane's Photos” is read only.",
+                                           log: "Couldn't replace the app: Error Domain=NSCocoaErrorDomain Code=642")
+        e.install()
+        host.release()
+        host.feed = FeedResponse(status: nil, error: "The file “Jane's Photos” couldn’t be opened.",
+                                 errorCode: "Error Domain=NSCocoaErrorDomain Code=260")
+        e.check(userInitiated: false)
+        host.release()
+        let logged: String = host.lines.joined(separator: "\n")
+        try expect(!logged.contains("Jane"), "a volume name in the log:\n\(logged)")
+        try expect(logged.contains("Code=642") && logged.contains("Code=260"), "the codes are missing:\n\(logged)")
+    }
+    check("updateLogKeepsErrorCodesOnly", updaterLogsCodes)
+}
+
+// MARK: - Fix round 1 (review-r3 @ 04a9e42, findings 1 and 6): the opted-in log and the form
+
+private func reportRound1Checks() {
+    let base: URL = URL(string: "https://github.com/o/r/issues/new")!
+    let home: String = "/Volumes/Data/jane doe"
+    func facts(_ log: [String]) -> DiagnosticFacts {
+        DiagnosticFacts(appVersion: "3.1 (12)", macOS: "26.1.0", model: "Mac17,9", displays: [], power: "AC power",
+                        mode: "Ocean, live", settingsJSON: #"{"fps":30}"#, crashedLastTime: false, logTail: log,
+                        displaySizes: ["2560x1440 @2x 60 Hz"])
+    }
+    func form(_ log: [String]) -> String {
+        IssueReport.form(facts(log), includeLog: true, homePath: home, userName: "jdoe", fullName: "Jane Doe",
+                         base: base, title: "Problem: ")
+    }
+    /// What Log.write and Log.tail make of a message: a stamp, then the text split at its newlines.
+    func logged(_ message: String) -> [String] {
+        "2026-11-25T10:00:00Z \(message)".split(separator: "\n").map(String.init)
+    }
+
+    // A real Foundation file error on a named volume (nothing is there: reading the folder just fails), and a home
+    // folder on a named volume as a file URL, percent-encoded.
+    func errorsAndEncodedHome() throws {
+        var lines: [String] = []
+        do {
+            _ = try FileManager.default.contentsOfDirectory(atPath: "/Volumes/Jane's Photos")
+            try expect(false, "the fixture folder exists")
+        } catch {
+            lines += logged("still failed: \(error)")
+        }
+        let homeURL: URL = URL(fileURLWithPath: home + "/Pictures/a b.png")
+        lines += logged("wallpaper: \(homeURL.absoluteString)")
+        lines += logged("next line")
+        let text: String = form(lines)
+        for leak in ["Jane", "Photos", "doe", "jane"] {
+            try expect(!text.contains(leak), "\(leak) left in:\n\(text)")
+        }
+        try expect(text.contains("still failed: Error Domain=NSCocoaErrorDomain Code=260"), "the error's domain and code are missing:\n\(text)")
+        try expect(text.contains("next line"), "a later line went too:\n\(text)")
+    }
+    check("reportLogErrorsKeepDomainAndCode", errorsAndEncodedHome)
+
+    // Finding 6: a literal + reaches the form as +, read the way a web form reads its query.
+    func plusSurvivesFormDecoding() throws {
+        let shown: String = form(logged("speed 1+1 = 2, C++ and a+b"))
+        let u: URL = IssueReport.url(base: base, title: "Problem: +", body: shown)
+        let items: [URLQueryItem] = URLComponents(url: u, resolvingAgainstBaseURL: false)?.percentEncodedQueryItems ?? []
+        func formDecoded(_ name: String) -> String? {
+            items.first { $0.name == name }?.value?.replacingOccurrences(of: "+", with: " ").removingPercentEncoding
+        }
+        try expect(formDecoded("body") == shown, "the body read as a form differs from what was shown")
+        try expect(formDecoded("title") == "Problem: +", "the title read as a form: \(formDecoded("title") ?? "nil")")
+    }
+    check("reportPlusSurvivesFormDecoding", plusSurvivesFormDecoding)
 }
