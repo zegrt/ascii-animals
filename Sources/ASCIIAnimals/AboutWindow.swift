@@ -13,6 +13,9 @@ enum AboutWindow {
         controller?.show()
     }
 
+    /// The machine's state changed: the strip follows the previews' policy while the window is up.
+    static func powerChanged(_ i: PowerInputs) { controller?.powerChanged(i) }
+
     /// Debug: render to a PNG (no Screen Recording needed). `--snapshot-about <png>`
     /// `ASCII_ANIMALS_SNAPSHOT_LIGHT=1` snapshots the light appearance, `ASCII_ANIMALS_SNAPSHOT_HABITAT=web|meadow`
     /// the Web or the Meadow (default the Ocean). Prints the strip's accessibility label.
@@ -63,6 +66,7 @@ final class AboutController: NSObject, NSWindowDelegate {
     private let model = AboutModel()
     private var window: NSWindow?
     private var ocean: LiveOceanView?
+    private var appearance: NSKeyValueObservation?
 
     init(app: AppDelegate) {
         self.app = app
@@ -95,20 +99,35 @@ final class AboutController: NSObject, NSWindowDelegate {
             w.contentView = host
             w.center()
             window = w
+            // The Mac turning light or dark: the strip follows (effectiveAppearance settles a pass later).
+            appearance = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+                DispatchQueue.main.async { self?.themeChanged() }
+            }
         }
         model.habitat = s.habitat
         if let ocean {
             // The habitat or line-up may have changed since the window was made.
             ocean.setTheme(OceanDirector.currentTheme(s))
             ocean.rebuild(s, reopening: true)
-            ocean.start()
+            // Reduce Motion and Low Power Mode hold a still, as on the desktop.
+            ocean.run(PowerPolicy.preview(app.signals.inputs))
         }
         model.checking = app.updates.state == .checking
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
     }
 
-    func windowWillClose(_ notification: Notification) { ocean?.stop() }
+    func windowWillClose(_ notification: Notification) { ocean?.run(.paused) }
+
+    func powerChanged(_ i: PowerInputs) {
+        guard window?.isVisible == true else { return }
+        ocean?.run(PowerPolicy.preview(i))
+    }
+
+    private func themeChanged() {
+        guard window?.isVisible == true else { return }
+        ocean?.setTheme(OceanDirector.currentTheme(app.store.settings))
+    }
 }
 
 // MARK: - View

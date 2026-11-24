@@ -23,8 +23,7 @@ enum WhatsNewCard {
     static let closeLabel = "Close"
 
     private static var current: WhatsNewSession?
-    private static var presenter: WhatsNew.Presenter?
-    private static var looker: Timer?
+    private static var looker: GreetingLooker?
     /// Counts awake, unlocked time while an unanswered card waits to come back.
     private static var accruer: Timer?
 
@@ -72,17 +71,19 @@ enum WhatsNewCard {
         markShown(preview: preview)
     }
 
-    /// A card went (`reason`), its content reached or not (`WhatsNewSession.contentReached`): what its showing comes to.
+    /// A card went (`reason`), its content reached or not (`WhatsNewSession.contentReached`): what its showing comes
+    /// to. Cut short before its content, it is owed again (`WhatsNew.Showings.closed`).
     static func cardWent(_ reason: WhatsNew.CloseReason, reached: Bool, preview: Bool) {
-        update(preview: preview) { $0.closed(reason) }
+        update(preview: preview) { $0.closed(reason, reached: reached) }
     }
 
     // MARK: Waiting
 
     /// From launch (`OnboardingController.showIfNeeded`): the card is due, or comes back once its 3 hours have passed.
     /// Due, it comes about a second later, and only once the screen can be seen: after an automatic update at night it
-    /// waits for the screen to wake and unlock rather than spend a showing on a locked screen. It looks once a second
-    /// (`WhatsNew.Presenter`); every look reads the session, lock and displays live. Not due yet, it counts awake,
+    /// waits for the screen to wake and unlock rather than spend a showing on a locked screen. It looks when the lock,
+    /// the screensaver, sleep or the displays change, and otherwise only when `WhatsNew.Presenter.nextLook` asks
+    /// (`GreetingLooker`); every look reads the session, lock and displays live. Not due yet, it counts awake,
     /// unlocked time every 30 s (`WhatsNew.Showings.accrue`), saved as it goes, and looks again when it is.
     static func showWhenSeen(app: AppDelegate) {
         stopLooking()
@@ -105,10 +106,7 @@ enum WhatsNewCard {
                                        // Tools/energy.sh preview waits for this line, bound to its launch id.
                                        if previewing { Log.write(EnergyLog.cardShown(pid: getpid(), launch: Launch.plan.launchID)) }
                                    })
-        presenter = p
-        looker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            if p.look() != .keepWaiting { stopLooking() }
-        }
+        looker = GreetingLooker(p, firstLookAfter: 1) { stopLooking() }
     }
 
     private static func accrue(_ app: AppDelegate) {
@@ -127,12 +125,10 @@ enum WhatsNewCard {
     }
 
     private static func stopLooking() {
-        looker?.invalidate()
+        looker?.cancel()
         looker = nil
         accruer?.invalidate()
         accruer = nil
-        presenter?.cancel()
-        presenter = nil
     }
 
     private static func moment(_ app: AppDelegate) -> WhatsNew.Moment {
@@ -246,7 +242,7 @@ enum WhatsNewCard {
     /// welcome that reached the screen ends the card for good: `Handover.meadowCardKey`).
     @discardableResult
     static func dismiss() -> Bool {
-        let waiting: Bool = presenter != nil || accruer != nil || current != nil
+        let waiting: Bool = looker != nil || accruer != nil || current != nil
         stopLooking()
         current?.close(trying: false, now: true, reason: .welcome)
         current = nil
@@ -259,9 +255,13 @@ enum WhatsNewCard {
         current?.settingsChanged(s)
     }
 
-    /// The machine's state changed: the live preview holds a still in Low Power Mode and stops when it can't be seen.
+    /// The machine's state changed: the live preview holds a still in Low Power Mode and stops when it can't be seen;
+    /// a waiting card looks again (it may be seeable now). The welcome and About previews follow the same policy.
     static func powerChanged(_ i: PowerInputs) {
         current?.apply(power: i)
+        looker?.look()
+        OnboardingController.powerChanged(i)
+        AboutWindow.powerChanged(i)
     }
 
     // MARK: Placement
@@ -696,6 +696,51 @@ enum WhatsNewCard {
     }
 }
 
+/// A greeting (the card, the welcome) waiting for a screen that can be seen: it looks when told something changed
+/// (`look`, from the machine's state; a display change), and on its own only when the presenter asks
+/// (`WhatsNew.Presenter.nextLook`: a second to confirm a clear look, else a slow backstop). No 1 s poll.
+final class GreetingLooker {
+    private let presenter: WhatsNew.Presenter
+    private let done: () -> Void
+    private var timer: Timer?
+    private var observer: NSObjectProtocol?
+
+    init(_ presenter: WhatsNew.Presenter, firstLookAfter: TimeInterval, done: @escaping () -> Void) {
+        self.presenter = presenter
+        self.done = done
+        observer = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                                          object: nil, queue: .main) { [weak self] _ in self?.look() }
+        schedule(after: firstLookAfter)
+    }
+
+    /// Looks now: opens, keeps waiting (and schedules the next look of its own), or stops.
+    func look() {
+        guard !presenter.finished else { return }
+        if presenter.look() != .keepWaiting {
+            cancel()
+            done()
+            return
+        }
+        if let after = presenter.nextLook { schedule(after: after) }
+    }
+
+    func cancel() {
+        timer?.invalidate()
+        timer = nil
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+        observer = nil
+        presenter.cancel()
+    }
+
+    private func schedule(after seconds: TimeInterval) {
+        timer?.invalidate()
+        let t = Timer(timeInterval: seconds, repeats: false) { [weak self] _ in self?.look() }
+        t.tolerance = seconds >= 10 ? 5 : 0.1
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+}
+
 /// What a card needs from the app: its settings, the Meadow when tried. The app is one; the probe has a stand-in.
 protocol WhatsNewHost: AnyObject {
     var cardSettings: OceanKit.Settings { get }
@@ -732,7 +777,8 @@ private final class ProbeHost: WhatsNewHost {
 // MARK: - Model
 
 final class WhatsNewModel: ObservableObject {
-    let light: Bool
+    /// Follows the Mac's light and dark (`WhatsNewSession.themeChanged`).
+    @Published var light: Bool
     /// The habitat that stays: "Keep the Ocean" or "Keep the Web". Follows a change made elsewhere.
     @Published var keep: HabitatKind
     let reduceMotion: Bool
@@ -816,7 +862,12 @@ final class WhatsNewSession {
     private var observers: [NSObjectProtocol] = []
     private var typer: Timer?
     private var blinker: Timer?
+    /// Ticks before the title starts typing.
+    private var typingPause = 12
     private var closing = false
+    /// Faded in and counting (`arm`): its timers run whenever it can be seen.
+    private var armed = false
+    private var appearance: NSKeyValueObservation?
     private var preview: WhatsNew.Preview?
     var onFinish: (() -> Void)?
     /// Told once when the card starts to go, with why and how many seconds after `arm`.
@@ -916,6 +967,7 @@ final class WhatsNewSession {
     /// The card is up for good: fade in, type, listen for Esc and clicks elsewhere, and set the preview going.
     func arm(power: PowerInputs) {
         armedAt = Date()
+        armed = true
         apply(power: power)
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = model.reduceMotion ? 0.2 : 0.45
@@ -930,30 +982,53 @@ final class WhatsNewSession {
         }) { monitors.append(m) }
         // A click elsewhere leaves the card be (it reaches what was clicked); untouched, the card goes by itself.
         hovering = panel.frame.contains(NSEvent.mouseLocation)
-        lastTick = CACurrentMediaTime()
-        ticker = CommonTimer.repeating(every: 1.0 / 30) { [weak self] _ in
-            guard let self else { return }
-            let now: CFTimeInterval = CACurrentMediaTime()
-            self.advance(by: now - self.lastTick)
-            self.lastTick = now
-        }
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                                 object: nil, queue: .main) { [weak self] _ in
             self?.close(trying: false, reason: .screens)
         })
+        // The Mac turning light or dark: the card and its Meadow follow (effectiveAppearance settles a pass later).
+        appearance = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.themeChanged() }
+        }
+        if model.reduceMotion { model.finishTyping() }
+        if preview != .stopped { startTicking() }
+    }
 
-        if model.reduceMotion {
-            model.finishTyping()
-        } else {
-            var pause = 12
-            typer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] t in
-                guard let self else { t.invalidate(); return }
-                if pause > 0 { pause -= 1; return }
-                self.model.typedTitle += 1
-                if !self.model.isTyping { t.invalidate() }
+    /// The countdown, the typing and the cursor's blink: running only while the card can be seen (`apply`).
+    private func startTicking() {
+        guard armed, !closing else { return }
+        if ticker == nil {
+            lastTick = CACurrentMediaTime()
+            ticker = CommonTimer.repeating(every: 1.0 / 30) { [weak self] _ in
+                guard let self else { return }
+                let now: CFTimeInterval = CACurrentMediaTime()
+                self.advance(by: now - self.lastTick)
+                self.lastTick = now
             }
         }
-        blinker = Timer.scheduledTimer(withTimeInterval: 0.53, repeats: true) { [weak self] _ in self?.model.cursorOn.toggle() }
+        if typer == nil, model.isTyping {
+            typer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] t in
+                guard let self else { t.invalidate(); return }
+                if self.typingPause > 0 { self.typingPause -= 1; return }
+                self.model.typedTitle += 1
+                if !self.model.isTyping {
+                    t.invalidate()
+                    self.typer = nil
+                }
+            }
+        }
+        if blinker == nil {
+            blinker = Timer.scheduledTimer(withTimeInterval: 0.53, repeats: true) { [weak self] _ in self?.model.cursorOn.toggle() }
+        }
+    }
+
+    private func stopTicking() {
+        ticker?.invalidate()
+        ticker = nil
+        typer?.invalidate()
+        typer = nil
+        blinker?.invalidate()
+        blinker = nil
     }
 
     /// The countdown moves on by `seconds`: paused while the pointer is over the card or nothing is drawn (the screen
@@ -972,11 +1047,24 @@ final class WhatsNewSession {
     func pressCloseForProbe() { model.onClose() }
 
     var countdownRemaining: Double { countdown.remaining }
-    /// The machine's state changed: the preview for it.
-    func apply(power i: PowerInputs) { apply(WhatsNew.preview(i)) }
+    /// The machine's state changed: the preview for it, live at the previews' rate (`PowerPolicy.preview`).
+    func apply(power i: PowerInputs) {
+        if case .live(let fps) = PowerPolicy.preview(i), !closing { live.run(.live(fps: fps)) }
+        apply(WhatsNew.preview(i))
+    }
 
-    /// The Mac's light or dark look changed.
-    func themeChanged() {}
+    /// The Mac's light or dark look changed: the card's colours, its live Meadow and its still follow.
+    func themeChanged() {
+        guard !closing else { return }
+        let theme: ThemeParams = OceanDirector.currentTheme(WhatsNewSession.meadow(host?.cardSettings ?? .defaults))
+        live.setTheme(theme)
+        guard theme.light != model.light else { return }
+        model.light = theme.light
+        if model.still != nil {
+            model.still = try? WhatsNewSession.still(settings: host?.cardSettings ?? .defaults, light: theme.light,
+                                                     preview: model.previewSize, renderer: renderer)
+        }
+    }
 
     var isLight: Bool { model.light }
     var liveFPS: Int { live.fps }
@@ -1006,17 +1094,21 @@ final class WhatsNewSession {
         case .live:
             model.liveAttached = true
             model.cover = false
-            live.start()
+            if live.fps == 0 { live.run(.live(fps: 60)) }
+            startTicking()
         case .still:
-            live.stop()
+            live.run(.paused)
+            startTicking()
             if model.still == nil {
                 model.still = try? WhatsNewSession.still(settings: host?.cardSettings ?? .defaults, light: model.light,
                                                          preview: model.previewSize, renderer: renderer)
             }
             model.cover = true
         case .stopped:
-            live.stop()
+            // Nobody can see it: nothing drawn, nothing ticking.
+            live.run(.paused)
             model.cover = true
+            stopTicking()
         }
     }
 
@@ -1048,11 +1140,10 @@ final class WhatsNewSession {
         monitors = []
         for o in observers { NotificationCenter.default.removeObserver(o) }
         observers = []
-        typer?.invalidate()
-        blinker?.invalidate()
-        ticker?.invalidate()
-        ticker = nil
-        live.stop()
+        stopTicking()
+        appearance?.invalidate()
+        appearance = nil
+        live.run(.paused)
         if now { teardown(); return }
         let duration: Double = trying && !model.reduceMotion ? 0.6 : 0.25
         NSAnimationContext.runAnimationGroup({ ctx in

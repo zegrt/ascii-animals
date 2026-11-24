@@ -57,17 +57,14 @@ public enum PowerPolicy {
         return .live(fps: fps)
     }
 
-    /// The live previews (the what's-new card, the welcome, About): the card's rule, live at up to 60 fps.
+    /// The live previews (the what's-new card, the welcome, About): the desktop's own rule (Reduce Motion, Low Power
+    /// Mode, heat, the rate on battery), except that a paused desktop or covered desktop windows don't stop a preview
+    /// someone is looking at.
     public static func preview(_ i: PowerInputs) -> RunMode {
         var c = i
         c.anyWindowVisible = true
         c.userPaused = false
-        c.reduceMotion = false
-        switch mode(c) {
-        case .paused: return .paused
-        case .still: return .still
-        case .live: return .live(fps: 60)
-        }
+        return mode(c)
     }
 
     /// Replace the lock / session / screensaver flags with what the OS says now,

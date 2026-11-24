@@ -33,10 +33,10 @@ public enum WhatsNew {
             self.canDraw = canDraw
         }
 
-        /// The welcome's (and the Sharks Web welcome's) look at launch: it shows whenever a renderer and a display are
-        /// there.
+        /// The welcome's (and the Sharks Web welcome's) look at launch: like the card, it waits for a screen that can
+        /// be seen (not locked, asleep or under the screensaver) rather than come up where nobody sees it.
         public static func welcome(seeable: Bool, screens: Int, canDraw: Bool, welcomeUp: Bool) -> Moment {
-            Moment(seeable: true, screens: screens, shown: false, habitat: .ocean, tried: false, welcomeUp: welcomeUp,
+            Moment(seeable: seeable, screens: screens, shown: false, habitat: .ocean, tried: false, welcomeUp: welcomeUp,
                    canDraw: canDraw)
         }
     }
@@ -95,13 +95,16 @@ public enum WhatsNew {
         }
     }
 
-    /// One launch's waiting card, from its first look to its opening or its end. The app looks once a second;
-    /// `moment` reads the live state, `open` builds the card and orders it forward (true only once it is on a usable
+    /// One launch's waiting card (or welcome), from its first look to its opening or its end. The app looks when
+    /// something changes (the lock, the screensaver, the displays) and on its own only when `nextLook` asks: a second
+    /// after a clear look, to confirm it, else a slow `backstop`. `moment` reads the live state, `open` builds the card and orders it forward (true only once it is on a usable
     /// display, still seeable), and `mark` saves the once-only flag. The flag is saved only after an opening that
     /// reached the screen; a failed one waits again, unmarked.
     public final class Presenter {
         private var waiter = Waiter()
         public private(set) var finished = false
+        /// The last look was clear but not yet for a full second: look again in one.
+        private var confirming = false
         private let moment: () -> Moment
         private let open: () -> Bool
         private let mark: () -> Void
@@ -115,8 +118,11 @@ public enum WhatsNew {
         /// `.open`: it is up and marked. `.stop`: nothing more this launch. Either way the app stops looking.
         public func look() -> Step {
             guard !finished else { return .stop }
-            switch waiter.look(verdict(moment())) {
+            let v: Verdict = verdict(moment())
+            confirming = false
+            switch waiter.look(v) {
             case .keepWaiting:
+                confirming = v == .show
                 return .keepWaiting
             case .stop:
                 finished = true
@@ -135,12 +141,15 @@ public enum WhatsNew {
         /// Something else took over (the welcome from Help): no more looks.
         public func cancel() { finished = true }
 
-        /// The longest a waiting card goes without a look of its own (a missed notification can't strand it).
-        public static let backstop: Double? = nil
+        /// The longest a waiting card goes without a look of its own, so a missed notification can't strand it.
+        public static let backstop: Double? = 60
 
-        /// When the app should look again on its own, in seconds; nil: never (finished). The app looks once a second
-        /// while waiting.
-        public var nextLook: Double? { finished ? nil : 1 }
+        /// When the app should look again on its own, in seconds: 1 to confirm a clear look, else `backstop`; nil when
+        /// finished. Any change in between looks at once.
+        public var nextLook: Double? {
+            if finished { return nil }
+            return confirming ? 1 : Presenter.backstop
+        }
     }
 
     /// Why a card went (the preview logs it: `EnergyLog.cardClosed`). A click elsewhere no longer closes it.
@@ -210,10 +219,19 @@ public enum WhatsNew {
             awake = 0
         }
 
-        /// It went: for good, or to come back later. `reached`: whether its content was in front of the person.
+        /// It went: for good, or to come back later. `reached`: whether its content was in front of the person
+        /// (`WhatsNew.contentAfter`). One cut short before that (a display change) didn't happen: it is owed again at
+        /// once, not counted. An answer is an answer, reached or not.
         public mutating func closed(_ reason: CloseReason, reached: Bool = true) {
-            if reason.endsForGood { ended = true }
-            awake = 0
+            if reason.endsForGood {
+                ended = true
+                awake = 0
+            } else if !reached {
+                count = max(0, count - 1)
+                awake = Showings.returnAfter
+            } else {
+                awake = 0
+            }
         }
 
         /// Never again (the tour was seen, the Meadow picked).
@@ -316,14 +334,10 @@ public enum WhatsNew {
         case stopped
     }
 
-    /// The card's preview for the machine's state: the desktop's own rule (`PowerPolicy.mode`), except that a paused
-    /// desktop or covered windows don't stop a card someone is looking at.
+    /// The card's preview for the machine's state: the previews' rule (`PowerPolicy.preview`), Reduce Motion and Low
+    /// Power as the desktop has them.
     public static func preview(_ i: PowerInputs) -> Preview {
-        var c = i
-        c.anyWindowVisible = true
-        c.userPaused = false
-        c.reduceMotion = false
-        switch PowerPolicy.mode(c) {
+        switch PowerPolicy.preview(i) {
         case .paused: return .stopped
         case .still: return .still
         case .live: return .live

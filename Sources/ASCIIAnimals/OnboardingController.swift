@@ -10,6 +10,8 @@ import SwiftUI
 enum OnboardingController {
     static let seenKey = "onboarded.v1"
     private static var current: OnboardingSession?
+    /// The launch's welcome, waiting for a screen that can be seen.
+    private static var looker: GreetingLooker?
 
     /// First launch: the tour. After the hand-over from ASCII Sharks (which skips it): the Web card, once. Upgrading
     /// to 3.1: the small Meadow card under the menu bar icon, once (`WhatsNewCard`).
@@ -27,14 +29,35 @@ enum OnboardingController {
         case .meadowCard:
             WhatsNewCard.showWhenSeen(app: app)
         case .tour, .webCard:
-            // A moment for the desktop habitat to come up first, so the dissolve has something to reveal.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { present(app: app, card: welcome == .webCard) }
+            // A moment for the desktop habitat to come up first, so the dissolve has something to reveal; and, like
+            // the card, only on a screen that can be seen (not locked, asleep or under the screensaver): it looks again
+            // when that changes.
+            let card: Bool = welcome == .webCard
+            let p = WhatsNew.Presenter(moment: { moment(app) }, open: {
+                present(app: app, card: card)
+                return isShowing
+            }, mark: {})
+            looker = GreetingLooker(p, firstLookAfter: 0.8) { looker = nil }
         }
+    }
+
+    private static func moment(_ app: AppDelegate) -> WhatsNew.Moment {
+        let seen: Bool = WhatsNewCard.target(app).map { WhatsNewCard.seeable(app, NSScreen.screens[$0.screen]) } ?? false
+        return .welcome(seeable: seen, screens: NSScreen.screens.count, canDraw: app.director?.renderer != nil,
+                        welcomeUp: isShowing)
+    }
+
+    /// The machine's state changed: a waiting welcome looks again; one up follows the previews' policy.
+    static func powerChanged(_ i: PowerInputs) {
+        looker?.look()
+        current?.powerChanged(i)
     }
 
     /// The welcome from Help. The Meadow card goes first, at once, and stops waiting; if the welcome couldn't open,
     /// a card that was still waiting waits again (it reads the saved flag at every look).
     static func show(app: AppDelegate) {
+        looker?.cancel()
+        looker = nil
         let cardWaiting: Bool = WhatsNewCard.dismiss()
         present(app: app, card: false)
         if cardWaiting && !isShowing { WhatsNewCard.showWhenSeen(app: app) }
@@ -332,6 +355,7 @@ final class OnboardingSession: NSObject {
     private var typingPause = 0
     private let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     private let card: Bool
+    private var appearance: NSKeyValueObservation?
     var onFinish: (() -> Void)?
     /// Once, when the user has had the welcome in front of them: in front and key after 3 s, or
     /// they ended it themselves sooner. Not when it was closed because it never got the focus.
@@ -414,6 +438,8 @@ final class OnboardingSession: NSObject {
     // MARK: Lifecycle
 
     func start() {
+        // Its live habitat as the previews' policy says (Reduce Motion and Low Power Mode hold a still).
+        ocean.run(PowerPolicy.preview(app.signals.inputs))
         for d in dims { d.orderFrontRegardless() }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -424,8 +450,13 @@ final class OnboardingSession: NSObject {
             window.animator().alphaValue = 1
             for d in dims { d.animator().alphaValue = 0.55 }
         }
+        // The Mac turning light or dark: the welcome follows (effectiveAppearance settles a pass later).
+        appearance = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.themeChanged() }
+        }
         let nc = NotificationCenter.default
-        // Never trap: leaving the app, opening another of its windows or changing displays ends the welcome.
+        // Never trap: leaving the app, opening another of its windows or changing displays ends the welcome. Cut short
+        // before it was seen (`markSeen`), it is still owed and comes back next launch.
         observers.append(nc.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             self?.interrupted(.leftApp)
         })
@@ -458,16 +489,30 @@ final class OnboardingSession: NSObject {
 
     func interrupted(_ by: Interruption) {
         switch by {
-        case .leftApp: finish(fast: false)
-        case .otherWindow, .screens: finish(fast: true)
+        case .leftApp: finish(fast: false, seen: false)
+        case .otherWindow, .screens: finish(fast: true, seen: false)
         }
     }
 
     /// The overlay lets clicks through to what is under it.
     var ignoresClicks: Bool { window.ignoresMouseEvents }
 
-    /// The Mac's light or dark look changed.
-    func themeChanged() {}
+    /// The Mac's light or dark look changed: the habitat behind and the words follow (`pickLook` too).
+    func themeChanged() {
+        guard !finishing else { return }
+        let theme = OceanDirector.currentTheme(model.settings)
+        ocean.setTheme(theme)
+        window.backgroundColor = theme.light ? NSColor(white: 0.96, alpha: 1) : .black
+        if model.light != theme.light {
+            withAnimation(.easeInOut(duration: 0.35)) { model.light = theme.light }
+        }
+    }
+
+    /// The machine's state changed: the habitat behind follows the previews' policy.
+    func powerChanged(_ i: PowerInputs) {
+        guard !finishing else { return }
+        ocean.run(PowerPolicy.preview(i))
+    }
 
     var isLight: Bool { model.light }
 
@@ -553,10 +598,7 @@ final class OnboardingSession: NSObject {
     private func pickLook(_ look: OnboardingLook) {
         app.store.update { look.apply(&$0) }
         model.settings = app.store.settings
-        let theme = OceanDirector.currentTheme(model.settings)
-        ocean.setTheme(theme)
-        window.backgroundColor = theme.light ? NSColor(white: 0.96, alpha: 1) : .black
-        withAnimation(.easeInOut(duration: 0.35)) { model.light = theme.light }
+        themeChanged()
     }
 
     /// The desktop behind dissolves to it too; the welcome's own scene follows here.
@@ -642,10 +684,15 @@ final class OnboardingSession: NSObject {
         onSeen = nil
     }
 
-    /// `seen: false` only when the welcome never reached the user, so it comes back next launch.
+    /// `seen: false` when the welcome never reached the user (cut short before the 3 s mark, or never given the
+    /// focus), so it comes back next launch. An answer (Esc, ⌘W, the last step, "Try the Web") is `seen`.
     func finish(fast: Bool, seen: Bool = true) {
         guard !finishing else { return }
         finishing = true
+        // Fading out, it lets clicks through to what is under it.
+        window.ignoresMouseEvents = true
+        appearance?.invalidate()
+        appearance = nil
         if seen { markSeen() }
         typer?.invalidate()
         blinker?.invalidate()
