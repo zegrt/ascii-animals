@@ -176,4 +176,70 @@ func pointerChecks() {
         print("  a minute of misses (3600 moves): \(verdicts.reads) list read(s)")
     }
     check("pointerMissesReadAboutOnceASecond", missesReadAboutOnceASecond)
+
+    // Right-size fix round 2 (review-r1b-r1 @ 63f40c0, "Regression").
+
+    /// The one-second wait after a miss belongs to the missed number: an event handed to a different number that the
+    /// list now has is looked up as before, so a desktop click is not lost and the fish does not react through a window.
+    func missWaitsOnlyForTheMissedNumber() throws {
+        let newDesktop: Int = 150, newWindow: Int = 160
+        var current: [ListedWindow] = listed
+        var t: TimeInterval = 100
+        let verdicts = EventWindowVerdicts(read: { current }, now: { t })
+        let miss: EventWindow = verdicts.verdict(for: 777).0
+        try expect(miss == .unknown && verdicts.reads == 1, "the miss: \(miss), reads \(verdicts.reads)")
+        current = listed + [ListedWindow(number: newDesktop, layer: desktopLayer), ListedWindow(number: newWindow, layer: 0)]
+        t = 100.1
+        // A desktop window listed since the miss, banner up: the fish, not the banner's rectangle.
+        let desk: PointerTarget? = route(bare, newDesktop, verdicts, withBanner)
+        // A normal window listed since the miss, its rectangle not yet in the last move's snapshot: blocked.
+        t = 100.2
+        let win: PointerTarget? = route(bare, newWindow, verdicts, noBanner)
+        let deskOK: Bool = desk == PointerTarget(viewportID: 0, local: bare)
+        let winOK: Bool = win == nil
+        try expect(deskOK && winOK,
+                   "within the second, a newly listed desktop number: \(String(describing: desk)); a newly listed normal window: \(String(describing: win))")
+        try expect(verdicts.verdict(for: newWindow).0 == .window, "its verdict")
+        // The missed number itself still waits out its second, then is looked up again.
+        let reads: Int = verdicts.reads
+        t = 100.5
+        try expect(verdicts.verdict(for: 777).0 == .unknown && verdicts.reads == reads, "the missed number waits: reads \(verdicts.reads)")
+        t = 101.1
+        _ = verdicts.verdict(for: 777)
+        try expect(verdicts.reads == reads + 1, "a second after its miss, read again: \(verdicts.reads)")
+    }
+    check("pointerMissWaitsOnlyForTheMissedNumber", missWaitsOnlyForTheMissedNumber)
+
+    func spaceOrDisplayChangeDropsMisses() throws {
+        var current: [ListedWindow] = listed
+        var t: TimeInterval = 100
+        let verdicts = EventWindowVerdicts(read: { current }, now: { t })
+        _ = verdicts.verdict(for: 777)
+        current = listed + [ListedWindow(number: 777, layer: desktopLayer)]
+        verdicts.clear()
+        t = 100.1
+        let v: EventWindow = verdicts.verdict(for: 777).0
+        try expect(v == .desktop && verdicts.reads == 2, "after a change, the missed number is looked up at once: \(v), reads \(verdicts.reads)")
+    }
+    check("pointerSpaceOrDisplayChangeDropsMisses", spaceOrDisplayChangeDropsMisses)
+
+    func missesOnManyNumbersStaySmall() throws {
+        // A minute of moves at 60 a second, each handed to one of 4 numbers the list never has, in turn.
+        var t: TimeInterval = 100
+        let verdicts = EventWindowVerdicts(read: { listed }, now: { t })
+        var most: Int = 0
+        for i in 0..<3600 {
+            t = 100 + Double(i) / 60
+            let number: Int = 770 + (i % 4)
+            _ = verdicts.verdict(for: number)
+            most = max(most, verdicts.missCount)
+        }
+        try expect(verdicts.reads <= 4 * 61, "list reads in a minute of misses on 4 numbers: \(verdicts.reads)")
+        try expect(most <= 4, "misses remembered at once: \(most)")
+        t = 200
+        _ = verdicts.verdict(for: 999)
+        try expect(verdicts.missCount == 1, "misses older than a second are dropped: \(verdicts.missCount)")
+        print("  a minute of misses on 4 numbers (3600 moves): \(verdicts.reads) list read(s)")
+    }
+    check("pointerMissesOnManyNumbersStaySmall", missesOnManyNumbersStaySmall)
 }

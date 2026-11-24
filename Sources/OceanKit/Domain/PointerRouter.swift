@@ -73,6 +73,8 @@ public final class EventWindowVerdicts {
     public private(set) var reads: Int = 0
     private var known: [Int: Int] = [:]
     private var lastMiss: TimeInterval? = nil
+    /// Missed numbers waiting out their retry (for the checks).
+    public var missCount: Int { lastMiss == nil ? 0 : 1 }
     private let read: () -> [ListedWindow]
     private let now: () -> TimeInterval
     /// A bound on the map; past it, it starts again (one more read).
