@@ -203,6 +203,31 @@ func wallpaperKeeperChecks() {
         desk.removeFails = false
         let out: RestoreOutcome = k.restoreAll()
         try expect(out.restored == ["S"] && desk.picture(on: "S", space: 0) == a, "Space 1 not restored: \(out)")
+
+        // Upgrading from a memory without still records (3.0): the stills on disk may be up on other Spaces.
+        var m = WallpaperMemory()
+        _ = m.decide(screen: "S", current: a, stillsFolder: stills)
+        let full = try JSONSerialization.jsonObject(with: JSONEncoder().encode(m)) as? [String: Any] ?? [:]
+        let v1: Data = try JSONSerialization.data(withJSONObject: ["originals": full["originals"] ?? [:]])
+        let legacy: WallpaperMemory = try JSONDecoder().decode(WallpaperMemory.self, from: v1)
+        let old = FakeDesktop()
+        old.attach("S", spaces: 5, showing: a)
+        for space in 0..<5 {
+            let url: URL = stills.appendingPathComponent("still-S-170000000000\(space).png")
+            old.write(url)
+            old.view(space: space, on: "S")
+            try old.set(WallpaperKeeper.stillEntry(url), on: "S")
+        }
+        let k2 = keeper(old, legacy)
+        old.view(space: 0, on: "S")
+        applyStill(k2, old, on: "S")
+        for space in 1..<5 {
+            let shown: WallpaperEntry = old.picture(on: "S", space: space)
+            try expect(old.exists(shown.url), "after the upgrade, Space \(space + 1)'s still \(shown.url.lastPathComponent) was deleted")
+        }
+        old.view(space: 3, on: "S")
+        let up: RestoreOutcome = k2.restoreAll()
+        try expect(up.restored == ["S"] && old.picture(on: "S", space: 3) == a, "a 3.0 still not restored: \(up)")
     }
 
     // 3. Recovery material stays until a restore is verified; uninstall keeps it and says so when a restore failed.

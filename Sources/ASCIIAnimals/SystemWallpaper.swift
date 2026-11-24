@@ -26,7 +26,7 @@ final class SystemWallpaper {
         stillsFolder = support.appendingPathComponent("ASCII Animals/Stills", isDirectory: true)
         try? FileManager.default.createDirectory(at: stillsFolder, withIntermediateDirectories: true)
         let memory: WallpaperMemory = UserDefaults.standard.data(forKey: SystemWallpaper.memoryKey)
-            .flatMap { try? JSONDecoder().decode(WallpaperMemory.self, from: $0) } ?? WallpaperMemory()
+            .flatMap { try? JSONDecoder().decode(WallpaperMemory.self, from: $0) } ?? WallpaperMemory.unrecorded()
         let sharksMemory = (UserDefaults(suiteName: Handover.sharksBundleID)?.data(forKey: Handover.sharksWallpaperKey)
             ?? UserDefaults.standard.data(forKey: SystemWallpaper.sharksMemoryCopyKey))
             .flatMap { try? JSONDecoder().decode(WallpaperMemory.self, from: $0) }
@@ -68,6 +68,7 @@ final class SystemWallpaper {
                     DispatchQueue.main.async { self?.set(url, key: key, generation: gen) }
                 } catch {
                     Log.write("still failed: \(error)")
+                    DispatchQueue.main.async { self?.keeper.discard(url) }
                 }
             }
         }
@@ -76,27 +77,29 @@ final class SystemWallpaper {
     private func set(_ url: URL, key: String, generation gen: Int) {
         // A restore may have happened while the still rendered.
         guard gen == generation else {
-            try? FileManager.default.removeItem(at: url)
+            keeper.discard(url)
             return
         }
         keeper.commit(url, on: key)
     }
 
-    /// Put each screen's own wallpaper back wherever our still is showing.
+    /// Put each screen's own wallpaper back wherever our still is showing. Only what reads back counts.
     @discardableResult
     func restoreAll() -> RestoreOutcome {
         pending?.cancel()
         generation += 1
-        return keeper.restoreAll()
+        let out: RestoreOutcome = keeper.restoreAll()
+        if !out.failed.isEmpty || out.stillsLeft > 0 {
+            Log.write("restore: \(out.restored.count) back, \(out.failed.count) failed, \(out.stillsLeft) stills still up elsewhere")
+        }
+        return out
     }
 
-    /// A display came back, the Space changed or the Mac woke.
+    /// A display came back, the Space changed, the Mac woke or the app launched: with matching off, our still comes
+    /// down wherever it shows (a detached display, a Space not in view at the last restore).
     func reconcile(matching: Bool) {
-        if !matching {
-            pending?.cancel()
-            generation += 1
-        }
-        keeper.reconcile(matching: matching)
+        guard !matching else { return }
+        restoreAll()
     }
 
     static func key(for screen: NSScreen) -> String {
