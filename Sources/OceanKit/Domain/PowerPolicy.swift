@@ -57,6 +57,19 @@ public enum PowerPolicy {
         return .live(fps: fps)
     }
 
+    /// The live previews (the what's-new card, the welcome, About): the card's rule, live at up to 60 fps.
+    public static func preview(_ i: PowerInputs) -> RunMode {
+        var c = i
+        c.anyWindowVisible = true
+        c.userPaused = false
+        c.reduceMotion = false
+        switch mode(c) {
+        case .paused: return .paused
+        case .still: return .still
+        case .live: return .live(fps: 60)
+        }
+    }
+
     /// Replace the lock / session / screensaver flags with what the OS says now,
     /// so a missed "unlocked" or "screensaver stopped" notification can't leave
     /// the wallpaper paused forever.

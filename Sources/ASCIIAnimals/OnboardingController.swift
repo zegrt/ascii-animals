@@ -427,15 +427,15 @@ final class OnboardingSession: NSObject {
         let nc = NotificationCenter.default
         // Never trap: leaving the app, opening another of its windows or changing displays ends the welcome.
         observers.append(nc.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.finish(fast: false)
+            self?.interrupted(.leftApp)
         })
         observers.append(nc.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self] n in
             // Settings or About opened from the menu would sit behind the welcome; make way.
             guard let self, let w = n.object as? NSWindow, w !== self.window, w.styleMask.contains(.titled) else { return }
-            self.finish(fast: true)
+            self.interrupted(.otherWindow)
         })
         observers.append(nc.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.finish(fast: true)
+            self?.interrupted(.screens)
         })
         // If macOS didn't let the app come forward, keys can't reach the welcome: don't sit on top of everything.
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
@@ -445,6 +445,31 @@ final class OnboardingSession: NSObject {
         blinker = Timer.scheduledTimer(withTimeInterval: 0.53, repeats: true) { [weak self] _ in self?.model.cursorOn.toggle() }
         after(reduceMotion ? 0.2 : 0.9) { [weak self] in self?.enter(.habitat) }
     }
+
+    /// What took the welcome away without an answer.
+    enum Interruption {
+        /// Another app became active.
+        case leftApp
+        /// Settings or About became key.
+        case otherWindow
+        /// The displays changed.
+        case screens
+    }
+
+    func interrupted(_ by: Interruption) {
+        switch by {
+        case .leftApp: finish(fast: false)
+        case .otherWindow, .screens: finish(fast: true)
+        }
+    }
+
+    /// The overlay lets clicks through to what is under it.
+    var ignoresClicks: Bool { window.ignoresMouseEvents }
+
+    /// The Mac's light or dark look changed.
+    func themeChanged() {}
+
+    var isLight: Bool { model.light }
 
     func focus() {
         NSApp.activate(ignoringOtherApps: true)

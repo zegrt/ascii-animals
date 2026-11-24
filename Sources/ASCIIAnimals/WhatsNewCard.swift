@@ -67,6 +67,16 @@ enum WhatsNewCard {
         update(preview: preview) { $0.shown() }
     }
 
+    /// The presenter's mark, once a card is up: the showing is counted.
+    static func cardOpened(preview: Bool) {
+        markShown(preview: preview)
+    }
+
+    /// A card went (`reason`), its content reached or not (`WhatsNewSession.contentReached`): what its showing comes to.
+    static func cardWent(_ reason: WhatsNew.CloseReason, reached: Bool, preview: Bool) {
+        update(preview: preview) { $0.closed(reason) }
+    }
+
     // MARK: Waiting
 
     /// From launch (`OnboardingController.showIfNeeded`): the card is due, or comes back once its 3 hours have passed.
@@ -91,7 +101,7 @@ enum WhatsNewCard {
         let previewing: Bool = preview
         let p = WhatsNew.Presenter(moment: { moment(app) }, open: { open(app) },
                                    mark: {
-                                       markShown(preview: previewing)
+                                       cardOpened(preview: previewing)
                                        // Tools/energy.sh preview waits for this line, bound to its launch id.
                                        if previewing { Log.write(EnergyLog.cardShown(pid: getpid(), launch: Launch.plan.launchID)) }
                                    })
@@ -193,8 +203,8 @@ enum WhatsNewCard {
         let previewing: Bool = preview
         let pid: Int32 = getpid()
         let launch: String? = Launch.plan.launchID
-        session.onClose = { (reason: WhatsNew.CloseReason, after: Double) in
-            update(preview: previewing) { $0.closed(reason) }
+        session.onClose = { [weak session] (reason: WhatsNew.CloseReason, after: Double) in
+            cardWent(reason, reached: session?.contentReached ?? false, preview: previewing)
             if previewing { Log.write(EnergyLog.cardClosed(pid: pid, launch: launch, reason: reason, after: after)) }
             // Unanswered: it waits to come back (counting from now). The welcome taking over looks again itself.
             if !reason.endsForGood, reason != .welcome {
@@ -251,7 +261,7 @@ enum WhatsNewCard {
 
     /// The machine's state changed: the live preview holds a still in Low Power Mode and stops when it can't be seen.
     static func powerChanged(_ i: PowerInputs) {
-        current?.apply(WhatsNew.preview(i))
+        current?.apply(power: i)
     }
 
     // MARK: Placement
@@ -550,6 +560,85 @@ enum WhatsNewCard {
         update(preview: true) { $0.closed(.keep) }
         expect(showings(preview: true).finished, "Keep: never again")
         save(WhatsNew.Showings(), preview: true)
+        // Fix round 2 (trimmed). 1: a greeting cut short before its content stays owed.
+        cardOpened(preview: true)
+        let cut = make(ProbeHost())
+        cut.arm(power: PowerInputs())
+        cut.setHovering(false)
+        run(cut, 0.5)
+        cardWent(.screens, reached: cut.contentReached, preview: true)
+        cut.close(trying: false, now: true)
+        let owed: WhatsNew.Showings = showings(preview: true)
+        expect(owed.due && owed.count == 0,
+               "card: a display change 0.5 s in, before its content: still owed (count \(owed.count), due \(owed.due))")
+        save(WhatsNew.Showings(), preview: true)
+        cardOpened(preview: true)
+        let read = make(ProbeHost())
+        read.arm(power: PowerInputs())
+        read.setHovering(false)
+        run(read, 5)
+        cardWent(.screens, reached: read.contentReached, preview: true)
+        read.close(trying: false, now: true)
+        let spent: WhatsNew.Showings = showings(preview: true)
+        expect(!spent.due && spent.count == 1, "card: a display change after 5 s seen: the showing counts (count \(spent.count))")
+        save(WhatsNew.Showings(), preview: true)
+
+        // 3: nothing ticks for a card nobody can see.
+        let hidden = make(ProbeHost())
+        hidden.arm(power: PowerInputs())
+        var asleep = PowerInputs()
+        asleep.displaysAsleep = true
+        hidden.apply(power: asleep)
+        expect(hidden.runningTimers == 0, "card: the displays asleep: no countdown, typing or blink ticking (\(hidden.runningTimers) timers)")
+        hidden.apply(power: PowerInputs())
+        expect(hidden.runningTimers >= 1, "card: awake again: its countdown runs (\(hidden.runningTimers) timers)")
+        hidden.close(trying: false, now: true)
+
+        // 4: the card's preview at the desktop's rate, and its look following light and dark.
+        let rated = make(ProbeHost())
+        var battery = PowerInputs()
+        battery.onBattery = true
+        rated.arm(power: battery)
+        expect(rated.previewState == "live" && rated.liveFPS == 15, "card on battery: live at 15 fps (\(rated.previewState), \(rated.liveFPS) fps)")
+        var reduce = PowerInputs()
+        reduce.reduceMotion = true
+        rated.apply(power: reduce)
+        expect(rated.previewState == "still", "card with Reduce Motion: holds a still (\(rated.previewState))")
+        rated.close(trying: false, now: true)
+        let systemHost = ProbeHost()
+        systemHost.settings.appearance = .system
+        let appearanceBefore: NSAppearance? = NSApp.appearance
+        NSApp.appearance = NSAppearance(named: .aqua)
+        let themed = make(systemHost)
+        let wasLight: Bool = themed.isLight
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        themed.themeChanged()
+        expect(wasLight && !themed.isLight, "card: the Mac turned dark: the card follows (light \(wasLight) then \(themed.isLight))")
+        themed.close(trying: false, now: true)
+
+        if Launch.plan.transientSettings {
+            // The welcome's settings are this run's memory (the preview flags): nothing is read or saved. Built, never
+            // ordered onto a screen.
+            let app = AppDelegate()
+            app.store.update { $0.appearance = .system }
+            NSApp.appearance = NSAppearance(named: .aqua)
+            let welcome = OnboardingSession(app: app, renderer: renderer, card: true)
+            var seen = false
+            welcome.onSeen = { seen = true }
+            let welcomeWasLight: Bool = welcome.isLight
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+            welcome.themeChanged()
+            expect(welcomeWasLight && !welcome.isLight, "welcome: the Mac turned dark: the welcome follows")
+            welcome.interrupted(.screens)
+            expect(!seen, "welcome: a display change before its content: still owed (not marked seen)")
+            // 2: a finishing overlay doesn't eat clicks.
+            expect(welcome.ignoresClicks, "welcome: once it is finishing, its overlay lets clicks through")
+            withExtendedLifetime(app) {}
+        } else {
+            expect(false, "welcome: run the probe with the preview flags (its settings in memory)")
+        }
+        NSApp.appearance = appearanceBefore
+
         // The probe is offscreen: it never writes the live card evidence energy.sh waits for, and has no launch id.
         let cardLine: String = "energy-card: pid=\(getpid()) "
         let logged: Bool = Log.tail(4000).contains { (l: String) -> Bool in l.contains(cardLine) }
@@ -737,7 +826,12 @@ final class WhatsNewSession {
     private var ticker: Timer?
     private var lastTick: CFTimeInterval = 0
     /// The pointer is over the card: the countdown waits.
-    private(set) var hovering = false
+    private(set) var hovering = false {
+        didSet { if hovering { contentReached = true } }
+    }
+    /// Its content has been in front of the person: `WhatsNew.contentAfter` seconds of the countdown seen, or the
+    /// pointer over the card.
+    private(set) var contentReached = false
 
     /// The Meadow at the person's look and line-up: what the card shows.
     static func meadow(_ s: OceanKit.Settings) -> OceanKit.Settings {
@@ -822,7 +916,7 @@ final class WhatsNewSession {
     /// The card is up for good: fade in, type, listen for Esc and clicks elsewhere, and set the preview going.
     func arm(power: PowerInputs) {
         armedAt = Date()
-        apply(WhatsNew.preview(power))
+        apply(power: power)
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = model.reduceMotion ? 0.2 : 0.45
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -867,6 +961,7 @@ final class WhatsNewSession {
     func advance(by seconds: Double) {
         guard !closing else { return }
         countdown.advance(by: seconds, paused: hovering || preview == .stopped)
+        if WhatsNew.Countdown.duration - countdown.remaining >= WhatsNew.contentAfter { contentReached = true }
         let f: Double = countdown.fraction
         if abs(model.remaining - f) >= 0.001 || f == 0 { model.remaining = f }
         if countdown.expired { close(trying: false, reason: .timeout) }
@@ -877,6 +972,17 @@ final class WhatsNewSession {
     func pressCloseForProbe() { model.onClose() }
 
     var countdownRemaining: Double { countdown.remaining }
+    /// The machine's state changed: the preview for it.
+    func apply(power i: PowerInputs) { apply(WhatsNew.preview(i)) }
+
+    /// The Mac's light or dark look changed.
+    func themeChanged() {}
+
+    var isLight: Bool { model.light }
+    var liveFPS: Int { live.fps }
+
+    /// The card's own timers still firing (the countdown, the typing, the cursor's blink).
+    var runningTimers: Int { [ticker, typer, blinker].filter { (t: Timer?) -> Bool in t?.isValid == true }.count }
 
     /// A key typed while the card is up: Esc closes it when ASCII Animals is the active app. The event always goes on
     /// to the window it was meant for (Esc still cancels a sheet or closes Settings).

@@ -21,6 +21,8 @@ final class LiveOceanView: NSView {
     let zoom: CGFloat
     var theme: ThemeParams
     var speed = 1.0
+    /// The most frames a second it draws.
+    private(set) var fps = 60
     /// Fish flee the pointer and clicks splash, from this view's own mouse events.
     var handlesMouse = true
     private var tracking: NSTrackingArea?
@@ -136,7 +138,7 @@ final class LiveOceanView: NSView {
     func start() {
         guard link == nil, window != nil else { return }
         let l = displayLink(target: self, selector: #selector(tick(_:)))
-        l.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+        l.preferredFrameRateRange = CAFrameRateRange(minimum: Float(min(fps, 30)), maximum: Float(fps), preferred: Float(fps))
         l.add(to: .main, forMode: .common)
         link = l
     }

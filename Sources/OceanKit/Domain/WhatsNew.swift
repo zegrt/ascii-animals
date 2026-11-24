@@ -32,6 +32,13 @@ public enum WhatsNew {
             self.welcomeUp = welcomeUp
             self.canDraw = canDraw
         }
+
+        /// The welcome's (and the Sharks Web welcome's) look at launch: it shows whenever a renderer and a display are
+        /// there.
+        public static func welcome(seeable: Bool, screens: Int, canDraw: Bool, welcomeUp: Bool) -> Moment {
+            Moment(seeable: true, screens: screens, shown: false, habitat: .ocean, tried: false, welcomeUp: welcomeUp,
+                   canDraw: canDraw)
+        }
     }
 
     public enum Verdict: Equatable, Sendable {
@@ -127,6 +134,13 @@ public enum WhatsNew {
 
         /// Something else took over (the welcome from Help): no more looks.
         public func cancel() { finished = true }
+
+        /// The longest a waiting card goes without a look of its own (a missed notification can't strand it).
+        public static let backstop: Double? = nil
+
+        /// When the app should look again on its own, in seconds; nil: never (finished). The app looks once a second
+        /// while waiting.
+        public var nextLook: Double? { finished ? nil : 1 }
     }
 
     /// Why a card went (the preview logs it: `EnergyLog.cardClosed`). A click elsewhere no longer closes it.
@@ -156,6 +170,10 @@ public enum WhatsNew {
             }
         }
     }
+
+    /// Seconds of the card's countdown seen (it runs only while the card can be seen and the pointer is off it) after
+    /// which its content counts as reached: faded in, the title typed. The pointer over the card counts too.
+    public static let contentAfter: Double = 2
 
     // MARK: Its life across launches
 
@@ -192,8 +210,8 @@ public enum WhatsNew {
             awake = 0
         }
 
-        /// It went: for good, or to come back later.
-        public mutating func closed(_ reason: CloseReason) {
+        /// It went: for good, or to come back later. `reached`: whether its content was in front of the person.
+        public mutating func closed(_ reason: CloseReason, reached: Bool = true) {
             if reason.endsForGood { ended = true }
             awake = 0
         }
