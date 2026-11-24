@@ -311,6 +311,14 @@ extension IssueReport {
     }
 }
 
+/// The recent log as Report a Problem picks it, from the log file's text.
+public enum LogEntries {
+    /// The last `n` of the log (`text`), oldest first. (For now the last `n` lines, as `Log.tail` reads them.)
+    public static func last(_ n: Int, in text: String) -> [String] {
+        Array(text.split(separator: "\n").suffix(n).map(String.init))
+    }
+}
+
 // MARK: - The updater's decisions, behind a seam the checks drive with fakes (the app's UpdateService is the host).
 
 /// Where the updater is.

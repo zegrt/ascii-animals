@@ -36,6 +36,8 @@ private final class FakeHost: UpdateHost {
     var fetches: Int = 0
     var staged: [String] = []
     var committed: [String] = []
+    /// What each swap put in: the download's link and the checksum it was checked against.
+    var committedDownloads: [String] = []
     var discarded: [String] = []
     var started: Int = 0
     var quits: Int = 0
@@ -62,6 +64,7 @@ private final class FakeHost: UpdateHost {
     func commit(_ staged: StagedUpdate) -> Result<URL, UpdateFailure> {
         if let commitFailure { return .failure(commitFailure) }
         committed.append(staged.release.tag)
+        committedDownloads.append("\(staged.release.zipURL?.absoluteString ?? "none") \(staged.release.zipSHA256 ?? "none")")
         return .success(URL(fileURLWithPath: "/fake/ASCII Animals.app"))
     }
     func discard(_ staged: StagedUpdate) { discarded.append(staged.release.tag) }
@@ -78,13 +81,14 @@ private final class FakeHost: UpdateHost {
     func said(_ match: (UpdateMessage) -> Bool) -> Bool { told.contains(where: match) }
 }
 
-/// A GitHub `releases/latest` answer for `tag`, installable (a zip with a digest).
-private func releaseJSON(_ tag: String) -> Data {
-    let digest: String = "sha256:" + String(repeating: "ab", count: 32)
+/// A GitHub `releases/latest` answer for `tag`, installable (a zip, `asset`, with a digest of `hex`).
+private func releaseJSON(_ tag: String, hex: String = String(repeating: "ab", count: 32),
+                         asset: String = "ASCII-Animals.zip") -> Data {
+    let digest: String = "sha256:" + hex
     let json: String = """
     {"tag_name":"\(tag)","html_url":"https://github.com/zegrt/ascii-animals/releases/tag/\(tag)","body":"notes",
-     "assets":[{"name":"ASCII-Animals.zip",
-                "browser_download_url":"https://github.com/zegrt/ascii-animals/releases/download/\(tag)/ASCII-Animals.zip",
+     "assets":[{"name":"\(asset)",
+                "browser_download_url":"https://github.com/zegrt/ascii-animals/releases/download/\(tag)/\(asset)",
                 "digest":"\(digest)"}]}
     """
     return Data(json.utf8)
@@ -126,6 +130,8 @@ func updateChecks() {
     updateRound1Checks()
     reportFormChecks()
     reportRound1Checks()
+    updateRound2Checks()
+    reportRound2Checks()
     // Last: on 971a216 an extreme saved fps traps (overflow), which ends the run.
     settingsExtremeChecks()
 }
@@ -578,4 +584,127 @@ private func reportRound1Checks() {
         try expect(formDecoded("title") == "Problem: +", "the title read as a form: \(formDecoded("title") ?? "nil")")
     }
     check("reportPlusSurvivesFormDecoding", plusSurvivesFormDecoding)
+}
+
+// MARK: - Fix round 2 (review-r3-r1 @ a46e3e1, remaining findings 1 and 2)
+
+private func updateRound2Checks() {
+    // Remaining 2: the same tag with a replaced asset (a new checksum, or a new download link). The held download
+    // was checked against the old asset, so it goes and the current one is fetched and swapped in.
+    func heldReplacedAsset() throws {
+        let newHex: String = String(repeating: "cd", count: 32)
+        let cases: [(String, Data, String)] = [
+            ("a new checksum", releaseJSON("v3.1", hex: newHex),
+             "https://github.com/zegrt/ascii-animals/releases/download/v3.1/ASCII-Animals.zip \(newHex)"),
+            ("a new download link", releaseJSON("v3.1", asset: "ASCII-Animals-3.1.zip"),
+             "https://github.com/zegrt/ascii-animals/releases/download/v3.1/ASCII-Animals-3.1.zip "
+                + String(repeating: "ab", count: 32)),
+        ]
+        for (change, feed, wanted) in cases {
+            let host = FakeHost()
+            let e = engineKnowing("v3.1", host)
+            e.tick()
+            host.surfaces = UpdateSurfaces(menuOpen: true)   // in use as the download is ready: it's held
+            host.release()
+            try expect(host.staged == ["v3.1"] && host.discarded.isEmpty, "\(change): not held in the first place")
+            host.now = host.now.addingTimeInterval(21 * 3600)
+            host.surfaces = UpdateSurfaces()
+            host.feed = FeedResponse(status: 200, body: feed, etag: "\"b\"")
+            e.tick()                                         // the next check: same tag, replaced asset
+            host.release()
+            try expect(host.discarded == ["v3.1"], "\(change): the held download wasn't dropped: \(host.discarded)")
+            try expect(host.staged == ["v3.1", "v3.1"], "\(change): not fetched again: \(host.staged)")
+            try expect(host.committedDownloads == [wanted], "\(change): swapped in \(host.committedDownloads)")
+        }
+    }
+    check("updateHeldDownloadMustMatchTheCurrentAsset", heldReplacedAsset)
+}
+
+private func reportRound2Checks() {
+    let base: URL = URL(string: "https://github.com/o/r/issues/new")!
+    let stamp: String = "2026-11-25T10:00:00Z"
+    func facts(_ log: [String]) -> DiagnosticFacts {
+        DiagnosticFacts(appVersion: "3.1 (12)", macOS: "26.1.0", model: "Mac17,9", displays: [], power: "AC power",
+                        mode: "Ocean, live", settingsJSON: #"{"fps":30}"#, crashedLastTime: false, logTail: log,
+                        displaySizes: ["2560x1440 @2x 60 Hz"])
+    }
+    func form(_ log: [String]) -> String {
+        IssueReport.form(facts(log), includeLog: true, homePath: "/Users/jdoe", userName: "jdoe",
+                         fullName: "Jane Doe", base: base, title: "Problem: ")
+    }
+    /// The log file's text as Log.write leaves it: each message stamped, ending in a newline.
+    func file(_ messages: [String]) -> String {
+        messages.map { (m: String) -> String in "\(stamp) \(m)\n" }.joined()
+    }
+    /// The lines between the log's fences in a form.
+    func logLines(_ text: String) -> [String] {
+        let lines: [String] = text.components(separatedBy: "\n")
+        guard let open = lines.firstIndex(of: "<details><summary>Recent log</summary>"),
+              let fence = lines[open...].firstIndex(where: { (l: String) -> Bool in l.hasPrefix("```") }),
+              let close = lines[(fence + 1)...].firstIndex(of: lines[fence]) else { return [] }
+        return Array(lines[(fence + 1)..<close])
+    }
+    func isStamped(_ line: String) -> Bool { line.hasPrefix(stamp + " ") }
+
+    // Remaining 1: at the old 60-line boundary the tail's first lines are an error's continuation (a volume name
+    // with a newline in it). None of it shows. Two errors: a real Foundation one and one written out by hand.
+    func boundaryError() throws {
+        var real: String = ""
+        do {
+            _ = try FileManager.default.contentsOfDirectory(atPath: "/Volumes/Jane's\nPhotos")
+            try expect(false, "the fixture folder exists")
+        } catch {
+            real = "still failed: \(error)"
+        }
+        try expect(real.contains("\n"), "the Foundation error is on one line: \(real)")
+        let byHand: String = "could not set wallpaper: Error Domain=NSCocoaErrorDomain Code=4 \"The file doesn’t exist.\" "
+            + "UserInfo={NSFilePath=/Volumes/Jane's\nPhotos/Walls/a.png,\nNSURL=file:///Volumes/Jane's%0APhotos/Walls/a.png}"
+        for error in [real, byHand] {
+            let errorLines: Int = error.components(separatedBy: "\n").count
+            let newer: [String] = (0..<(60 - (errorLines - 1))).map { (i: Int) -> String in "frame \(i)" }
+            let text: String = file(["launched", error] + newer)
+            let picked: [String] = LogEntries.last(60, in: text)
+            let shown: String = form(picked)
+            for leak in ["Jane", "Photos", "Walls", "NSURL", "NSFilePath"] {
+                try expect(!shown.contains(leak), "\(leak) shown:\n\(logLines(shown).prefix(4).joined(separator: "\n"))")
+            }
+            try expect(shown.contains("frame \(newer.count - 1)"), "the newest entry is missing")
+            for line in logLines(shown) {
+                try expect(isStamped(line), "a line that isn't a stamped entry: \(line)")
+            }
+        }
+    }
+    check("reportLogBoundaryErrorShowsNone", boundaryError)
+
+    // Whole entries only: the last n entries (never a line count), each with its own lines, and nothing from an
+    // entry whose stamp isn't in the text (the file starting inside one).
+    func wholeEntries() throws {
+        let text: String = "Photos/Walls (the end of an entry cut off)\nmore of it\n"
+            + file(["one", "two\n  two's detail\n  more detail", "three", "four\n  four's detail"])
+        let three: [String] = LogEntries.last(3, in: text)
+        let wanted: [String] = ["\(stamp) two\n  two's detail\n  more detail", "\(stamp) three", "\(stamp) four\n  four's detail"]
+        try expect(three == wanted, "last 3: \(three)")
+        let all: [String] = LogEntries.last(60, in: text)
+        try expect(all.count == 4 && all.first == "\(stamp) one", "all entries: \(all)")
+        try expect(!all.joined().contains("Photos") && !all.joined().contains("more of it"), "the headless start kept: \(all)")
+    }
+    check("reportLogIsWholeEntries", wholeEntries)
+
+    // Fitting the form to the link drops whole entries, oldest first: the log never starts inside an entry.
+    func fittingDropsWholeEntries() throws {
+        for pad in 0..<8 {
+            let messages: [String] = (0..<120).map { (i: Int) -> String in
+                "entry \(i) " + String(repeating: "x", count: 150 + 7 * pad) + "\n  detail of \(i)"
+            }
+            let shown: [String] = logLines(form(LogEntries.last(60, in: file(messages))))
+            try expect(!shown.isEmpty, "pad \(pad): no log left")
+            try expect(isStamped(shown[0]), "pad \(pad): the log starts inside an entry: \(shown[0])")
+            for (i, line) in shown.enumerated() where isStamped(line) {
+                let n: String = line.components(separatedBy: " ")[2]
+                let next: String = i + 1 < shown.count ? shown[i + 1] : ""
+                try expect(next == "  detail of \(n)", "pad \(pad): entry \(n) cut: \(next)")
+            }
+        }
+    }
+    check("reportFittingDropsWholeEntries", fittingDropsWholeEntries)
 }
