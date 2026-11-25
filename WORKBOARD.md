@@ -58,6 +58,7 @@ selftest 0 failed.
 
 ## Next, in order
 
+Paused after r3's fix round 3 reports in (the director: "after the fix pause"); nothing below starts without a go.
 1. r3 fix round 3 (running), then its one re-check (privacy).
 2. r2 rebuilt on the root fix: two reused files per display, written alternately, never deleted in normal use; the
    covered wallpaper in the file name; a file in our folder is ours, anything else is the person's; restore each
