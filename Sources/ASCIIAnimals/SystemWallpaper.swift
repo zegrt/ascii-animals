@@ -15,6 +15,8 @@ final class SystemWallpaper {
     private var pending: DispatchWorkItem?
     /// Bumped by restoreAll(); a still that finishes rendering after a restore is dropped.
     private var generation = 0
+    /// Uninstall began: nothing is scheduled or reconciled any more.
+    private var uninstalling = false
     private let work = DispatchQueue(label: "ascii-animals.stills", qos: .utility)
 
     /// Nil in the energy-test copy (`LaunchPlan.matchesSystemWallpaper`), before anything is read or made: no
@@ -27,12 +29,14 @@ final class SystemWallpaper {
         try? FileManager.default.createDirectory(at: stillsFolder, withIntermediateDirectories: true)
         let memory: WallpaperMemory = UserDefaults.standard.data(forKey: SystemWallpaper.memoryKey)
             .flatMap { try? JSONDecoder().decode(WallpaperMemory.self, from: $0) } ?? WallpaperMemory.unrecorded()
-        let sharksMemory = (UserDefaults(suiteName: Handover.sharksBundleID)?.data(forKey: Handover.sharksWallpaperKey)
-            ?? UserDefaults.standard.data(forKey: SystemWallpaper.sharksMemoryCopyKey))
-            .flatMap { try? JSONDecoder().decode(WallpaperMemory.self, from: $0) }
-        // ASCII Sharks' stills: one left up (Sharks force-quit) is never taken for the user's wallpaper.
+        let sharksOwn: Data? = UserDefaults(suiteName: Handover.sharksBundleID)?.data(forKey: Handover.sharksWallpaperKey)
+        let sharksCopy: Data? = UserDefaults.standard.data(forKey: SystemWallpaper.sharksMemoryCopyKey)
+        let sharksMemory = (sharksOwn ?? sharksCopy).flatMap { try? JSONDecoder().decode(WallpaperMemory.self, from: $0) }
+        // ASCII Sharks' stills: one left up (Sharks force-quit) is never taken for the user's wallpaper. With Sharks
+        // gone, the hand-over's copy is the only memory of what they cover: uninstall keeps it while they're on disk.
         let sharks = ForeignStills(folder: support.appendingPathComponent(Handover.sharksStillsFolder, isDirectory: true),
-                                   memory: sharksMemory ?? WallpaperMemory())
+                                   memory: sharksMemory ?? WallpaperMemory(),
+                                   memoryIsOurCopy: sharksOwn == nil && sharksCopy != nil)
         keeper = WallpaperKeeper(memory: memory, stillsFolder: stillsFolder, foreign: sharks,
                                  desktop: Desktop(stillsFolder: stillsFolder),
                                  save: { m in
@@ -45,6 +49,7 @@ final class SystemWallpaper {
 
     /// Debounced: looks changes come in bursts (sliders, appearance switches).
     func scheduleApply(settings: Settings, systemIsDark: Bool, accent: SIMD3<Float>, delay: TimeInterval = 2) {
+        guard !uninstalling else { return }
         pending?.cancel()
         let item = DispatchWorkItem { [weak self] in self?.apply(settings: settings, systemIsDark: systemIsDark, accent: accent) }
         pending = item
@@ -89,8 +94,9 @@ final class SystemWallpaper {
         pending?.cancel()
         generation += 1
         let out: RestoreOutcome = keeper.restoreAll()
-        if !out.failed.isEmpty || out.stillsLeft > 0 {
-            Log.write("restore: \(out.restored.count) back, \(out.failed.count) failed, \(out.stillsLeft) stills still up elsewhere")
+        if out.keepsRecovery {
+            let more: String = (out.adoptionPending ? ", stills folder unread" : "") + (out.foreignStillsLeft ? ", ASCII Sharks stills left" : "")
+            Log.write("restore: \(out.restored.count) back, \(out.failed.count) failed, \(out.stillsLeft) stills still up elsewhere\(more)")
         }
         return out
     }
@@ -98,8 +104,16 @@ final class SystemWallpaper {
     /// A display came back, the Space changed, the Mac woke or the app launched: with matching off, our still comes
     /// down wherever it shows (a detached display, a Space not in view at the last restore).
     func reconcile(matching: Bool) {
-        guard !matching else { return }
+        guard !uninstalling, !matching else { return }
         restoreAll()
+    }
+
+    /// Uninstall began: scheduled and rendering stills are dropped, and from now on nothing goes up or reconciles.
+    func beginUninstall() {
+        uninstalling = true
+        pending?.cancel()
+        generation += 1
+        keeper.beginUninstall()
     }
 
     static func key(for screen: NSScreen) -> String {

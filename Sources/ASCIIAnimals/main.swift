@@ -197,11 +197,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// With matching off, our still comes down wherever it still shows (a display back, another Space, a wake).
     func reconcileWallpaper() {
+        guard !isUninstalling else { return }
         wallpaper?.reconcile(matching: store.settings.matchSystemWallpaper)
     }
 
     func refreshSystemWallpaper(delay: TimeInterval = 2) {
-        guard let d = director, store.settings.matchSystemWallpaper else { return }
+        guard !isUninstalling, let d = director, store.settings.matchSystemWallpaper else { return }
         let t = OceanDirector.currentTheme(store.settings)
         wallpaper?.scheduleApply(settings: store.settings, systemIsDark: d.systemIsDark, accent: t.wake == ThemeParams.cyan ? SIMD3(0.2, 0.5, 1) : t.wake, delay: delay)
     }

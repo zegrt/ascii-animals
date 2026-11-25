@@ -25,10 +25,13 @@ enum Uninstaller {
         var problems: [String] = []
         app?.isUninstalling = true
         let wp: SystemWallpaper? = wallpaper ?? app?.wallpaper
+        wp?.beginUninstall()   // no still goes up and nothing reconciles from here on, even under an alert
         let outcome: RestoreOutcome? = wp?.restoreAll()
         let memory: Data? = UserDefaults.standard.data(forKey: SystemWallpaper.memoryKey)
+        // ASCII Sharks' memory, copied at the hand-over: the only record of what a Sharks still left up covers.
+        let sharksMemory: Data? = UserDefaults.standard.data(forKey: SystemWallpaper.sharksMemoryCopyKey)
         // Not restored, or not tried (no wallpaper object) with a memory saved: keep what puts it back.
-        let keep: Bool = outcome?.keepsRecovery ?? (memory != nil)
+        let keep: Bool = outcome?.keepsRecovery ?? (memory != nil || sharksMemory != nil)
         let stills: URL? = keep ? wp?.stillsFolder ?? CrashMarker.folder.appendingPathComponent("Stills", isDirectory: true) : nil
         if let stills {
             let folder: String = (stills.path as NSString).abbreviatingWithTildeInPath
@@ -51,8 +54,11 @@ enum Uninstaller {
         }
         if let id = Bundle.main.bundleIdentifier {
             UserDefaults.standard.removePersistentDomain(forName: id)
-            // Kept with the stills: a reinstall reads it and puts the wallpaper back.
+            // Kept with the stills: a reinstall reads them and puts the wallpaper back.
             if stills != nil, let memory { UserDefaults.standard.set(memory, forKey: SystemWallpaper.memoryKey) }
+            if stills != nil, let sharksMemory {
+                UserDefaults.standard.set(sharksMemory, forKey: SystemWallpaper.sharksMemoryCopyKey)
+            }
             UserDefaults.standard.synchronize()
             CFPreferencesAppSynchronize(id as CFString)
         }
