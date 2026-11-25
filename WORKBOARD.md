@@ -2,871 +2,103 @@ Team rules: the agent-team skill; read it first.
 
 # ASCII Animals: work board
 
-<!-- Only the manager edits this file. Why: one writer per file, the board included. Basis: the director, 9 Nov 2026. -->
+<!-- Only the manager edits this file. Basis: the director, 9 Nov 2026. History up to 2026-11-25 (Corrections,
+Decisions, Review routing, the full task ledger): docs/history/3.1-workboard.md. -->
 
 ## Where files go
 
 | File | Branch | Written by |
 |---|---|---|
 | WORKBOARD.md, briefs/<id>.md, everything merged | main | manager only |
-| the work, reports/<id>.md | the task's branch | its builder |
+| the work, reports/<id>.md (one page at most) | the task's branch | its builder |
 | reviews/<id>.md | review-<id>, made from main | its reviewer |
-| workers/<name>.md (handoff) | worker-<name>, never deleted | that worker |
 
-Approved state: branch `approved` (to be created at the first approved merge; until then the last approved state is
-tag `v3.0.1`).
+Last approved state: tag `v3.0.1`.
 
 ## Roles
 
-| Role | Who | Where (machine, thread) |
+| Role | Who | Where |
 |---|---|---|
 | Director | the owner | the owner's Mac |
-| Manager | Claude (Opus) | the owner's Mac, the main T3 thread for this project |
-| Builder | Claude agents, one per task | the owner's Mac, each in its own worktree next to the main folder |
-| Reviewer | Codex agents (from 2026-11-20), one per review or re-check | the owner's Mac, each in its own worktree |
-
-Director's profile: none
+| Manager | Claude (Opus) | the main T3 thread for this project |
+| Builder | one Claude agent per task, one at a time | its own worktree |
+| Reviewer | one Codex agent (medium) per review | its own worktree |
 
 ## Project rules
 
-- 2026-11-20: The work follows `docs/plans/2026-11-19-meadow-3.1-plan.md` (the approved plan). Its Global
-  Constraints and Review Focus bind every task. A brief points to its plan task instead of copying it.
-- 2026-11-20: Only the manager pushes to main, and only after running the private-string scan over what is pushed
-  (the pattern is kept outside the repo). Builders and reviewers push only their own branches.
-- 2026-11-20: Safety on the owner's Mac (carried over from 3.0): never launch the app without
-  `ASCII_ANIMALS_NO_HANDOVER=1`; never run the bare app binary without a `--snapshot-*` flag; never touch
-  `~/Applications` or the app's real defaults domain (only `Tools/energy.sh` may, and only with the director);
-  never run the old Sharks uninstaller; no live desktop runs without the director. The director answers any dialog
-  that pops up, so a test must never raise a real destructive one.
-- 2026-11-20: CI builds with an older Swift (6.3.3) than the local 6.4 and times out on long untyped expressions.
-  Give literals and SIMD maths explicit types, split long mixed expressions into typed lets, and turn long check
-  closures into named local functions.
-- 2026-11-20: Commits use the repo's existing author identity and end with
-  `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- The plan: `docs/plans/2026-11-19-meadow-3.1-plan.md` as cut back by `docs/plans/2026-11-20-meadow-port-plan.md`
+  and `docs/plans/2026-11-25-cut-the-creep.md`.
+- Only the manager pushes, after the private-string scan (the pattern is kept outside the repo). Builders and
+  reviewers commit only.
+- Safety on the owner's Mac: never launch the app without `ASCII_ANIMALS_NO_HANDOVER=1`; never run the bare binary
+  without a `--snapshot-*` flag; never touch `~/Applications` or the app's real defaults domain (only
+  `Tools/energy.sh` or the test copy's domain, only with the director); never run the old Sharks uninstaller; no live
+  desktop runs and nothing on the owner's display without the director; a test copy never changes the real wallpaper
+  (matching off) and never downloads or installs a real update; a test must never raise a real destructive dialog.
+- CI's Swift is 6.3.3: give literals and SIMD maths explicit types; long check closures become named local functions.
+- Commits use the repo's author identity and end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
+  (Codex reviewers: `Co-Authored-By: Codex <noreply@openai.com>`).
+- Plan and prep is not a go. Nothing starts without the director's go.
+- (Proposed 2026-11-25, in force once the director approves.) One review and one fix round per task. A re-check
+  only for a crash, data loss, a privacy leak or a broken habitat. A finding is fixed in 3.1 only if a user would hit
+  it in normal use; the rest goes to 3.1.1. The board holds only what's pending.
 
-## Corrections
-- 2026-11-21: "ok what now?". Applies: new (r3's and r2's briefs trimmed to what a user would hit, like t11's; what
-  was dropped from them and from t11 (a2 parts included: the reminder checkpoint write, r2's stale-job stage checks)
-  moves to 3.1.1, nothing is lost; order unchanged: t11 (running) -> r1 right-size -> r3 -> r2).
-- 2026-11-21: the live pointer trace with the director (unchanged test copy 971a216, then r1's 3a5a7a8; plugged in).
-  Applies: new (the popup is FOUND: while any notification banner shows, Notification Center puts a window over the
-  whole built-in screen (layer 21, alpha 1, 1800 x 1169); 971a216 reads it as covering the desktop, so the fish keep
-  swimming but ignore the pointer on that screen until the banner goes; seen three times, the log matches each.
-  The pointer callbacks never stopped: our Settings in front, our menu open and a foreign dialog all worked on
-  971a216, so a1's first cause (the global monitor) is not what users hit. r1's build works with the banner up: it
-  takes the window the window server handed the event to (the event's window number) instead of guessing from
-  rectangles; its still-pointer sample still uses rectangles and was blocked by the banner's window once.
-  r1 right-sized next, after t11 reports in: keep the event's window as the judge for moves and clicks, drop or fix
-  the still-pointer sample, keep own windows blocking; drop review extras no user would hit).
-- 2026-11-21: "other shit can run while this happens right?" (the live pointer trace). Applies: new (yes:
-  t11 fix round 2 starts now, trimmed, alongside the trace; it is offscreen and touches no pointer code; r1 still waits
-  on the trace; one builder at a time holds; CI runs remotely).
-- 2026-11-21: "ok" to the manager's step back on r1. Applies: new (first a short live trace with the director of the
-  unchanged test copy (971a216) to see which cause the popup is, then the same popups on r1's first build (a4f4ec7);
-  r1 then fixes what was seen, plainly, keeping review only for what a user would hit; t11 round 2, r3 and r2 briefs
-  trimmed the same way before they resume).
-- 2026-11-21: "take a step back" (during r1's restart). Applies: new (r1's restart held at once; the manager reviews
-  the approach before any more building: what the director asked, what is known live, what the review rounds added).
-- 2026-11-21: "run one at a time". Applies: new (one builder at a time, in this order: r1 (the popup, a user hit it),
-  then t11 fix round 2, then r3, then r2; r2, r3 and t11 held now, each starts when the one before reports in; any
-  uncommitted work stays in its worktree).
-- 2026-11-21, on a2: "Add them to 3.1 (Recommended)" and "Resume now (Recommended)". Applies: new (the four small
-  a2 fixes go into the paused builders' briefs as addenda: r1, r2, r3 and t11 round 2; the four restart now; the rest
-  of a2 is 3.1.1 or later, as Review routing a2 says).
-- 2026-11-21: "pause the claude workers for a bit". Applies: new (r1, r2, r3 and t11 fix round 2 held mid-build; any
-  uncommitted work stays in their worktrees; a2 (Codex) goes on; they resume when the director says).
-- 2026-11-21: "tell it to think out of the box, state of the art preformance" (about a2). Applies: new (a2 held and
-  restarted minutes after its start, with item 7 added to its brief: architectures and state-of-the-art techniques,
-  kept apart from the incremental fixes).
-- 2026-11-21: "send anoter agent to find more and deeper and more extensive perf imporevemtns". Applies: new (a2, a
-  read-only performance audit of the whole app; a fifth agent beside the four builders, at the director's ask).
-- 2026-11-21: "nvm mind that continue work here" (after asking how much could move to a Windows machine). Applies:
-  new (the pause is over; r1, r2, r3 and t11 fix round 2 resume on this Mac in their own worktrees, from where they
-  stopped: r3 and t11 have uncommitted work there, r1 and r2 none).
-- 2026-11-21: "pause work". Applies: new (all four builders stopped mid-task: r1, r2, r3 and t11 fix round 2;
-  their branches stay at 971a216 on origin, any uncommitted work stays in their worktrees; nothing resumes until
-  the director says).
-- 2026-11-21, on the a1 audit (10 root causes, all present since 3.0): scope "Users first, rest next (Recommended)";
-  signing "Not now". Applies: new (3.1 waits for: the pointer contract r1, the wallpaper transaction r2, updates,
-  settings and diagnostics r3, the greetings' lifecycle t11 fix round 2; 3.1.1 follows right after with findings 3, 6,
-  7, 8, 9 and the rest of 10, each at its cause; no Developer ID signing for now, the limit noted in DEVELOPING).
-- 2026-11-21: "cool also found a bug/behavior where when a mac popup(those this app will give notifications type
-  normal ones) was on screen no interaction happend until i dismissed the popup, on a friends laptop"; "animals kept
-  moving btw when popup was on"; then "take a step back" and "fix root cause and not symtoms , check if other root
-  issues are lurking in the app as a whole and in its details". Applies: new (a1: a read-only Codex audit of the
-  whole app for root causes; its causes are then fixed at the cause, briefed without file overlap; no symptom
-  patch for the popup in the meantime).
-- 2026-11-21, on the live card (t8 session, after "seen"): "should it dissapear on any click?", then "we can keep a
-  timer and if no interact it goes away and opens a while later we need good ux", then "20 s on screen and 3h before
-  coming back". Also: "an issue on my friends lap where he had so many icons in the top bar that the ours went under
-  the notch so it looked like we were pointing at nothing" and "the card shold appeard in the screen that is currently
-  in focus right? not always the laptop screen". Applies: new (t11 fix round 1: clicks elsewhere no longer close the
-  card; untouched it leaves after 20 s with a draining line, hover pauses; a timeout is not "seen" and it returns
-  after 3 h of awake, unlocked time, at most 3 showings; Try, Keep, esc and a close button end it for good; never
-  again once on the Meadow; the card and the welcome go on the screen in focus; a fish behind the notch counts as
-  hidden, so no arrow to nothing; d1 changed accordingly).
-- 2026-11-21: "stop jsut before the test session". Applies: new (the t8 prep rewrite, its Codex re-check and any
-  fixes finish, and t10w's CI; then all work stops before the live session; the session starts only when the
-  director says).
-- 2026-11-21, on t10w's drafts (LICENSE, README, About, CHANGELOG): "ok on the words". Applies: new (the words are
-  approved; t10w's small round fixes the three noticed items: About's accessibility label on the Meadow; the
-  sketch kept in the repo at Tools/meadow-sketch/ (from 4e1b869) so DEVELOPING links to a lasting path, not a
-  branch commit; the README battery note after t8).
-- 2026-11-21: "aslo we have to rework docs and customer facing stuff since now with meadows this is just not a port
-  of stackeds works but have proprietary work too but its also like mit open with creditation thing". Applies: new
-  (t10's words: README, About, LICENSE notice, DEVELOPING, CHANGELOG say the Ocean and Web are ports of @stackedlol's
-  MIT projects, credited, and the Meadow is XERO WORKS' own original work). Answered: MIT too, credited as ours
-  (Decisions, 2026-11-21); drafted in t10w.
-- 2026-11-21: "?shold the mac be plugged inw hen doign the tests" (answered: plugged in, Low Power Mode off; 15 fps is
-  set directly), then "so i have access to a different display now". Applies: new (t8 re-measures every habitat in
-  one session on the current setup, recorded as a new setup; the manager reads the displays itself).
-- 2026-11-21, on mp's films (sketch beside app, dark, light, quarter speed, 15 fps, two screens): "films look good".
-  Applies: new (t7, the film gate, passed; the 15 fps wingbeat accepted as is). Next: t8, energy measured live with
-  the director.
-- 2026-11-20: "can we work on stuff in parallel?". Applies: new (alongside mp, work that shares no files with it:
-  d1, the design of the Meadow in the app — presets, Settings, menu, status word, what's-new, welcome — as a
-  proposal with pictures for the director, so m8 and t9 build from an approved design).
-- 2026-11-20: "why are stuff taking so long?", then to the manager's list of process tweaks: "no first take a step
-  back / exercise absrtact thnking". Applies: decide.escalate (the manager re-thinks the port's shape and brings it
-  to the director before more is started; m1's running fix round may finish; nothing new starts).
-- 2026-11-20: "pause after m1". Applies: new (m1 finishes its fix round and Codex re-check, and its CI; then all
-  work stops; m2 does not start until the director resumes).
-- 2026-11-20: "continue also whats new doesnt need a full screen thing i think". Applies: new (t9: the 3.1
-  what's-new for existing users is not the full-screen welcome window the Web card uses today; the manager
-  proposes a small card under the menu bar icon, shown once, with "Try the Meadow" and "Not now", and a "New" tag
-  on Meadow in the Habitat menu; the first-run welcome tour for new users stays as it is; t9's brief brings the
-  design back to the director).
-- 2026-11-20, asked whether the sketch is ready to port: "dbbl check shit then go". Applies: new (the sketch gets
-  one independent Codex review before the port; meanwhile a read-only research task maps the sketch against the
-  Swift code for the port plan; the manager then writes the port plan for the director's approval, Design size).
-- 2026-11-20, on sketch round 6 (light mode for paper): "ok for now". Applies: new (round 6 accepted for now).
-- 2026-11-20, during s1 round 5: "also to be clear is the colors in light mode not beign correct intended?". The
-  manager's answer: only partly. The muted look and no colour sparkle on paper follow Web, but the rest is wrong:
-  solid near-black blocks for the black markings (heavy, muddy on paper), olive and brown wings, white flowers that
-  go grey and vanish, and pale mint leaves as the loudest colour. The family on paper uses pale tinted blocks with
-  dark ink glyphs and no solid black. Round 2 converted the dark palette by a formula instead of designing a paper
-  palette. Applies: task.change (round 5 is building on the same file; a light-mode round 6 follows it, designing
-  the paper palette from Ocean's and Web's light stills).
-- 2026-11-20, on sketch round 4: "looks good one last thing rn there is no seperation between the close butterfies
-  and the stuff far away especially the flowers.. what do we do, discuss no edits yet"; the manager proposed
-  pushing the meadow back with light (family depth dimming) plus a dark rim around high butterflies, with less
-  detail in the distance as a stronger step, all on one Depth slider; the director: "ok". Applies: new (s1 round 5).
-- 2026-11-20, during sketch round 4: "leaves param at .9". Applies: task.change (round 4 is building on the same
-  file and its brief is frozen, so this waited until round 4 landed; the manager set the Leaves default from
-  1.24 to 0.9 as a Small change, meadow-sketch @ f8811f6).
-- 2026-11-20, after playing with sketch round 3: "umm what happens when i keep clicking at the same point?" and new
-  settings, the same as before except glide 0.44 → 0.1 (the new round-3 controls left at their defaults).
-  Applies: new (the sketch's round 4: glide 0.1 is the default; what the manager found in the code: every click
-  stacks another flower of a random kind on the same spot, with no limit, kept even by "New meadow", and each click
-  may call the nearest butterfly, so repeated clicks pile butterflies onto one point, the gathering the director
-  asked to avoid. Round 4: a click on a bloom touches that bloom instead of stacking a new one).
-- 2026-11-20, after playing with sketch round 2, the director sent their settings "for now": count 7, sizeLow 0.75,
-  sizeHigh 1.4, wingbeat 0.5, lurch 2, zigzag 1.29, glide 0.44, speed 2, turning 1.23, bob 1, height 0.5, visits
-  0.35, stay 0.25, bask 0.2, density 0.85, flowerSize 1.32, leaves 1.24, breeze 1.7, shadow 1, green 0.69, grass 1,
-  sparkle 1, all four species. Applies: new (these become the sketch's defaults; the round-2 look is accepted for
-  now; the sketch's next round, motion and behaviour, starts from them).
-- 2026-11-20, on the sketch: "aslo colors in light mode doesnt look right". Applies: new (the sketch's next round:
-  light mode redone to match how Ocean and Web do light, from the research).
-- 2026-11-20, on the sketch: "aslo need reset button seperately for each tweak". Applies: new (the sketch's next
-  round: a reset beside every slider and choice, back to its default).
-- 2026-11-20: "no viual detail i meant about this: yeah figure all all the small devil in the edtails type stuff from
-  those scnees to this one can sfeel like the same family". Applies: the family-details round is about the LOOK
-  (visual details); motion and behaviour notes from the research are kept for later, not acted on now.
-- 2026-11-20, on the sketch: "yeah figure all all the small devil in the edtails type stuff from those scnees to this
-  one can sfeel like the same family", then "aslo the artefact foesnt work / not just visual detail / just local
-  host bro why artefact". Applies: new (the sketch is served on localhost, not as a published page; a researcher
-  catalogues every detail of Ocean and Web, look, motion, behaviour, interaction, traces, edges, for the sketch's
-  next round).
-- 2026-11-20: "aslo we are missing some of that random gplyh color noise thing that the other animals bodies had,
-  first figure out what that is? its not a erro ir issue". Applies: task.change (s1 is building: it goes into the
-  sketch's next round). What it is (manager, from Shaders.swift and WebPainter.swift): the hide shimmer. Each body
-  cell has a key hashed from its body-local position, so its glyph rides with the body; interior glyphs come from
-  a density ramp by shade with a ±1 random step; every cell re-rolls a random number about 2.4 times a second on its
-  own staggered phase; on a roll about 9 % of cells show their glyph in one of seven accent colours (orange, red,
-  purple, cyan, green, blue, gold), about 4 % in white, the rest in dark ink; edge cells use light glyphs with 7 %
-  accents; the sharks add a ±3 % brightness flicker per cell at 6 Hz. Accents are off on paper and scaled down in
-  Calm. The Meadow painter has the body-anchored glyphs but none of the coloured re-rolling flecks.
-- 2026-11-20: "take a step back". Applies: decide.escalate (p2a held; the manager reviews the whole approach with the
-  director before more building).
-- 2026-11-20, on the p1 prototype: "also it doenst move like a butterfly anomore". Applies: new (p1 used a quick
-  stand-in flight; the measured flight's beat-coupled lurch, bob and zig-zag must carry into the top-down view;
-  part of the proposed p2).
-- 2026-11-20, on the p1 top-down prototype: "the wing beat loosk too infreent and slow, the flowers need a lot of
-  work and some findelity and quality we are missing". Applies: new (revisits the plan's "slow motion" decision,
-  wingbeat = real × 0.28 capped at 3 Hz; proposed: a look-development step p2 before the plan is rewritten).
-- 2026-11-20, sent by the director straight to p1's builder mid-task: "keep the screen mainly black with hints of
-  green and need way better flowers". Applies: new (applied in p1; it carries into the top-down plan if chosen).
-- 2026-11-20: "mm also what if its a top down view into the scene instead of the side view we have now? exercis
-  abstract thinking", then "then can come closer and further away from the viewpoint / take all the feed back in
-  this set ive given and exercise abstract tthinking". Applies: task.size (a Design change: written direction to
-  the director first, docs/plans/2026-11-20-meadow-top-down-direction.md); t3 held meanwhile (task.change).
-- 2026-11-20: "not replace but learn from it and make a whole new one/ modify ours also their wings have a bit more
-  detail and not just one flat color like ours (we dont want full realistic colors but yeah)". Applies: new (t5w:
-  our own wingbeat, turning and wing shading, learning from the reference rather than copying it).
-- 2026-11-20: "i have a wing beat referene, look properly. also dont take anything else from this it doesnt have the
-  life stuff we have. also want the butterflies to like rotatea around when moving (idk how much is possible)",
-  with https://www.pocketstudio.design/ascii-animals-app/. Applies: new (t5w rewritten before it started: the
-  reference's symmetric wingbeat and turning only; the checks of the replaced wing design are replaced on this
-  decision).
-- 2026-11-20, on the first films: "also it looks like onyl the left wing is moving and the right wing dissapears on
-  motion towards close". Applies: task.change (t3 is building and lists MeadowPainter.swift, so this becomes a new
-  task t5w after t3, not a change to t3).
-- 2026-11-20, after watching the first films: "1. to many 2. they gather around to mcuh and look like they roam
-  around the same places and not enough movevemt". Applies: new (t3's brief; it sets the realism line: movement
-  and spread first).
-- 2026-11-20, asked what the issue was, then "think more exercise abstract thinking": the manager had kept a rule
-  nobody asked for (nothing drawn off screen) and patched around it for two rounds. Applies: decide.escalate /
-  review.restart (step back to the director's actual asks before rewriting a brief).
-- 2026-11-20, on the first Meadow stills: "would like bigger butterflies and better flowrs". Applies: new (t5 fix
-  round 1).
+## 3.1 candidate
 
-- 2026-11-19, on the T2 flight-path picture: "did you see the flight paths? they seem clusted at the center of the
-  screen". Applies: new (sent to the T2 builder mid-task, before this board existed; now part of brief t1-2).
-- 2026-11-19: "pause work". Applies: new. All work stopped; resumed by the director's "be the pm" on 2026-11-20.
+| Part | Branch @ SHA | State |
+|---|---|---|
+| Meadow, card, welcome, energy (t11 stack) | meadow-t11 @ 20cdb3c | approved (review-t11-r3 @ b03d17f); live card look at the join |
+| Pointer input (r1b) | meadow-r1b @ afa861f | approved (review-r1b-r2 @ d158c7c); banner re-test with the director |
+| Updates, settings, diagnostics (r3) | meadow-r3 @ 633a682 | fix round 3 briefed (briefs/r3.md "Fix round 3": a report reads only entries this version wrote; an unfinished last entry dropped); the reviewer's two reproducing checks: briefs/r3-recheck2-probe-checks.patch; waits for a go |
+| Wallpaper recovery (r2) | meadow-r2 @ bb6df14 | re-check review-r2-r1 @ 1086bf7: changes requested (4 open, all from deleting stills and per-still records); to be rebuilt on the root fix, waits for the director's go |
 
-## Decisions
+Trial join (2026-11-25, scratch only, on t11 20cdb3c + r1b afa861f + r3 633a682 + r2 d9e05a0): one conflict
+(`Sources/OceanChecks/main.swift`, `greetingChecks()` and `pointerChecks()`, keep both); build passes, 334 checks,
+selftest 0 failed.
 
-- 2026-11-21: The Meadow is licensed "MIT too, credited as ours" (the director). Everything people read says the
-  Ocean and Web are Mac ports of @stackedlol's MIT projects, credited, and the Meadow is XERO WORKS' own original
-  work; the app stays MIT with every notice kept.
+## Next, in order (each waits for a go)
 
-- 2026-11-21: The count's area base is withdrawn as unverified (the director: "ok"). The manager had set it to
-  1800 x 1169 from an old benchmark setting; the director tuned the 7 at a smaller size (likely 1512 x 982, in a
-  browser window). The anchor is now set by eye: in t8's live session, with the Meadow on the laptop screen, the
-  director sets How many until it feels like the sketch; that screen and number become `areaCountReference` and
-  the default (a one-line change after the session). The energy readings follow at that count, and are recorded
-  as this desk's (1800 x 1169 at "more space" scaling plus a 3440 x 1440 ultrawide), for comparing the habitats,
-  not as typical numbers. Lesson (manager): settle looks by eye, not by inferred numbers.
+1. r3 fix round 3, then its one re-check (privacy).
+2. r2 rebuilt on the root fix: two reused files per display, written alternately, never deleted in normal use; the
+   covered wallpaper in the file name; a file in our folder is ours, anything else is the person's; restore each
+   Space on its next visit; do nothing when a read fails; uninstall restores the Space in view, keeps the small
+   folder and says so; 3.0 and Sharks stills left on disk, restored to their display's saved original. The brief
+   checks 3.0's limit of 3 stills per display. Then one review.
+3. The join: `meadow-3.1` from meadow-t11 plus r1b, r3, r2; a draft PR for CI; one Codex review of the merge only.
+4. Copy, with the director's OK: briefs/copy-unslop.patch (the director's /unslop, 29 lines in 10 files, made on the
+   trial join; re-apply after r2 and r3 change their files) plus three README/CHANGELOG fixes (the card "once": an
+   unanswered card can come back twice; "deletes everything it saved": uninstall can keep the stills folder; the
+   battery claim: Meadow's WindowServer 29.7 % vs Web's 26.3 %).
+5. Release notes and the 3.1.1 list.
 
-- 2026-11-21: How many on a big desk: "Scale, but cap at 12 total" (the director). 7 on the laptop the director
-  tuned on, more on bigger screens by area, never more than 12 across all screens, so the Meadow stays within Web's
-  CPU. The manager rules the area base is the director's laptop screen (1800 x 1169 points, where the 7 was tuned),
-  not 1440 x 900, so their laptop shows exactly 7.
+## With the director
 
-- 2026-11-20, the director on d1 (docs/plans/2026-11-20-meadow-in-the-app.md on design-d1): presets: "Fewer
-  presets", then keep "Mixed (default), Just a Few, Blue Morphos" (three line-ups plus Custom); Custom: "Yes, switches + How many"; what's-new: "C: small card"; the 7 were tuned
-  on "A laptop screen" (7 is the laptop number; bigger displays get more by area).
-
-- 2026-11-20: The port is reshaped (the director: "mm ok and preformant"; docs/plans/2026-11-20-meadow-port-plan.md,
-  "Revised the same day"): m1 and m3 stand; one translation pass, mp, replaces m2, m4, m5, m6, m7; the director
-  judges fidelity by eye on films next to the sketch; the Meadow must cost no more CPU than Web at 30 and 15 fps and
-  allocate nothing per frame; one review of the whole port guards what can hurt. "Pause after m1" is lifted by
-  this approval. m1's fix round 2 finishes without another Codex round: the manager checks it, and mp's review
-  covers it. Lesson recorded: briefs ask for what the director asked for and what the sketch does, nothing more.
-
-- 2026-11-20: (withdrawn the same day) m1's pointer air trailing by 0.14 s. Replaced by the sketch's own per-step
-  stir with no lag (Review routing, m1, re-check); the 5 % burst rule was the manager's, not the director's
-  (manager).
-
-- 2026-11-20: The port plan is approved: the director said "dbbl check shit then go" and answered its three
-  questions. Ground colour per cell: "Yes, change it" (m3). The monarch life cycle and courtship chases: "Leave out
-  of 3.1" (t4's life cycle and courtship are dropped from 3.1; crossings move into m6). What users can change:
-  "presets like the other two animas" (m8: named butterfly line-ups like Ocean's and Web's presets, with Custom; the
-  manager proposes the names in m8's brief). The side-view tasks are superseded by m1–m8 on a fresh stack from main;
-  the no-merge rule stands. Draft PR #1 (t1-2's CI) is closed at the end with the side-view branches, with the
-  director's OK.
-
-- 2026-11-20: The port plan is written (docs/plans/2026-11-20-meadow-port-plan.md, from research r2 and the sketch
-  review) and sent to the director with three questions; nothing is built from it until approved (Design size).
-  Proposed in it, by the manager: a fresh stack from main (m1–m8), superseding the side-view branches, instead of
-  stacking on meadow-t1-2 (every t1-2 file is replaced); this supersedes the 2026-11-20 stacking base once
-  approved, not the no-merge rule.
-
-- 2026-11-19: Meadow 3.1 plan approved ("ok"); species, slow motion, monarch-only life cycle, courtship chases,
-  caterpillar horn deferred, morphos sip flowers (the director, via the plan's questions).
-- 2026-11-19: Order: T1, T2, T5 (painter and a first still), T3, T4, T6, then the T7 gate, T8, T9, T10, so the
-  director sees a still early (manager).
-- 2026-11-20: The director made Claude the manager ("be the pm for this project"). This board replaces the earlier
-  private progress ledger. The unreviewed Meadow commits (5496bbf breeze and flowers, 0cce823 butterfly flight) moved
-  off main onto task branch `meadow-t1-2`; main is back at 3043eed (the plan) (manager).
-
-- 2026-11-20: The board files (WORKBOARD.md, briefs/, reviews/, reports/) may live in the public repo for now; to be
-  revisited later ("yesh fr now its fine we will deal with taht later", the director).
-- 2026-11-20: t1-2 gets its CI run through a draft pull request (CI runs only on main and on pull requests), so a
-  red build never lands on main (manager).
-
-- 2026-11-20: Reviews and re-checks are done by Codex from now on ("use codex for reviewing", the director).
-  t1-2's review and re-check, already done by Claude, stand.
-- 2026-11-20: t5 is briefed ahead (briefs/t5.md) (manager).
-
-- 2026-11-20: Nothing merges into main until the whole Meadow is built ("bro fnish the work first / dont merge now",
-  the director). Tasks stack: each task's branch is made from the previous task's branch, starting from
-  `meadow-t1-2`. The director approves the stack at the end; each task still gets its own review and CI run. A later
-  fix to an earlier task's files goes through that task's own branch and is then merged up the stack (manager).
-
-- 2026-11-20: A later task may change an earlier stacked task's file when the change is that later task's own
-  purpose (the director's bigger butterflies and better flowers in t5); its row names the file. Other fixes to an
-  earlier task go through that task's branch (manager).
-
-- 2026-11-20: t5 restarts with the rewritten brief: closed wings as the solid underside, the flight at the drawn
-  size, starting with a design exercise ("ok after some exercise abnstract thinking", the director; read as yes
-  plus think it through first).
-
-- 2026-11-20: Butterflies may flutter partly off screen and into the gap between displays; only the body stays on
-  a screen, like the sharks ("yeah butterflies can flutter a bit off screen, in between screens it was neveer a
-  iusse", the director). t5 restarts simplified (briefs/t5.md, "Restart 2, simplified"). Dropped, against this
-  decision: the checks `nothingDrawnLeavesTheScreen` and `drawingStaysOnScreen`, and review findings 1–3 of the
-  t5 restart review as far as they demand no off-screen cells (manager, on the director's decision).
-
-- 2026-11-20: After t5, a short film of the butterflies flying before t3 starts (the director: "yes"). Also: keep
-  the physics where it makes them look better, and decide how realistic we want them ("its a line drawn in sand on
-  a spectrum", the director). The line is decided after the director sees the film ("we can only decied afteri see it in motion"). Set on
-  2026-11-20 by the director's verdict on the film: movement and spread across the whole screen first, real
-  behaviours tuned to keep the meadow moving. The clap snap and the morpho's flash drew no comment from the
-  director, so t5's two clap findings go to Noticed (manager).
-
-- 2026-11-20: A throwaway top-down prototype film (p1) before the plan is rewritten; the director picks the view by
-  watching it next to the side-view film ("ok", the director). No review for p1: it is never merged (manager).
-
-- 2026-11-20: The view from above is chosen (the director's notes on p1 treated it as the pick; not objected to).
-  Look development (p2) comes before the plan is rewritten: first motion and wingbeat speed (p2a), then the
-  butterfly sheets, then the flowers ("ok", the director). t3 and t5w stay held until the plan is rewritten.
-
-- 2026-11-20: Make the Meadow's original first: a live web sketch with sliders the director plays with; port it to
-  the app once the director says it's right ("ok", the director, to the proposal; earlier "uhhh" to the long
-  version). Look development: no reviews or checks while exploring; the team process resumes for the Swift port.
-  The manager delegates the sketch to a builder (team.manager: the manager does not build) and publishes it.
-
-- 2026-11-20: Sketch round 3 is motion and behaviour, from the research's gap list (§3.2–3.6), built on the
-  director's settings. The settings read as: more travel, more lurch and zig-zag, less gliding, more breeze, more
-  butterflies. So nothing added this round may make them sit more or move less by default; every new behaviour gets
-  its own slider or switch with a reset, so the director tunes it (manager).
-
-## Tasks
-
-| Id | Task | Size | Files | Branch | Builder | Reviewer | Rounds | State | Brief |
-|---|---|---|---|---|---|---|---|---|---|
-| t1-2 | Breeze, flowers and butterfly flight (plan T1 + T2), with the director's path fix | Content | Sources/OceanKit/Meadow/{Breeze,Flowers,ButterflySpecies,Butterfly}.swift, Sources/OceanChecks/MeadowChecks.swift, Sources/OceanTool/{Paths,main}.swift | meadow-t1-2 | builder-t1-2 (Claude Opus, T3 child thread; fix round 1) | reviewer-t1-2 (Claude Opus, T3 child thread) | 1 | reviewed, waits for the end of the stack (director: no merge yet): reviewed (review-t1-2 @ 68288c7), CI passed on 1e11a1b (PR #1), merge rehearsed 2026-11-20 (200 passed, app builds); superseded by the port plan (m1–m8), kept as a reference until the end | briefs/t1-2.md |
-| t5 | Meadow painter and `OceanTool meadow-still` (plan T5, as reordered); fix round 1 adds the director's bigger butterflies and better flowers | Content (grown: now also t1-2's sizes and flower shapes; the director set the look, so no separate plan) | Meadow/MeadowPainter.swift (new), OceanTool/{MeadowStill,main}.swift, OceanChecks/MeadowChecks.swift, Render/GlyphAtlas.swift (append only); fix round 1 adds Meadow/ButterflySpecies.swift (sizes) and Meadow/Flowers.swift (heads, leaves, clumps) | meadow-t5 (from meadow-t1-2); restart on meadow-t5r | builder-t5 (Claude Opus, T3 child thread) | reviewer-t5 (Codex) | 2 before the restart; 2 after it; restart 2: 0 | reviewed (review-t5r2 @ 57f880a); clap findings to Noticed after the director's watch; superseded by the port plan (m1–m8), kept as a reference until the end | briefs/t5.md |
-| t5v | A 30 s film of the butterflies flying, for the director to judge the motion | Content (small) | OceanTool/MeadowFrames.swift (new), OceanTool/main.swift | meadow-t5v (from meadow-t5r) | builder-t5v (Claude Opus, T3 child thread) | Codex | 0 | reviewed (review-t5v @ 94d9d2b); its 4 tool fixes moved into t3 (which rewrites meadow-frames); superseded by the port plan (m1–m8), kept as a reference until the end | briefs/t5v.md |
-| p1 | Throwaway prototype film of the Meadow seen from above, with depth | Prototype (never merged, no review) | new OceanTool files, OceanTool/main.swift | proto-top-down (from meadow-t5v) | builder-p1 (Claude Opus, T3 child thread) | none | 0 | built (proto-top-down @ de1f728); director's notes in Corrections; superseded by the port plan (m1–m8), kept as a reference until the end | briefs/p1.md |
-| p2a | Look development 1: butterfly motion from above (the measured flight turned on its side) and wingbeat speed | Design (look development; approved; reviewed later in the plan's tasks) | new Meadow/OceanTool files, OceanTool/main.swift, additive Butterfly/ButterflySpecies | look-top-down (from proto-top-down) | builder-p2a (Claude Opus, T3 child thread) | later | 0 | held (the director: "take a step back"); notes only at look-top-down @ adc632f, no code changed; superseded by the port plan (m1–m8), kept as a reference until the end | briefs/p2a.md |
-| s1 | The Meadow sketch: a live web original with sliders (published for the director) | Design (look development; approved; one review before the port, the director asked) | Tools/meadow-sketch/meadow.html (new) | meadow-sketch (from main) | builder-s1 (Claude Opus, T3 child thread) | Codex | 0 | built (meadow-sketch @ 0e2ecf7); round 2 built (meadow-sketch @ d893c50, done with concerns); round 3 built (meadow-sketch @ caca692, done with concerns); round 4 built (meadow-sketch @ ee6009b, done with concerns); leaves 0.9 set by the manager (f8811f6); round 5 built (meadow-sketch @ b01db3f, done); round 6 built (meadow-sketch @ 3f02cb3, done); the director: "ok for now", then "dbbl check shit then go": Codex review a8f02d4 in (15 findings, routed below); fix round 1 done with concerns (meadow-sketch @ f20b833); re-check 1f9e985 routed below; fix round 2 done (meadow-sketch @ 4bcf693), re-check 2 436917c: fixed, three small fixture findings; fix rounds 1–3 done, re-checks passed (review-s1 @ 66f4462); R3-1 fixed by the manager (meadow-sketch @ 4e1b869). The original for the port is meadow-sketch @ 4e1b869; open edge cases are carried into m1, m6, m7, m8 | briefs/s1.md, briefs/s1r2.md … briefs/s1r6.md |
-| r1 | Research: what makes Ocean and Web look and feel alive, and the Meadow's gaps | Small (read-only research) | docs/plans/2026-11-20-family-details.md | main | research agent | none | 0 | done (saved on main) | none |
-| r2 | Research for the port: the sketch's model, numbers and behaviours mapped against the Swift Meadow code on the task branches | Small (read-only research) | docs/plans/2026-11-20-meadow-port-inventory.md (saved by the manager) | main | research agent (Claude Opus, T3 child thread) | none | 0 | done (saved on main) | none |
-| t5w | A new wingbeat (both wings together), wing shading and detail, and butterflies that turn to face where they fly, learning from the director's reference | Content | Meadow/MeadowPainter.swift, Meadow/Butterfly.swift (drawn heading, open), OceanChecks/MeadowChecks.swift | meadow-t5w (from meadow-t3) | | Codex | 0 | held (the view changed; replaced by look development); superseded by the port plan (m1–m8) | briefs/t5w.md |
-| t3 | Meadow world and behaviours (plan T3), with the director's film verdict | Content | Meadow/{MeadowWorld,Behaviour}.swift (new), OceanChecks/MeadowChecks.swift, Meadow/MeadowPainter.swift (convenience paint, breeze trail), Meadow/Breeze.swift (pointer field), Meadow/{Butterfly,ButterflySpecies}.swift (roaming, spacing, stays), OceanTool/{MeadowStill,MeadowFrames,main}.swift | meadow-t3 (from meadow-t5v) | builder-t3 (Claude Opus, T3 child thread) | Codex | 0 | held (2026-11-20: the view may change to top-down); WIP saved at meadow-t3 @ 11394be (does not build yet; checks written, world not started); superseded by the port plan (m1–m8), kept as a reference until the end | briefs/t3.md |
-| t4 | Cursor landing, courtship, crossings, monarch life cycle (plan T4) | Content | to brief | meadow-t4 | | | 0 | open (waits on t3); superseded by the port plan (m1–m8) | |
-| t6 | Meadow habitat, settings and tools (plan T6) | Content | to brief | meadow-t6 | | | 0 | open (waits on t4); superseded by the port plan (m1–m8) | |
-| t7 | Director reviews the prototype films (plan T7, a gate) | Content | none | none | | | 0 | open (waits on t6) | passed: "films look good" (the director, 2026-11-21)
-| t8 | Energy measured live with the director: prep (energy.sh for the Meadow, a safe live preview of the what's-new card, a runbook, the app built), then the session | Content | Tools/energy.sh, Sources/ASCIIAnimals/WhatsNewCard.swift and the launch file (preview flag), reports/t8.md; docs/DEVELOPING.md after the session, grown: the app's launch code (ASCII_ANIMALS_QUIET_LAUNCH, set by energy.sh) | meadow-t8 (from meadow-t9) | builder-t8 (Claude Opus, T3 child thread); the session: manager with the director | Codex (light) | 3 | prep done with concerns (meadow-t8 @ d2dc3be: energy.sh takes meadow, dry runs on a throwaway domain only; ASCII_ANIMALS_PREVIEW_WHATSNEW shows the card without recording; runbook in reports/t8.md, about 25-30 min; app built, 262 checks). Ruled by the manager: the extra ASCII_ANIMALS_QUIET_LAUNCH (energy runs show no welcome or card and leave arrival.v1 alone) is accepted, it protects the measurement and the director's one-time card. Codex safety review c9566d4: hold the session (11 findings; routed: rewrite around an isolated test identity); prep rewrite done with concerns (meadow-t8 @ 978f67e: a test copy `local.ascii-animals.energy-test` that never runs the updater, hand-over, uninstaller, wallpaper match or login item, decided in one place; energy.sh drives only it, writes and deletes its own domain, one run at a time, validated sampling, quits and relaunches the owner's apps without Apple Events; preview, calibrate, status, recover modes; 267 checks; identity probe 20/20; untested live: quit/relaunch and the test copy's launch); re-check 4e42078: hold again (routed: the director quits and reopens their own apps; the script never touches them); rewrite 2 done with concerns (meadow-t8 @ c0e8ca8: never touches the owner's apps, refuses while one runs; lock under build/energy-test; test-copy identity by lsof path, bundle ID and start time; strict sampling with per-display fps and power state; calibration and preview confirmed by the director; artefacts confined; 270 checks; selftest 65/65; unproven until live: the test copy's live launch, lsof/lsappinfo checks on it, the card-on-screen line); re-check 2 ed62f60: core safety fixed, adversarial cases left (routed: small fix round 3, residual risks accepted for a supervised session); fix round 3 done (meadow-t8 @ 69cde4a: launch ids, fresh calibration, stable displays, strict power trace, wallpaper-app watch, symlink pre-check, stderr kept; the manager re-ran the dry selftest, 0 failed, and OceanChecks, 271 passed). READY; stopped before the live session as the director asked; it starts when the director says go. Before it: Energy Mode on Automatic (High Power fails a run), plugged in, the director quits ASCII Animals and ASCII Sharks from their menus; the session needs the director and starts with the density set by eye (Decisions, 2026-11-21). The director's setup (read by the manager 2026-11-21): built-in now 1800 x 1169 pt at 2x (main; the director raised it from 1512 x 982, the size the 7 was tuned on) plus an LG ultrawide 3440 x 1440 pt at 1x to its right, 187 pt higher at the bottom edge; the Meadow shows 12 in all there. Setup for the session (the director, 2026-11-21, at the office): the built-in (main) plus the BenQ 2560 x 1440 at 1x, the monitor the 3.0 Ocean and Web two-display table in docs/DEVELOPING.md was measured on, so the Meadow's rows compare with it directly (the runbook's LG line is superseded; the script checks only that the displays stay the same through a run). Read then: on battery with Low Power on battery (powermode 1); plugged in, the AC setting is Automatic (0). SESSION RUN 2026-11-21 with the director (office desk: built-in + BenQ 2560 x 1440 at 100 Hz; plugged in, Automatic), from meadow-t8 @ 8d310ca, the manager typing: count by eye on the built-in alone: 7 (the default; areaCountReference already 1800 x 1169, so no change). Energy, all seven runs valid (every display at the asked rate, power traced): app CPU / WindowServer / memory: 30 fps Ocean 11.5 / 26.0 / 243 MB, Web 13.7 / 26.3 / 205, Meadow 10.7 / 29.7 / 213; 15 fps Ocean 8.7 / 18.4 / 243, Web 8.7 / 16.8 / 205, Meadow 6.2 / 19.0 / 211; baseline WindowServer 8.9 then 6.9. The Meadow costs the app least; WindowServer about 3 points more at 30 fps (likely the per-cell ground). Found live: (1) energy.sh exited 2 silently when the test copy's log did not exist yet (awk under set -e and pipefail); the manager fixed it on the spot (8d310ca: plan_of, check_readings, calibration_after read a missing log as nothing; dry selftest 0 failed) and pushed; (2) calibration's last check failed on a 14 s gap in the readings while the director had the test copy's menu open (the reading timer stalls in menu tracking); the count was confirmed from the log instead (count=7 drawn live at 30 fps on the built-in after the answer); (3) the live what's-new card draws EMPTY: its panel is on screen (layer 25, alpha 1, 460 x 333 at the built-in's top right) and logged shown, but the director's screenshot shows nothing there (twice; the first time it also came 23 s after launch, the second 1 s). Preview not passed. Routed to t11. energy.sh needs a terminal for calibrate and preview (/dev/tty); the manager drove it through a pseudo-terminal. Final status clean (no test copy, domain absent); the director reopens their apps. Done, except the card
-| t9 | The welcome's Meadow words and chips, and the what's-new card C for upgraders (design d1, approved) | Content | Sources/ASCIIAnimals/{OnboardingController,StatusMenu,WhatsNewCard (new)}.swift and the app's launch file, Sources/OceanKit/Domain/{Arrival,Handover}.swift (as needed), Sources/OceanChecks/AppChecks.swift | meadow-t9 (from meadow-pf) | builder-t9 (Claude Opus, T3 child thread) | Codex | open (waits on t8); the what's-new is not full screen (Corrections, 2026-11-20) | built (meadow-t9 @ 4e6e990, done: card C for upgraders once, waits for an awake unlocked screen, never key; Esc only while the app is active; the Web card first for Sharks arrivals, the Meadow card next launch; welcome words and line-ups; 253 checks; seen only in snapshots); Codex review 5e62a5c in (8 findings, all routed to fix); CI green on 4e6e990 (draft PR #7); fix round 1 done (meadow-t9 @ d2a059d: all eight fixed; 262 checks; an offscreen probe of the real card, 15 of 15); the manager re-ran: 262 passed, and looked at the card snapshot (a whole morpho and a flower, under the fish); CI green on d2a059d (PR #7). Done; the live card is seen with the director in t8; the live card needs the director
-| t10w | The words and media for 3.1: LICENSE notice, README (three habitats, Meadow media), About credits, DEVELOPING, CHANGELOG; the Meadow credited as XERO WORKS' own, Ocean and Web as @stackedlol's (drafts; the director approves the words) | Content | LICENSE, README.md, CHANGELOG.md, docs/DEVELOPING.md, docs/media/*, Sources/ASCIIAnimals/AboutWindow.swift (credits text) | meadow-t10w (from meadow-t9) | builder-t10w (Claude Opus, T3 child thread) | Codex (light) | 0 | built (meadow-t10w @ b723ea6, done; LICENSE, README, About, DEVELOPING, CHANGELOG, Meadow GIF and stills); words approved by the director ("ok on the words"); fix round 1 done (meadow-t10w @ 8134a0e: About's label per habitat, the Meadow's "A live meadow: move the pointer over it, or click to bloom a flower"; Tools/meadow-sketch/ in the repo, DEVELOPING links to it); CI green on 8134a0e (draft PR #8); the README battery note after t8. Noticed (to fix in its next round): About's accessibility label says "A live ocean" on the Meadow; the sketch link needs a lasting target (a tag); the README battery note to update after t8 | briefs/t10w.md |
-| t11 | The what's-new card drawn live (it draws empty on the desktop), calibration's reading check, the energy numbers in the docs; joins t8 and t10w | Content | Sources/ASCIIAnimals/WhatsNewCard.swift and what the cause needs, Tools/energy.sh, the app's energy reading timer, Sources/OceanChecks/AppChecks.swift, docs/DEVELOPING.md, README.md (battery note), reports/t8.md (runbook notes) | meadow-t11 (from meadow-t8 @ 8d310ca, meadow-t10w merged in) | builder-t11 (Claude Opus, T3 child thread) | Codex (light) | 1 | built with concerns (meadow-t11 @ 5e3dea9: the card draws, 0.977 of its window, measured from inside the test copy; the manager's "draws empty" was wrong: the card most likely closed on a click before the director looked (the first time it waited 23 s for a sleeping screen; the second, `open` gave the test copy the keyboard); the preview now opens it in the background, checks its drawn share before asking and logs why it closed; readings in common run-loop modes; calibration checks after the answer; the 3.1 table in DEVELOPING, the README battery note; 275 checks, selftest 0 failed; concern: the builder put 1-2 pt probe windows on the owner's display for about a second without the director, noted, not to repeat). Live preview with the director 2026-11-21 07:54Z: drawn 0.978, SEEN, exit 0, status clean. Fix round 1 from the director's notes (Corrections, 2026-11-21): the card's timer and return, the screen in focus, the notch; the README's "The Web costs no more than the Ocean" corrected to the 3.1 numbers; fix round 1 done (meadow-t11 @ 971a216: the card's 20 s with a draining line, hover pauses, back after 3 h of awake unlocked time, at most 3; a close button; the card and the welcome on the screen in focus (NSScreen.main); a fish behind the notch is hidden; README corrected; 280 checks; probe 35/35; nothing on the owner's display). Live with the director 2026-11-21 08:16Z: the card came up on the BenQ (the screen in focus), drawn 0.978, hover paused it, it left by itself (closed=timeout after=23s), "seen ans works". Fix round 2 (a1 finding 5 and the preview parts of 3, 7, 10): one presentation lifecycle for the card and both welcomes; previews follow the power policy; brief trimmed to what a user would hit (the step back); RESUMED 2026-11-21 alongside the live pointer trace, in its worktree from its uncommitted work; that run was interrupted with nothing committed (found 2026-11-25), restarted the same day from its uncommitted work; round 2 done (meadow-t11 @ f9bfe12: proof 7941f0d fails 3 checks and 8 probe lines on the old behaviour, fix cff506b, report f9bfe12; a greeting cut short stays owed (the card counts as seen after 2 s of its countdown or a hover, the welcomes after their 3 s mark or a dismissal, and come back next launch), the launch welcome waits for a seeable screen, the fading welcome lets clicks through, nothing ticks while locked, asleep or under the screensaver (60 s fallback instead of the 1 s poll), previews follow Low Power and Reduce Motion and redraw on light/dark; 283 checks, probe 45/45, selftest 0 failed, drawn 0.977; rulings for the director: Reduce Motion or Low Power freezes the tour's pointer and splash steps); Codex (medium) review-t11 @ 93b1e06: changes requested, 4 findings, all routed fix (Review routing, t11 round 2); fix round 3 started 2026-11-25 after r1 reported in; fix round 3 done (meadow-t11 @ 20cdb3c: proof 00db9a6 fails 3 checks and 12 probe lines on f9bfe12, fix 23d8d5e, report 20cdb3c; welcomes cut short by sleep, lock or the screensaver close unseen; a showing is saved only when the card's content is reached; a waited greeting opens one full second after the screen first looks clear, a lock cancels it; the tour: Low Power keeps it live at 15 fps, Reduce Motion skips the pointer and splash steps (Tour in PowerPolicy.swift); 285 checks, probe 64/64, selftest 0 failed; AppChecks presenter looks now spaced a second apart); Codex (medium) re-check review-t11-r3 @ b03d17f: approved with minor findings (one minor, accepted for 3.1.1); DONE pending the live card look with the director when 3.1 is joined; meadow-t11 at 971a216; then Codex (medium) | briefs/t11.md |
-| a1 | Root causes across the app (an audit, read-only): the popup that stops pointer interaction, and any cause of the same kinds anywhere in the app | Review | reviews/a1.md only | review-a1 (from main; reads meadow-t11 @ 5e3dea9) | auditor-a1 (Codex gpt-6.2-sol, high) | (the manager assesses) | 0 | done with concerns (review-a1 @ d5a32f1: 10 root causes; finding 1 explains the popup: the only pointer source is a global monitor, which never sees events dispatched to ASCII Animals itself (its alerts, Settings, About), and foreign window rectangles can also reject events; animation runs regardless; a live trace would tell which hit the friend). Routed (Review routing, a1) after the director's scope call | briefs/a1.md |
-| a2 | Performance across the app, deeper (an audit, read-only): the frame path end to end (the Meadow's extra WindowServer cost), idle and hidden states, several displays, memory, start-up and switching, hot-path details; measured offscreen | Review | reviews/a2.md only | review-a2 (from main; reads meadow-t11 @ 971a216) | auditor-a2 (Codex gpt-6.2-sol, high) | (the manager assesses) | 0 | done with concerns (review-a2 @ b26ba4d: 9 findings and 8 architecture options; the big lever is not drawing when nothing is seen and presenting fewer full frames (about 1.5 GB/s of full-screen pixels at 30 fps on the desk); every CPU-side rewrite has a small ceiling (about 1 CPU point); the Meadow's ground upload measured at about 0.016 CPU points, so it does not explain the WindowServer gap, whose cause stays unproven until a live test with presented-frame counts; 280 checks pass; no live tests). Routed (Review routing, a2): four small fixes into r1, r2, r3, t11 as brief addenda; the rest 3.1.1 or later | briefs/a2.md |
-| r1 | Desktop pointer input, one contract whichever app is in front (a1 finding 1: the popup) | Content | Sources/ASCIIAnimals/PointerMonitor.swift, Sources/OceanKit/Domain/PointerRouter.swift, OceanDirector.swift pointer entry points only, Sources/OceanChecks/PointerChecks.swift (new) | meadow-r1 (from meadow-t11 @ 971a216) | builder-r1 (Claude Opus, T3 child thread) | Codex (medium) | 2 | built with concerns (meadow-r1 @ a4f4ec7: a second, passive local monitor so events to the app itself count; the cursor sampled once a step for a still pointer under a popup; clicks judged at the event against a fresh front-to-back window list; an unreadable list routes nothing; caches dropped on window, menu, Space and display changes; drags that start on a window ignored; a2: 240 moves in 2 s now 8 window-list reads instead of 40 and 1 screen read instead of 240; proof commit abc7d9a fails 15 of 22 new checks against a model of 971a216 on purpose, b1c3b57 passes 22; 302 checks; concerns: nothing ran live, a still pointer now costs one window-list read a second (about 1.3 ms), the click-through fix leans on an event field not observed live; the popup trace with the director is written up in reports/r1.md). Codex (medium) review a3f20ee: changes requested, 6 findings, all routed fix (Review routing, r1); fix round 1 done with concerns (meadow-r1 @ 3a5a7a8: all six fixed, each with a check that failed first (proof 0216ba4); host-boundary checks with a real in-process local monitor; one sample per simulation step across displays; a Meadow dwell-and-landing check; 315 checks; concerns: one existing assertion reversed for finding 1, OceanChecks now creates NSApplication.shared (no window), hover 10 times a second during bursts of own-window changes); draft PR #9 for CI; Codex re-check b9f04e3: changes requested (finding 4 failed twice; review.restart); brief rewritten (Restart: one snapshot generation); restart HELD ("take a step back", the director); live trace 2026-11-21: the popup is Notification Center's full-screen banner window, and 3a5a7a8 fixes it live (Corrections); right-size next, after t11 ; brief: Right-size, a small fresh build on meadow-r1b from 971a216 (the event's window decides); builder-r1 started 2026-11-25 after t11 reported in; right-size done (meadow-r1b @ 5db562e: proof 7787b73 fails 6 of 7 new checks on 971a216, fix b34a20b, report 5db562e; each move, drag and click judged by the event's window: desktop-level routes, any other blocks, no or unknown number falls back to rectangles; verdicts cached per window number, cleared on start, Space and display changes; no still-pointer sampling; a minute of moving with the banner up reads the list once (971a216: up to 1,200); 287 checks, selftest 0 failed; 147 source lines, more than the brief's tens, mostly cache, parsing and trace; test copy built, not launched; untested live); Codex (medium) review-r1b @ c74a9c6: changes requested, 2 findings, routed (Review routing, r1 right-size): fix round 1 started 2026-11-25 after t11 reported in; fix round 1 done (meadow-r1b @ 2022f57: proof a53a8c1 (3 of 4 fail on 5db562e; the fourth guards the one-read-a-second limit), fix 4d72ea4, report 2022f57; the point is the event's own CG location, an event without one does nothing; misses not remembered, a read at most a second after a miss; over the desktop with the banner up still 1 list read a minute; 291 checks, selftest 0 failed; test copy rebuilt from 4d72ea4, not launched); Codex re-check review-r1b-r1 @ 63f40c0: changes requested (one regression from round 1, routed: fix round 2, a retry wait per missed number, started 2026-11-25 after r3 reported in); fix round 2 done (meadow-r1b @ afa861f: proof 55ab64b fails on 2022f57, fix 8f86448 in PointerRouter only: a map of missed number to miss time, emptied as reads find them or their second passes, cleared on Space and display changes; reads a minute: 1 over the desktop with the banner up, 60 for one unknown number, 241 for four; 294 checks, selftest 0 failed; test copy rebuilt from 8f86448, not launched); Codex re-check review-r1b-r2 @ d158c7c: APPROVED; the live banner re-run with the director on the 8f86448 test copy is next; the live banner re-run with the director on the 4d72ea4 test copy | briefs/r1.md |
-| r2 | The system wallpaper always comes back: change and restore as one recoverable transaction (a1 finding 2, and 10's still filenames) | Content (large) | Sources/ASCIIAnimals/{SystemWallpaper,Uninstaller}.swift, Sources/OceanKit/Domain/WallpaperMemory.swift, main.swift wallpaper and quit entry points, StatusMenu.swift Restore item, Sources/OceanChecks/WallpaperChecks.swift (new) | meadow-r2 (from meadow-t11 @ 971a216) | builder-r2 (Claude Opus, T3 child thread) | Codex (medium) | 0 | brief trimmed to what a user would hit (the step back); builder-r2 started 2026-11-25 after r3's fix round 1 reported in; done (meadow-r2 @ d9e05a0: proof aab2732 moves the wallpaper decisions unchanged into OceanKit's WallpaperKeeper behind a fake desktop API, all five checks fail there; fix 52e7730: each still recorded with the picture it covers before it goes up, ours never recorded as an original, a restore never forgets it; cleanup deletes only stills nothing shows (3.0 stills on disk count as in use); a set or restore counts only once it reads back, uninstall keeps the Stills folder and the record and says so on failure; with matching off our still comes down at launch, display changes, Space switches and wake; quit restores whether matching is on or off; UUID filenames; Restore restores once; BEHAVIOUR CHANGE for the director: a still goes only on the Space in view when the look changes, never on a Space switch; Settings help words proposed (the report); 286 checks, selftest 0 failed); Codex (medium) review-r2 @ e004c95: changes requested, 6 findings, routed (Review routing, r2): 5 into fix round 1 (with the director's one-line help text; started 2026-11-25 without the director's go and stopped on their word: proof 0097677 committed, the fix half-done and uncommitted in its worktree; the director's go ("finish r2") the same day, resumed from its worktree; fix round 1 done (meadow-r2 @ bb6df14: proof 0097677 fails 6 checks on d9e05a0, fix f9eb606, report bb6df14; adopted 3.0 stills restore their own display's original, unknown ones stay and uninstall keeps the folder; a failed folder read stays pending and is retried; Sharks upgraders get Sharks' original back; a throwing set or restore is read back before anything is deleted; nothing refreshes once uninstall begins; the help line is the director's; limits: replaced stills' files collect until a full restore, the deletion rule waits on the live "Show on all Spaces" step; 292 checks, selftest 0 failed; pushed); Codex re-check review-r2-r1 @ 1086bf7: changes requested (all five fixes pass for the right reason; 4 open: an access failure still reads as an empty folder in the real adapter; a still restored during a failed read becomes a permanent recovery record; a verified Sharks restore keeps unrelated Animals stills and the folder; the deletion rule assumes one still shows in one place, which the live "Show on all Spaces" step decides; replaced stills grow about 100-214 MB a month at ten refreshes a day, no cap); NOT routed: the director said stop; the next round should restate the principle (two rounds on keeping and deleting stills)), 1 to 3.1.1; the Space behaviour is unchanged from 3.0; its live proof needs a separate macOS account, with the director later | briefs/r2.md |
-| r3 | Updates, settings and diagnostics that tell the truth (a1 finding 4 without signing; 10's settings overflow and diagnostics) | Content | Sources/ASCIIAnimals/{UpdateService,SelfUpdater,Diagnostics,SettingsStore}.swift, Sources/OceanKit/Domain/{Updates,Settings}.swift, main.swift Report a Problem call site only, docs/DEVELOPING.md signing note, Sources/OceanChecks/UpdateChecks.swift (new) | meadow-r3 (from meadow-t11 @ 971a216) | builder-r3 (Claude Opus, T3 child thread) | Codex (medium) | 0 | brief trimmed to what a user would hit (the step back); builder-r3 started 2026-11-25 after r1's fix round 1 reported in, in its worktree from its uncommitted work; done (meadow-r3 @ 4d3918b: proof 36df469 moves the update logic unchanged into OceanKit behind a host interface, 7 update and 3 report checks fail there and the extreme-settings checks crash it; fix a7f82b6: automatic installs wait while the app is frontmost, Settings, a menu, the card, a welcome, About or an alert is up, re-checked with the setting re-read right before the swap; a failed or garbled check says so and retries hourly; a failed relaunch keeps the old copy; fps clamped before arithmetic (Int.min, Int.max, 3.0 and Sharks settings); Report a Problem shows exactly what goes into the form first, log lines only if ticked, names and paths removed; timers only while checks are on; signing note in DEVELOPING; 296 checks, selftest 0 failed; the two new alerts not seen on screen: a live look with the director); Codex (medium) review-r3 @ 04a9e42: changes requested, 7 findings, routed (Review routing, r3): 5 into fix round 1, started 2026-11-25 after r1's fix round 2 reported in; fix round 1 done (meadow-r3 @ 9c682a3: proof 9887936 fails 9 checks on 4d3918b, fix 220b607, report 9c682a3; error lines keep domain and code only, the encoded home path removed; a malformed stable release is a failed check; a feed failure never overwrites an install, only the owning install swaps; a held update notifies once and keeps its verified download (updateRechecksRightBeforeReplacing now expects it kept, as routed); + encoded; 304 checks, selftest 0 failed; limit: a held download left in the temp folder on quit until macOS clears it); Codex re-check review-r3-r1 @ a46e3e1: changes requested (2, routed: fix round 2, whole log entries only and the held download matched by URL and SHA-256; started 2026-11-25 after r2 reported in; that run stopped on an API outage after its proof commit 2b9daef, restarted from its uncommitted fix); fix round 2 done with concerns (meadow-r3 @ 633a682: proof 2b9daef fails 4 on 9c682a3, fix f928e68, report 633a682; the log is the last 60 whole timestamped entries, each scrubbed as one; a held download is reused only if its URL and SHA-256 match; beyond the brief, Log.write indents continuation lines so a message can't forge an entry (check reportLogMessageCannotForgeAnEntry); limits: the form trusts entries, older logs stay unindented until the 512 KB log rolls over; 309 checks, selftest 0 failed; pushed); Codex re-check review-r3-r2 @ 62426ed: changes requested (both round 2 fixes confirmed; keep the indentation; 2 left, routed (Review routing, r3 re-check 2): fix round 3, a report reads only entries this version wrote (the old log set aside once) and an unfinished last entry is dropped; queued after r2's fix round 1); 2 dropped or 3.1.1| briefs/r3.md |
-| t10 | Words, watch and release 3.1 (plan T10; outward-facing, the director approves the release) | Content | to brief | meadow-t10 | | | 0 | open (waits on t9) | |
-| m1 | Air and flowers from above (breeze, pointer air, downwash, flowers, planting, clicks on flowers, the tuning file) | Content | Sources/OceanKit/Meadow/{MeadowTuning,MeadowMath,Breeze,Flowers}.swift (new), Sources/OceanChecks/MeadowChecks.swift (new), Sources/OceanChecks/main.swift, Sources/OceanTool/{MeadowAir,main}.swift (optional), a copy of the sketch fixture in the checks' resources, Package.swift (grown: bundles the fixtures as the checks' resources; for the review to judge) | meadow-m1 (from main) | builder-m1 (Claude Opus, T3 child thread) | 0 | 2 | built (meadow-m1 @ 5965216, done with concerns); Codex review af7dbb1 in (7 findings, routed below); CI green on 5965216 (draft PR #3); fix round 1 done with concerns (meadow-m1 @ 3e54973); re-check 9cc9790: 4 fixed, 3 not (routed below; the pointer timing rewritten); CI green on 3e54973 (PR #3); fix round 2 done with concerns (meadow-m1 @ 652658c; the manager re-ran OceanChecks: 201 passed); no further Codex round, mp's review covers it; CI green on 652658c (PR #3)
-| m2 | Flight from above | Content | Sources/OceanKit/Meadow/{ButterflySpecies,Butterfly}.swift (new), Meadow/MeadowTuning.swift (additions), Sources/OceanChecks/{MeadowFlightChecks,main}.swift, Sources/OceanTool/{MeadowPaths,main}.swift | meadow-m2 (from meadow-m1) | | Codex | 0 | open (waits on m1) | superseded by mp (one translation pass, 2026-11-20)
-| m3 | A ground colour per cell in the shared canvas | Content | Sources/OceanKit/Render/{CellCanvas,OceanRenderer,Shaders}.swift, Sources/OceanChecks/CanvasChecks.swift, Sources/OceanChecks/main.swift (only if a new check group needs registering) | meadow-m3 (from main) | builder-m3 (Claude Opus, T3 child thread) | Codex | 1 | reviewed (meadow-m3 @ 796d61e: review 3f52b22, fix round 1 5d12bea, re-check e811cc2 passed, CI green on 796d61e); waits for the end of the stack | briefs/m3.md |
-| m4 | Painter: the meadow | Content | to brief (port plan m4) | meadow-m4 (from meadow-m2, with m3 merged up the stack) | | Codex | 0 | open (waits on m2, m3) | superseded by mp (one translation pass, 2026-11-20)
-| m5 | Painter: the butterflies | Content | to brief (port plan m5) | meadow-m5 | | Codex | 0 | open (waits on m4) | superseded by mp (one translation pass, 2026-11-20)
-| m6 | World and behaviours, several screens | Content | to brief (port plan m6) | meadow-m6 | | Codex | 0 | open (waits on m5) | superseded by mp (one translation pass, 2026-11-20)
-| m7 | Pointer and clicks | Content | to brief (port plan m7) | meadow-m7 | | Codex | 0 | open (waits on m6) | superseded by mp (one translation pass, 2026-11-20)
-| mp | One translation pass: the rest of the sketch (flight, butterflies, behaviours, pointer, painter) into the family's shape, runnable in OceanTool, films next to the sketch, within Web's CPU | Content (large; judged by eye, one review) | Sources/OceanKit/Meadow/* (new files; additions to MeadowTuning; m1's files only where the world needs hooks), Sources/OceanChecks/Meadow*.swift, Sources/OceanChecks/main.swift, Sources/OceanTool/{Meadow*,main,Bench}.swift, Sources/OceanKit/Domain/{HabitatKind,HabitatSim}.swift and the minimal `.meadow` switch cases in Sources/ASCIIAnimals (not offered in the app) | meadow-mp (from meadow-m1 after its fix round 2, with meadow-m3 merged in) | builder-mp (Claude Opus, T3 child thread) | Codex | 0 | built (meadow-mp @ 3134721, done with concerns: the app plays the sketch's film cell for cell, CPU below Web at 30 and 15 fps); Codex review 4f1b5d4 in (10 findings, all routed to fix); CI green on 3134721 (draft PR #4); fix round 1 done with concerns (meadow-mp @ 965e8c9; the builder loosened `meadowLongRunStaysSane` from 2 to 4 spans off screen, as the base already went to 3.7: for the re-check to judge); re-check 8a5f261: 7 of 10 fixed, narrow cases left (routed); CI green on 965e8c9 (PR #4); fix round 2 done (meadow-mp @ eaad21f; the manager re-ran the build and OceanChecks: 230 passed); CI FAILED on eaad21f (PR #4): `meadowClicksAllocateNothingLater` saw 11 allocations on the runner (OCEAN_SKIP_GPU=1, Swift 6.3.3), passing locally; fix round 3 done with concerns (meadow-mp @ aa28c08): no Meadow cause found; Swift 6.3.3 locally passes; likely another thread's allocations counted by the process-wide counter (it appears after the CoreText check); the check now prints where the first allocations come from; CI green on aa28c08 (PR #4); the thread-local counter stays a fallback if it recurs. If CI shows other threads, the manager rules the counter counts only the calling thread (it measures the Meadow's own frame work; the rule is unchanged); then waits for the director's film verdict. Files moved to m8 while it runs: HabitatKind, Settings, MeadowSim's settings hooks, ASCIIAnimals Presets/SettingsView/StatusMenu/OceanStatus/SettingsStore (mp's fixes change them through m8 or after it) | briefs/mp.md |
-| m8 | The Meadow offered in the app: three presets plus Custom, Settings, menu, status word (design d1, approved) | Content | Sources/OceanKit/Domain/{HabitatKind,Settings}.swift, Meadow/MeadowSim.swift (settings hooks), Sources/ASCIIAnimals/{Presets,SettingsView,StatusMenu,OceanStatus,SettingsStore}.swift, Sources/OceanChecks/SettingsChecks.swift, grown: Domain/{SceneLayout,HabitatSim}.swift and ASCIIAnimals/HabitatScene.swift (the desk-wide 12), MeadowTuning/MeadowWorld (area count), OceanPreview (2 lines), app main.swift (--snapshot-menu) | meadow-m8 (from meadow-mp) | builder-m8 (Claude Opus, T3 child thread) | 0 | open (waits on m7) | fix rounds 1-2 done (meadow-m8 @ df860b7: 12 in all in both display modes; a steady CPU check, median of 9 paired runs; 239 checks); Codex review e33baa6 in (8 findings, all routed to fix); CI green on df860b7 (draft PR #5); fix round 3 done (f0c8347: all 8 fixed with checks; Ocean and Web byte for byte; 246 checks); the manager merged mp aa28c08 in (cfbe72f) and re-ran: 247 passed; re-check a7e0543: all fixed, two small new (routed); fix round 4 done with concerns (meadow-m8 @ 8e215f0: hosted steps allocate nothing; paused display changes draw the held frame; thread-scoped counter; 250 checks); concern: at 12 butterflies the Meadow is 0.98-1.03 x Web at 30 fps, so the CPU check flakes on both cfbe72f and 8e215f0: routed to pf (headroom, no visible change); CI green on 8e215f0 (PR #5)
-| d1 | The Meadow in the app, designed: presets, Settings, menu, status word, what's-new (not full screen), welcome; mock-up pictures for the director | Design (proposal only; nothing built) | docs/plans/2026-11-20-meadow-in-the-app.md, docs/plans/media/d1/* | design-d1 (from main) | builder-d1 (Claude Opus, T3 child thread) | none (the director approves it) | 0 | built (design-d1 @ f813cc9, done); approved with the director's answers (Decisions, 2026-11-20); m8 and t9 build from it | briefs/d1.md |
-| pf | Headroom under Web's CPU: the Meadow cheaper with not a pixel changed (target at most 0.8 x Web at 30 fps on the owner's desk with 12) | Content (performance only) | Sources/OceanKit/Meadow/* (hot paths), Sources/OceanChecks/Meadow*.swift (equivalence checks) | meadow-pf (from meadow-m8 8e215f0) | builder-pf (Claude Opus, T3 child thread) | Codex (light: equivalence and allocation) | 0 | built (meadow-pf @ 45103eb, done: 0.76 x Web at 30 fps, 0.53 at 15, from 0.98 and 0.66; 1,446 output files byte for byte against 8e215f0; three clean runs of 250 checks); Codex light review c1f10fd in (1 finding, routed); CI green on 45103eb (draft PR #6); fix round 1 done (meadow-pf @ 5b59068: records back to 36 bytes, tufts 32; probe peak 157.8 MiB vs base 151.5; owner's desk 8.3 MiB as base; relayout 5 allocations as base; CPU 0.75-0.78 at 30 fps; 1,673 outputs byte for byte); the manager re-ran: 250 passed; CI green on 5b59068 (PR #6). Done; waits for the end of the stack | briefs/pf.md |
-
-## 3.1 finish plan (the director's "plan and prep for the stuff that doesn't need me", 2026-11-25)
-Without the director, in order (one builder at a time):
-Nothing here starts until the director says go ("plan and prep" is not a go).
-1. r2 (go: "finish r2"): fix round 1 done, re-check changes requested (4 open), stopped on the director's word.
-   The director's /unslop of the app's on-screen text: 29 lines in 10 files, built and checked on the trial join
-   (334 pass), kept as a scratch patch; applied on meadow-3.1 right after the join, with the director's OK.
-2. r3 fix round 3 (queued after r2's builder), then a Codex re-check.
-3. The join: branch `meadow-3.1` from meadow-t11 (20cdb3c), merging meadow-r1b, meadow-r3, meadow-r2. Trial run
-   2026-11-25 on the current heads, in a scratch worktree, nothing pushed: one conflict only
-   (`Sources/OceanChecks/main.swift`, `greetingChecks()` and `pointerChecks()` both added; keep both); build
-   passes, 334 checks pass, selftest 0 failed. Then push and a draft PR to main so CI (Swift 6.3.3) runs; a Codex
-   look at the joined diff only for what the merge itself could break.
-4. Release notes and the 3.1.1 list drafted from the board (Review routing's dropped and 3.1.1 items, a1 and a2).
-With the director:
-- The notification banner re-test on the r1b test copy (any time; say "ready").
-- One live session on the joined 3.1 test copy: the card, the welcome, Report a Problem's review (then Cancel), the
+- The notification banner re-test on r1b's test copy (`build/ASCII Animals Test.app` in its worktree; say "ready").
+- One live session on the joined test copy: the card, the welcome, Report a Problem's text (then Cancel), the
   "couldn't restart" message if it can be shown safely.
-- r2's live proof on a separate macOS account (the director makes the account; the plan is in `reports/r2.md`,
-  plus "Show on all Spaces").
-- The release go, then merge and publish.
+- The wallpaper check on a separate macOS account, with "Show on all Spaces" and an upgrade from 3.0.
+- The release go, then merge, tag and publish.
 
-## Review routing
+## 3.1.1 (from the history file)
 
-### r1 (review-r1 @ a3f20ee, Codex medium, changes requested; routed 2026-11-21)
-- Findings 1 (a stale desktop verdict reaching a click), 3 (new facts dropped at an unchanged point), 4 (the old
-  list used after a Space or window change), 5 (the trace can't tell the failures apart): fix, small, this task's own.
-- Finding 2 (receiver and location evidence for clicks): fix, medium, inside the task's files; the CG field is
-  validated only in the live trace.
-- Finding 6 (a replaced habitat misses a resting pointer): fix; it was there before, but it is small and in r1's
-  pointer entry points, and the new contract owns the hand-off.
-- "What is missing": host-boundary checks, one shared input tick or the real cadence measured, a Meadow
-  dwell-and-landing check, the live-trace cases: fix (brief r1, Fix round 1).
-
-### r2 (review-r2 @ e004c95, Codex medium, changes requested; routed 2026-11-25)
-- Finding 1 (blocker: two 3.0 stills over one picture; a later look elsewhere changes what an old Space restores to):
-  fix, round 1 (snapshot each adopted still's original).
-- Finding 2 (blocker: a failed folder read is taken as empty, and an in-use 3.0 still can be deleted): fix, round 1.
-- Finding 3 (Sharks upgraders: a Sharks still restored from an unrelated original; Sharks recovery data dropped on
-  uninstall): fix, round 1, narrowed to those two.
-- Finding 4 (a force quit between saving the original and setting the still): 3.1.1, a few-millisecond window.
-- Finding 5 (a set that throws after selecting deletes the selected still): fix, round 1 (read back first).
-- Finding 6 (a display or theme change during uninstall's alert can put a new still up): fix, round 1 (gate refresh).
-- Note: the Space-switch behaviour is unchanged from 3.0 (971a216 has no Space-switch apply either); the manager's
-  question to the director is withdrawn; the report's wording is corrected in round 1. "Show on all Spaces" goes into
-  the live-proof plan.
-
-### r3 re-check 2 (review-r3-r2 @ 62426ed, Codex medium, changes requested; routed 2026-11-25)
-- Both round 2 fixes confirmed (whole entries; the held download matched by URL and SHA-256). Keep Log.write's
-  continuation indentation.
-- Finding 1 (blocker: an old-format error line from before the upgrade can still pass a volume name into an opted-in
-  report): fix round 3, the plain rule: a report reads only entries this version wrote; the old log is set aside once.
-- Finding 2 (should fix: an unfinished last entry is included): fix round 3, dropped.
-
-### r3 re-check (review-r3-r1 @ a46e3e1, Codex medium, changes requested; routed 2026-11-25)
-- Findings 3, 4, 5, 6 fixed; the reversed check expectation judged right.
-- Remaining 1 (blocker: the 60-line tail can start inside an error's continuation, which the scrubber misses): fix,
-  round 2. Second round on the opted-in log's privacy, so per review.restart the brief states the principle: the
-  log is whole entries only, scrubbed as units, anything else dropped.
-- Remaining 2 (a held download reused after the same tag's asset was replaced): fix, round 2 (match URL and SHA-256).
-
-### r3 (review-r3 @ 04a9e42, Codex medium, changes requested; routed 2026-11-25)
-- Finding 1 (blocker: opted-in log lines can keep a volume name or an encoded home path): fix, round 1, simply: error
-  lines keep only domain and code; the encoded home path removed too. The one-character account case: dropped (the
-  person sees the text before sending).
-- Finding 2 (a failed check soon after a successful one waits on the successful one's schedule): dropped; the release
-  was checked minutes before, nothing is missed.
-- Finding 3 (a malformed stable release reads as "up to date"): fix, round 1.
-- Finding 4 (a feed failure can overwrite an install in progress, allowing a second download): fix, round 1.
-- Finding 5 (a held automatic update re-downloads every hour and never says so): fix, round 1 (notice once, keep the
-  verified download).
-- Finding 6 (minor: a literal + becomes a space in the form): fix, round 1 (one line).
-- Finding 7 (minor: cleanup on the main thread after the split): 3.1.1, a short stall at most.
-
-### r1 right-size re-check (review-r1b-r1 @ 63f40c0, Codex medium, changes requested; routed 2026-11-25)
-- Both round-1 findings fixed (the review's table).
-- Regression (one shared retry wait for every unknown window number, so after a miss a different new number is not
-  looked up for a second: a lost desktop click, or a reaction through a new window): fix, round 2, a wait per missed
-  number. Small; a new issue, not the same one twice.
-
-### t11 re-check (review-t11-r3 @ b03d17f, Codex medium, approved with minor findings; routed 2026-11-25)
-- All four round-2 findings fixed, each with evidence (the review's table).
-- Minor (turning Reduce Motion on while the pointer or splash step is showing leaves that step's words up over a
-  still habitat; the user can still go on): accepted, no fix in 3.1. It needs the setting changed in that very step,
-  and the next step is already right. Noted for 3.1.1.
-
-### r1 right-size (review-r1b @ c74a9c6, Codex medium, changes requested; routed 2026-11-25)
-- Finding 1 (the point is read when the callback runs, not from the event): fix, small (take the event's own
-  location). The visible effect is tiny (a splash at a window edge), but the fix is one line and removes the gap.
-- Finding 2 (cached verdicts never expire): split. A missed number cached as unknown can bring the banner bug back for
-  a desktop window that appears late: fix (don't remember misses; at most about one list read a second while they
-  continue). A cached desktop verdict turning into a normal window: dropped, window numbers are not reused within a
-  session and the desktop window doesn't change level.
-
-### t11 round 2 (review-t11 @ 93b1e06, Codex medium, changes requested; routed 2026-11-25)
-- Finding 1 (sleep or screensaver in a welcome's first 3 s marks it seen): fix, round 3. A user loses the welcome.
-- Finding 2 (quitting before the card is readable spends a showing): fix, round 3. On the third showing the card is
-  gone for good.
-- Finding 3 (a burst of wake notifications opens a greeting before a full clear second; the check expects it): fix,
-  round 3. The welcome could take focus on a screen about to relock.
-- Finding 4 (the tour asks for effects a held still can't show): fix, round 3, by the manager's default: Reduce Motion
-  skips the pointer and splash steps, Low Power keeps them live during the tour; asked of the director, one place to
-  change.
-
-### r1 re-check (review-r1 @ b9f04e3, changes requested; routed 2026-11-21)
-- Findings 1, 2, 3, 5, 6: fixed (kept).
-- Finding 4 not fixed, and new: queued motion crosses an invalidation; a hint outlives its second. Second failed
-  round on the same thing (review.restart): rewrite the brief, not a third patch. The cause is upstream: evidence
-  with separate lifetimes. Brief r1, "Restart": one snapshot generation, evidence stamped, deadlines that rejudge.
-- New: the AppKit check needs WindowServer in the default suite: fix in the restart (run only with a GUI session,
-  say when skipped).
-- Coverage: the real install call and the display link's mode can't be checked offline (OceanChecks links only
-  OceanKit): later, covered by the live trace.
-
-### a2 (review-a2 @ b26ba4d; routed 2026-11-21, the director accepted the proposal)
-- Into the paused 3.1 builders, small and in their own files (each brief gets an addendum, the build restarts):
-  t11, the greetings' timers stop while hidden and the card's 1 s waiting poll becomes one scheduled due time
-  (finding 4; the preview's power policy is already in its brief); r1, one cached window snapshot per input tick and
-  coalesced motion instead of a window-list fetch per move (hot-path audit); r2, a generation check before each
-  expensive still stage (finding 5); r3, no update timers while checks are off (finding 4).
-- 3.1.1: desktop eligibility, presented-frame counts and pacing as one owner with a1 findings 6, 7, 9 (findings 1-3);
+- a1, deferred by the director's scope call (2026-11-21): findings 3 (sleep, lock, held frames), 6 (display
+  relayout), 7 (GPU backpressure, presented frames), 8 (identity and migration side effects), 9 (pacing), and the
+  rest of 10 (login approval, hotkey status, theme refresh, locale).
+- a2: desktop eligibility, presented-frame counts and pacing as one owner with a1 6, 7, 9 (a2 findings 1-3);
   Settings and About previews' lifecycle (4-5); renderer resources and the Ocean path (5, 6, 9); Web and Meadow
-  painters under byte-equality checks (7, 8); then the live attribution of the Meadow's WindowServer gap with the
-  director. Option A (a deadline-driven display link that sleeps between changes) trialled after eligibility.
-- Later or the director's product calls: B (a retained still scene with damage-only updates, Meadow first) once the
-  live attribution says pixels matter; E and H (lower rate or a held still on battery) change what the user sees; G
-  (build-time shader library) only if cold launch measures slow; C, D, F not worth it at today's sizes.
+  painters under byte-equality checks (7, 8); the live attribution of the Meadow's WindowServer gap with the
+  director; option A (a deadline-driven display link) trialled after eligibility. Later, the director's product
+  calls: B, E, H, G.
+- Trimmed from the 3.1 briefs (2026-11-21): the reminder checkpoint write; r2's stale-job stage checks.
+- r2 finding 4 (a force quit between saving the original and setting the still), if the rebuild leaves it.
+- r3 finding 7 (cleanup on the main thread after the split).
+- t11 minor: Reduce Motion turned on during the tour's pointer or splash step leaves that step's words over a still.
+- The WhatsNewCard debug probe (about 380 lines) moved out; one copy of `air-flowers.json`; `Tools/energy.sh` cut
+  to the modes still used.
 
-### a1 (review-a1 @ d5a32f1; routed 2026-11-21 after the director's scope call)
-- Finding 1 (pointer delivery and eligibility): accepted, r1. The live trace runs with the director.
-- Finding 2 (wallpaper recovery): accepted, r2, with 10's still filenames. Live proof on a separate account later.
-- Finding 4 (updates): accepted, r3, except publisher signing (the director: "Not now"; noted in DEVELOPING).
-- Finding 5 (presentation vs acknowledgement) and the preview parts of 3, 7, 10: accepted, t11 fix round 2.
-- Finding 10, settings overflow and diagnostics privacy: accepted, r3.
-- Findings 3 (sleep, lock, held frames), 6 (display relayout), 7 (GPU backpressure, presented frames), 8 (identity and
-  migration side effects), 9 (pacing), the rest of 10 (login approval, hotkey status, theme refresh, locale):
-  accepted, deferred to 3.1.1 by the director's scope call; briefed when 3.1 is out, files in the audit's fix order.
-- Every builder proves a finding with a failing check before fixing it, and says so when a claim is wrong.
-- Shared file: `Sources/OceanChecks/main.swift` gets one registration line from each of r1, r2, r3; the manager
-  resolves those lines when joining. `main.swift` (app) is split by function: r2 wallpaper and quit, r3 the report.
+## Noticed (still open)
 
-- t8 prep, Codex safety review c9566d4 (review-t8, 2026-11-21, of meadow-t8 @ d2dc3be): "Hold the live session".
-  Eleven findings, five blockers: the dry-run guard misses other spellings of the owner's domain; two runs can lose
-  the true backup; test launches can run the self-updater (and replace or relaunch the bundle); they change the
-  system wallpaper (`matchSystemWallpaper`), `wallpaperMemory.v1`, the crash marker and logs, none of which the
-  backup covers; quiet launch alone can start the Sharks hand-over, and the menus still offer ASCII Animals' own
-  uninstall. Also: restore failures exit 0; process ownership by bundle ID is ambiguous; the runbook's recovery is
-  unsafe; the preview reads saved settings; calibration with the ultrawide attached isn't a laptop density;
-  sampling accepts invalid rows.
-  - Routed by the manager, stepping back instead of patching each hole (review.restart in spirit: the cause is the
-    approach). Saving and restoring the owner's real state can't cover everything a live launch touches. Rewrite
-    t8's prep around ISOLATION: a separate test identity of the app (its own bundle ID, name, defaults domain,
-    logs and crash marker) that never runs the updater, the hand-over, the uninstaller or the system-wallpaper
-    match, so a session never writes the owner's real domain, wallpaper or ~/Applications at all; energy.sh drives
-    only that identity and its throwaway domain (no backup of the owner's settings needed); calibration happens in
-    the test identity too, on the built-in display alone; the preview card runs in the test identity; sampling
-    validates its rows and confirms the actual frame rate. Brief rewritten (briefs/t8.md, "Rewrite"). A Codex
-    re-check before any live run. Dropped: none.
-  - Re-check 4e42078 (2026-11-21, of 978f67e): "hold the live session" again. Fixed: 1, 3, 5, 9, 10 (the test
-    identity itself is sound); 6 no longer applies. Not fixed: 2 (the lock keys on TMPDIR and an inherited marker),
-    4/R1 (blocker: quitting and relaunching the owner's own installed ASCII Animals 3.0.1 and ASCII Sharks makes
-    THOSE apps do their normal lifecycle writes: wallpaper restore, wallpaper memory, crash marker, logs, updater),
-    7 (process identity by `ps comm`, stale PIDs, unverified relaunch), 8 (the runbook's promises), 11 (sampling
-    still accepts malformed rows; actual fps per display unproven); new R2 (calibration and preview can finish
-    without being seen), R3 (explicit output paths and TMPDIR escape the test folders), R4 (inherited flags change
-    the mode).
-  - Routed by the manager (review.restart: second failed round on the same tool; step back again). The remaining
-    blocker comes from the script quitting and relaunching the owner's real apps. It shouldn't: the director quits
-    their own ASCII Animals (and ASCII Sharks, if running) by hand before the session and reopens them after, an
-    ordinary user action, and energy.sh never signals, quits or launches any app but the test copy; it only refuses
-    to start while a real one is running. That removes R1, 4 and most of 7 and 8. Rewrite 2 (briefs/t8.md) keeps the
-    test identity (sound) and fixes: a fixed lock path that inherited state can't skip (2); test-process identity by
-    executable path and bundle ID, rechecked before every signal (7); a runbook that only promises what holds (8);
-    strict sampling, and fps reported per display with the screen count checked (11); calibration and preview
-    confirmed by the director typing the count / "seen" (R2); all test artefacts in one fixed folder, and the test
-    copy's snapshot outputs confined to it (R3); every test flag set explicitly on each launch (R4). A Codex
-    re-check follows; the session waits for the director in any case ("stop just before the test session").
-  - Re-check 2 ed62f60 (2026-11-21, of c0e8ca8): "hold" again, but the core safety property is now FIXED (4/R1:
-    the script never touches the owner's apps, domain, wallpaper or ~/Applications; R4 fixed). Still open, all
-    adversarial or measurement-validity cases: lock recovery racing a second concurrent operator or checkout (2);
-    a bare-PID signal after lookups and an unconfirmed pending launch at cleanup (7); cleanup's stderr silenced and
-    a runbook fallback that skips the lock (8); a mid-run display swap, identical or zero-stamped power rows, and a
-    wallpaper app appearing and leaving inside a sample window (11); calibration accepting a paused reading (R2);
-    a symlinked or hard-linked `build/energy-test` escaping the folder (R3); evidence keyed by PID only (R5).
-  - Routed by the manager (third round on the same tool; stepping back on scope, not approach): the session is a
-    single supervised 25-minute run with the director present and the manager typing the commands; the harms left
-    need a second concurrent operator, a planted symlink, PID reuse within seconds, or a display swapped mid-run.
-    Fix round 3, small, only what is cheap and real: cleanup's stderr (8), the runbook's baseline wording and its
-    fallback (8), launch-bound evidence with a per-launch id (R5), calibration needing a fresh drawing reading (R2),
-    a stable display set and validated power rows (11), refusing to run if `build/energy-test` or any parent inside
-    the checkout is a symlink (R3, a pre-check, not a general filesystem guard). Accepted as residual and written
-    in the runbook: concurrent operators (one operator only), PID reuse, unconfirmed pending launch (the manager
-    checks `status` before the director reopens their apps). No further Codex round: the manager checks the dry
-    runs; the first-run checks in the review become the session's first steps. The director says go.
-
-- t9, Codex review 5e62a5c (review-t9, 2026-11-21, of meadow-t9 @ 4e6e990). The card fits option C (non-activating,
-  never key, no Return); launch choices hold for new users, upgraders and Sharks arrivals; welcome words, chips and
-  the BUTTERFLIES row match the design; Ocean and Web snapshots unchanged; 253 checks; CI green. Routed by the
-  manager, all fix (caused by t9; fix round 1 in briefs/t9.md): 1 (a wake or unlock can spend the once-only flag on
-  an invisible card; no screens crashes; an already-asleep display missed), 2 (Help's welcome can open while the
-  card fades; pending callbacks outlive it), 3 (Esc swallowed for Settings and sheets while the app is active; the
-  fading card still takes clicks), 4 (the live preview ignores Low Power, lock, sleep and screensaver after
-  opening), 5 (an upgrader whose 3.0 tour was never marked seen gets the full tour, not the card), 6 (stale anchor
-  frames; the card can sit off a narrow screen), 7 (the preview crops butterflies; frame a readable butterfly and
-  flower), 8 (the Keep chip names a stale habitat after a switch). No further Codex round: the manager checks the
-  run and CI; the director sees the card live in t8's session. Dropped: none.
-
-- pf, Codex light review c1f10fd (review-pf, 2026-11-21, of meadow-pf @ 45103eb). 1,372 outputs byte for byte against
-  m8; resize, tiny and huge viewports and cell changes clean (AddressSanitizer included); 250 checks three times;
-  CPU 0.75 x Web at 30 fps, 0.53 at 15 (CI 0.62 and 0.51); CI green. One finding, routed to fix (pf fix round 1,
-  small, the manager checks it): the flower-cache records grew from 36 to 64 bytes, so a relayout that adds large
-  viewports reallocates every retained slot (4,331 allocations once) and peak memory in the extreme probe rose from
-  156 to 233 MiB. Keep the cached colours in storage that scales with the recorded ops; report peak memory on the
-  owner's desk before and after. Dropped: none.
-
-- m8, Codex review e33baa6 (review-m8, 2026-11-21, of meadow-m8 @ df860b7). Presets, Custom, switches, How many,
-  Speed, Settings and menu match the approved design; settings decode old files safely; fresh desks give 12 in both
-  modes; Ocean and Web unchanged on fixed layouts; the steady CPU check judged honest (medians 0.95 at 30 fps, 0.65
-  at 15); CI green. Routed by the manager:
-  - Fix (all caused by m8; fix round 3 in briefs/m8.md): 1 (a peer display change in separate mode relayouts
-    unchanged Ocean and Web scenes: keep the desk allotment out of plan equality), 2 (the 12 counts only the active
-    roster: leavers still on screen push a desk to 19 or 21 during changes; paused changes hold leavers), 3 (13+
-    displays allot 13: allow zero shares), 4 (a fresh Mixed scene's species split can differ from the preset's
-    advertised 2/2/2/1), 5 (the About banner keeps the old line-up when reopened), 6 (the "New" badge shows to fresh
-    users: only people upgrading from before 3.1 see it, by the same rule t9's what's-new will use), 7 (bench
-    --separate skips the desk allotment), 8 (two long check closures into named functions), and "What is missing"
-    (a transition check through the scene host: attach, detach, resize, count change, a held frame, unchanged
-    Ocean/Web scenes).
-  - Dropped: none. Asked of the director: none. One Codex re-check follows (finding 1 can change Ocean and Web).
-  - Re-check a7e0543 (2026-11-21, of cfbe72f): all eight and "What is missing" fixed; the builder's rulings accepted
-    (scene host in OceanKit; "at most 12 on every step"; `arrival.v1`). New, small: R3-1 (the hosted Meadow
-    allocates every step: the refill condition checks the draw limit before a shortage and the desk walk builds
-    temporary arrays; the existing allocation checks bypass the host), R3-2 (a paused display change updates the
-    roster but schedules no held frame, so the paused desktop shows stale frames). Routed by the manager: fix
-    round 4 (briefs/m8.md), small; also the allocation counter counts only the calling thread (it measures the
-    Meadow's own frame work, so system threads can't flake CI; the rule is unchanged), and an allocation check
-    through the scene host. No further Codex round: the manager checks the run and CI.
-
-- mp, Codex review 4f1b5d4 (review-mp, 2026-11-20, of meadow-mp @ 3134721), scoped to what can hurt. Ocean and Web
-  byte for byte unchanged (digests, 900-frame Ocean hashes, 8 stills); 215 checks; CI green; Meadow below Web's CPU
-  (30 fps 14.6-15.0 vs 18.6-18.9 ms/s; 15 fps 7.7 vs 14.5); 30-minute runs at tiny, huge and offset desks sane; the
-  Meadow not offered in the app. Routed by the manager:
-  - Fix (all can hurt; in mp's Files, m1's flower lifetime included since mp covers m1): 1 (flower caches grow on
-    the first of two displays), 2 (flight, approach and landed pulls can cross or enter a gap), 3 (newcomers can
-    spawn in a gap; a departure can be stranded), 4 (relayout can leave butterflies outside the new screens),
-    5 (a click allocates in later paint frames), 6 (Meadow tool inputs trap), 7 (degenerate or huge terrain traps
-    or goes non-finite), 8 (a pointer held in a gap can start a landing), 9 (keeping `Flowers` past its world
-    crashes), 10 (fading flowers uncapped under fast clicks), and the review's "What is missing" (the several-
-    screen, allocation-after-click and bad-input probes as checks).
-  - The builder's several-screen rules are kept (judged sound apart from 2-4).
-  - Dropped: none. Asked of the director: none. One Codex re-check follows (these are crash and leak classes).
-  - Re-check 8a5f261 (2026-11-21, of 965e8c9): fixed 1, 3, 5, 6, 7, 9, 10; Ocean, Web and the single-screen Meadow
-    unchanged; CPU below Web; CI green. The loosened long-run bound (4 spans) judged right (the base already
-    reached 3.8; the fixes lowered it to 2.9); exact route checking across real gaps judged sound. Narrow cases
-    left: 2 (a zero-length gap clip at an exact screen corner), 4 (a departing flyer skipped at unplug; an approach
-    route not revalidated after a relayout), 8 (an approach or sitter survives a sub-2.5 pt move into a gap), an
-    allocation while newcomers arrive after a count change (`Terrain.signedOutside` builds an array), and, visible
-    to the director: with a 1 pt gap between two displays, area seeding can leave one display empty for minutes.
-  - Routed by the manager (fix round 2, small, briefs/mp.md): all five, each with its check; the allocation fixed
-    with a Meadow-local allocation-free edge scan (Terrain and Ocean/Web untouched); initial butterflies spread
-    across screens that can't reach each other. No further Codex round: the manager checks the run and CI, and the
-    director's film review follows.
-
-- m1, Codex review af7dbb1 (review-m1, 2026-11-20, of meadow-m1 @ 5965216), routed by the manager. Faithful at the
-  director's settings on one screen (weather, flowers, seven kinds, RNG and hash, feeding, clicks, replant matched
-  the sketch run headless; format-2 fixture replays unchanged; CI green). Rulings judged: Package.swift bundling
-  accepted (scope recorded); supplemental probes kept; clicks off the screens ignored (fits m7's rule); pollen
-  inside Flowers accepted (document the spark buffer); wind-peak check 88-100 over an hour accepted; the 0.1 s
-  pointer lag stays open until finding 1's matrix passes; the planted-flower fade is kept as a port extension but
-  must work (finding 2).
-  - Fix (all caused by m1, in its Files): 1 (timestamped 15 Hz bursts miss 5 %; re-entry drops a queued move:
-    keep queued segments, test paired and jittered delivery at 15/30/60/120 Hz, define the timestamped input
-    contract the host must meet), 2 (planted-flower fade fails for small and big resizes; a cell-only change
-    skips the sizing transition), 3 (bad input: subnormal cell width hangs layout, huge coordinates give NaN,
-    non-tick step lengths accepted), 4 (fixture to format 2, validated; replay from viewport-derived points),
-    5 (shared-edge corner leak), 6 (regressions the checks miss: add the checks the review lists), 7 (constants
-    into the tuning file; document the repeat-touch rule and the sketch citations at 4e1b869), and the review's
-    "What is missing". The fix list is at the end of briefs/m1.md.
-  - Rewrite the brief: finding 1's host side (PointerMonitor and OceanDirector supplying each event's own time and
-    position) goes into m7's brief.
-  - Dropped: none. Asked of the director: none.
-
-  - Re-check 9cc9790 (2026-11-20, of 3e54973): fixed 2, 3, 4, 6; CI green on 3e54973. Not fixed: 1 (paired
-    15 Hz bursts still 6.9 % off at 0.14 s; a 15 fps, 1.5x speed host case 12 %; a frame stall 10 %), 5 (a
-    screen offset by 2 pt lets a bloom cross the shared edge; seen in real planting at seed 7773), 7 (two
-    comments overclaim). New: saturated catch-up differs 14.8 % (medium); a missing fixture tick traps the
-    runner (low).
-  - Routed by the manager, stepping back on finding 1 (review.restart: the pointer timing has now failed two
-    rounds, and each fix grew a queue, a lag, timestamps and a host clock contract). The cause is upstream: the
-    manager's brief turned the review's suggestion into a hard rule nobody asked for ("the same air within 5 %
-    for bursty 15 Hz input"). The director's sketch does it simply, as Web does: each step stirs along the way
-    the pointer went since the last step (the sketch's `stirStep`, fix round 1). Rewrite: port exactly that, no
-    lag, no queue, no timestamps; the stir is a soft, fast-decaying wind, and a few percent between input rates
-    is not visible. The 0.14 s lag decision is withdrawn. Checks: the port matches the sketch's `stirStep` for
-    the same per-step positions; regular 30/60/120 Hz input within 5 % (as the sketch achieves); no stroke lost
-    on leave and re-entry; finite and bounded. m7 then needs only the latest pointer position per step.
-  - Fix (fix round 2, in briefs/m1.md): 5 (test the bloom's actual segment from its patch centre against every
-    shared edge, offset screens and seam ends included; seed 7773's case as a check), 7 (comments say only what
-    the code does, including the spark buffer's real limit), the fixture runner trap (validate integer fields
-    before converting). The saturated catch-up finding goes away with the rewrite of 1 (no catch-up).
-  - Asked of the director: none (internal; the visible result is closer to the sketch: the stir is immediate).
-  - Fix round 2 (652658c): the pointer stir is the sketch's `stirStep` exactly (matches a sketch probe to 5e-7);
-    finding 5 tested along each bloom's real segment (seed 7773 and offset screens); comments honest (spark
-    buffer 256); fixture integers validated. The builder's concern: the manager's "30/60/120 Hz within 5 %" was
-    wrong for the sketch itself (30 Hz gestures 5.5 %, first 0.25 s 10 %; 120 Hz exact). Ruled by the manager: the
-    port follows the sketch exactly; the check holds the sketch's own behaviour, not the manager's number.
-
-- m3, Codex review 3f52b22 (review-m3, 2026-11-20, of meadow-m3 @ 2640dc6), routed by the manager. Ocean and Web
-  verified byte for byte (checks, digests, 8 stills, 60 Ocean frames); the dissolve ruling upheld (unrevealed cells
-  show the plain background).
-  - Fix (small, in m3's Files, caused by m3): 1 (Web keeps uploading an empty ground after a ground painter used
-    the viewport: track ground use per paint, fall back when none), 2 (a failed ground texture retries the whole
-    ring every frame: bound it, log once), 3 (the 77-line check closure into a named function, CI rule),
-    4 (the texture layout comment), and the review's "What is missing" (the GPU check covers ring-slot reuse, a
-    resize, and that ground-free frames skip the upload).
-  - Dropped: none. Asked of the director: none.
-
-  - Re-check e811cc2 (2026-11-20): all four and "What is missing" fixed; Ocean and Web byte for byte (checks,
-    digests, 8 stills, 60 Ocean frames); CI green on 5d12bea. New: two comments wrong (fixed by the manager as a
-    Small change, 796d61e: the atlas is r8Unorm; the upload counter's wording). Coverage note: the checked-in GPU
-    check waits for each frame, so it can't see two frames in flight sharing a ring slot (the reviewer's own probe
-    passed); routed to m4's brief: a check that encodes several ground frames before any completes.
-
-- s1, Codex review a8f02d4 (review-s1, 2026-11-20, of meadow-sketch @ 3f02cb3), routed by the manager. The sketch
-  is the reference the port copies, so a wrong rule here becomes a wrong rule in Swift: everything the sketch
-  caused is fixed in it (fix round 1, briefs/s1f1.md), none put off.
-  - Fix: 1 (count can fail to settle at the edges), 2 (pause bypasses lifetimes; clicks pile up while paused),
-    3 (stored and URL settings not validated), 4 (one replant transition: orphaned visitors, limit not applied),
-    5 (cursor approach outlives leave, Off and resize; body off the edge), 6 (re-enabled species stay absent),
-    7 (pointer wind depends on the event rate: integrate in simulation time), 9 (size sliders crossed: one size
-    rule for panel, clipboard and drawing; clicked flowers follow Flower size), 10 (non-primary and lost pointer
-    releases click), 11 (hints that overstate: make the hints describe the approved rules, keep the behaviour),
-    12 (click-answer gap and hold threshold wording; nearest blocking bloom), 13 (the stored settings key moves on,
-    so every browser shows the true defaults; the port takes its defaults from a fresh profile), 14 (Space on a
-    focused control), 15's sketch part (seeded shuffles; UI draws on their own random stream).
-  - Rewrite the brief (the port plan, written next): 8 (frame budget at extreme legal settings: the port profiles
-    shadows, flower scans and glyph drawing separately and keeps the step apart from the draw; the paused backlog
-    part is fixed with 2), 15's port part (the clock and tick policy, slow motion as its own mode), 7's port part
-    (pointer impulses in simulation time), and the review's "What is missing": a replay fixture (seed, settings,
-    viewport, cell size, pointer trace, expected samples), the unit and clock mapping, the 7.5 Hz wingbeat cap and
-    catch-up policy against the app's frame rate, and display-terrain edges (entering small, leaving large,
-    landing while displays change).
-  - Dropped: none. Asked of the director: none (no finding goes against a decision; 11 keeps the approved
-    behaviour and fixes the words).
-  - Re-check 1f9e985 (2026-11-20, of f20b833): fixed 2, 6, 8 (paused part), 9, 12, 13, 14, 15 (sketch part); default
-    look and motion match round 6 apart from the seeded shuffles (judged faithful). Not fully fixed, each now down
-    to a narrower edge case: 1 (an entrant that perches before clearing the inset waits long), 3 (a typo in a
-    `s.species=` URL list becomes a preset), 4 (a resize under 80 px keeps a clicked bloom just off screen), 5 (at
-    a tiny viewport's corner the body can still be clipped), 7 (30 Hz input still alternates empty and doubled
-    stirs), 10 (a touch dragged off the canvas edge can plant outside; another pointer's release cancels a press),
-    11 (three hints still overstate slightly). New, high: paused species toggles grow the butterfly array.
-  - Routed by the manager (2026-11-20), stepping back rather than a second round of sketch patches: the sketch's
-    job is the director's playground and the reference for the RULES; the app re-implements input, settings and
-    edges in Swift with its own checks. So:
-    - Fix in the sketch (s1 fix round 2, briefs/s1f2.md): the new finding (the director can hit it), and the
-      review's "What is missing" replay fixture export, which the port needs.
-    - Rewrite the briefs (carried into the port as rules with Swift checks): 1 → m6 (entering ends when it lands
-      or perches; no newcomer perches outside the screen), 4 → m1 (clicked flowers off screen after any resize
-      fade), 5 → m7 (the sitter's whole body stays on a screen at any corner), 7 → m1 (same air at 15–120 Hz input,
-      regular or bursty), 10 → m7 (a click is only ever inside the terrain; the app's pointer path), 11 → m1 and m6
-      (the tuning file states each rule as it is), the new finding → m8 (switching presets reconciles without
-      growth, checked over many switches).
-    - Not ported, not fixed: 3 (URL parameters are web-only; the app's settings go through `Settings.sanitized`).
-      The sketch's hints for 11 stay as they are (web-only words).
-    - Asked of the director: none (no finding goes against a decision).
-  - Re-check 2 436917c (2026-11-20, of 4bcf693): the paused-toggle growth fixed (bounded and settling over six
-    1,000-action runs); the fixtures reproduce byte for byte and replay correctly; default frames unchanged. New,
-    routed to fix (s1 fix round 3, small, sketch only, briefs/s1f3.md): R2-1 (the fixtures say dt 0.016667, not
-    exactly 1/60: encode the integer tick rate as the replay clock), R2-2 (unknown fixture names such as
-    `constructor` accepted), R2-3 (pin the scenario viewport, or report when a planting click can't plant). m1's
-    review also checks that the Swift replay uses exactly 1/60 s, never the JSON's rounded dt.
-  - Re-check 3 66f4462 (2026-11-20, of 92149b3): R2-1, R2-2, R2-3 fixed (both fixtures replay exactly at 1/60 s;
-    unknown names refused; the planting-click report works; default frames unchanged). New, low: R3-1 (an empty
-    `fixture=` was silently ignored): fixed by the manager as a Small one-line change, 4e1b869 (an empty name is
-    refused like any unknown one). The s1 review is closed: everything is fixed, carried into the port, or
-    not ported (finding 3).
-
-- t1-2, review 61e1f6e (2026-11-20), routed by the manager:
-  - Fix (in the task's Files, this task caused or carries them): 1 (finite guards), 2 (tiny-viewport walls),
-    3 (flower seekers reach the flowers: the plan's foraging needs it, so no director call), 4 (weak checks),
-    5 (coverage check over seeds), 6 (CI-risk expressions), 7 (breeze and lean scale with the cell),
-    8 (bloom keeps the land's clock), 10 (paths default 60 s, as the plan says).
-  - Rewrite t3's brief: 11 (stale flower indices) and 7's second half (the world sets `Butterfly.scale`).
-  - Later, for the director at t5's first still: 9 (tall stems sway at one rate and lean far; the plan allows it).
-  - Earlier Noticed items 1–5 are covered by findings 6, 1, 8, 11 and 4(c).
-  - Fix round 1 reported 2026-11-20 (1e11a1b, done with concerns): CI not yet run; a new per-beat speed surge for
-    the white (0.45) to meet the strengthened 4(b); the morpho exempt from the frozen-wings sink part of 4(a). The
-    re-check judges both.
-  - Re-check 68288c7 (2026-11-20): all nine fixed. The white's surge judged faithful to the research; the morpho's
-    exemption judged a model fact, nothing loosened. Two leftovers routed later (Noticed): a tighter morpho sink
-    form, and a code comment's citation.
-  - Before approval: t1-2 must pass CI (Swift 6.3.3), not only local checks.
-
-- t5 report (bbab77d, 2026-11-20), concerns for the review to judge: `wingsDoNotFlicker` was rewritten before its
-  first commit; wing width is stylised (tips drop) rather than the physical width; the breeze trail can't tell the
-  pointer's air from the weather; the ground-band cache repaints most frames in a breeze. Also: reports/t5.md holds
-  local folder paths, so meadow-t5 can't be pushed until the report drops them (fix round).
-
-- t5, Codex review f09abc6 (2026-11-20), routed by the manager:
-  - Rewrite t5's brief, then fix round 1 (the cause is the drawing approach, not one line), after the director says
-    how the butterflies should look: 1 (butterflies don't read as butterflies: one slab, body lost in the wing
-    letters, antennae inside the wing, swallowtail tails detached) and 3 (the painter drops the model's signed wing
-    width; it belongs to the same wing drawing).
-  - Fix: 2 (the flicker check passes a real violation; fix the raster and check true beat windows), 4 (the ground
-    buffers allocate when the band grows), 5 (any moving plant redraws the whole ground band), 6 (plants above a
-    lower display leak glyphs into its top row), 7 (a same-size relayout can keep the old garden), 9 (light + Calm
-    check), 10 (meadow-still validates its numbers), and the report's local folder paths.
-  - Fix round 1 reported 2026-11-20 (d6abff1, done with concerns): the bigger size is drawn only (flight still at
-    the old size, because a monarch of 19+ cells fails t1-2's coverage check, whose wall margins are in
-    wingspans); painter 0.36 ms a frame at 2560 x 1440 with 8 butterflies (was 0.14); closed wings drawn wider than
-    true; round 0's report commit bbab77d still holds local paths, so meadow-t5's history needs rewriting before it
-    is pushed. Routed after the re-check, together with its findings.
-  - Re-check f79ba98 (2026-11-20): fixed 2, 3, 4, 5, 6, 9, 10; NOT fixed 1 (closed and clap poses lose the
-    butterfly: outlines) and 7 (relayout cache misses a base-row shift). Also: drawn size outruns the flight's wall
-    margins (a morpho's drawing leaves the screen at an edge); adding a butterfly allocates; malformed sizes
-    accepted; old report commits still hold local paths. Second failed round on the look, so review.restart: the
-    brief is rewritten ("Restart" in briefs/t5.md) keeping the open poses, flowers and fixes, on a fresh branch
-    without the old history. Pending the director (closed wings as the solid underside; the flight using the drawn
-    size).
-  - Restart reported 2026-11-20 (87483a1, done with concerns): t1-2's free flight adjusted so coverage passes at
-    the bigger margins (0.732 of the width against 0.7: narrow); the white's turning ratio at seed 92 now 1.24
-    against 1.25; flowers within about 143–189 pt of a side edge can't be reached; butterflies at low flowers hang
-    below the screen edge (both for t3); painter not re-timed. Fresh Codex review of the restart.
-  - Restart review c9ddad3 (Codex, 2026-11-20), routed: fix 1, 2, 3 (drawing leaves the screen at the bottom on
-    low-flower pursuits, on the 340 x 150 preview, and at tilted edges; add a check on real painted cells) and 5
-    (clap: fold and face change reach real flight strokes, blended); rewrite t3's brief: 4 (edge flowers
-    unreachable). The open, banked and closed poses now read (the look that failed twice passes). Noticed: the
-    white's turning ratio exceeds its tolerance on 1 of 128 unchecked seeds.
-  - Restart fix round 1 reported 2026-11-20 (a59f71f, done with concerns): the flight's point is now the mouth at
-    a low flower, body drawn above (t3's landing must use it); on the 340 x 150 preview the drawing is placed up to
-    about 72 pt from the flight's point and drawn smaller (0.58–0.88) for the three big species; the body's lean
-    eases upright near walls so coverage passes (closest 0.713 width); painter not re-timed. Codex re-checks.
-  - Restart re-check 3e4b76f (Codex, 2026-11-20): single-screen clipping fixed, but NOT fixed 1 (the drawn
-    proboscis sits 7–8 rows above the flower; the flight's point and the drawing part ways), 2 (preview drawing
-    moved up to 85 pt from the flight's point), 3 (wings reach into the gap of offset displays), 5 (banked claps
-    still flip colour in one step). Second failed round, so review.restart: "Restart 2" in briefs/t5.md, one
-    shared butterfly geometry for flight and drawing. It changes the design, so it waits for the director.
-  - Restart 2 (simplified) reported 2026-11-20 (56d339e, done with concerns): workarounds removed, two checks
-    retired as decided, four new checks; the builder set `foldedSideNeverFlips` at a third of the blocks per step;
-    margins read as the earlier flight's (about 0.6 of the drawn wingspan); painter not re-timed. Fresh Codex
-    review.
-  - Restart 2 review 57f880a (Codex, 2026-11-20): workarounds really removed, body stays on screen (194,400 steps
-    over offset layouts), preview whole, nothing loosened beyond the two retired checks, no allocation, painter
-    0.38–0.40 ms at 8 and 0.72–0.74 ms at 16. Two findings, routed "ask the director" via the film: 1 (at the clap
-    the folded wing can swap sides in one 60 Hz step when the bank crosses level) and 2 (the top-to-underside colour
-    change can turn most of a wing in one frame). Both are 1–2-frame events inside a wingbeat; whether they show,
-    and whether the morpho's flash should be that sudden, is the realism line the director sets after watching
-    (decision of 2026-11-20). Not fixed blind.
-  - Rewrite t3's brief: 8 (the pointer's breeze trail needs the pointer's air apart from the weather; t3 owns the
-    pointer input).
-  - The director on the stills, 2026-11-20: "would like bigger butterflies and better flowrs". In t5's fix round 1.
-
-- t5v report (b8d4725, 2026-11-20), for the director's watch: the clap is a one-step snap every beat (a blink at
-  real speed); the colour flips in 1–2 steps at most claps (the morpho's brown flash shows every few seconds); the
-  folded wing jumps sides 78 times in 6 minutes of flight; butterflies pile up at the low flowers from about 8 s
-  (the test scene; nothing keeps them apart yet); whites spend 18 % of the time within 60 pt of the bottom; the
-  morpho's far wing shows as faint dots while opening; the white is faint on paper.
-
-- t5v, Codex review 94d9d2b (2026-11-20), routed fix (small, in t5v's Files; batched with whatever the director's
-  watch brings): 1 (a held frame can delete a directory named like the frame) and 2 (a shorter rerun leaves old
-  frames): refuse an output folder that already holds frames; 3 (`--seconds 0` refused unlike the still) and 4
-  (fps usage text lists six values, any divisor of 60 works): align.
-
-## Noticed
-- 2026-11-21, the manager in the t8 session: the test copy's energy reading timer pauses while one of its menus is
-  open (14 s gap); harmless for measurement (nobody touches the Mac) but it failed calibration's last check. Routed
-  to t11.
-- 2026-11-21, t10w's builder: source comments and `Sources/OceanChecks/Fixtures/README.md` still say the sketch is
-  "on `meadow-sketch` at 4e1b869"; now that `Tools/meadow-sketch/` is in the repo they can point there (with the
-  next task that touches those files).
-- 2026-11-21, pf's builder: the allocation checks' tracker crashes the whole check run the first time it sees an
-  allocation instead of reporting a failure (a real allocation then reads as a crash, not a FAIL). Outside pf's
-  files; to fix with the next task that touches the checks' helper.
-- 2026-11-20, s1 fix round 3's builder: m1 (building) may have copied fixture format 1 (`step.dt` 0.016667). Format
-  2 (meadow-sketch @ 92149b3) has `step.rate` 60 and no dt; the replay must step exactly 1/60 s and derive the wind
-  sample points from the viewport, not the rounded ones in the file. Routed to m1's review (and its fix round if
-  needed), not to the building task (task.change: its brief is frozen).
-- 2026-11-20, m3's builder: when the Meadow joins `OceanTool bench --digest` (m8), the per-cell ground must be added
-  to the digest in `Sources/OceanTool/Bench.swift`. Also m3's ruling: during a habitat dissolve, cells not yet
-  revealed show the plain background, not their ground (the family's rule; the green fades in with the rest);
-  the review judges it.
-- 2026-11-20, s1 round 4's builder: "New meadow" removes the flowers the director planted (only density and flower
-  size changes keep them); round 3's finished worktree still has `meadow-sketch` checked out with staged changes
-  that would put the sketch back to an older state (not to be committed; clean up with the stale worktrees).
-
-- From t1-2 (earlier review of plan T1, 2026-11-19), routed above on 2026-11-20:
-  1. Long mixed-literal expressions at `Breeze.swift:328,329,382,412,421` and `Flowers.swift:646,653` may time out
-     on CI's Swift 6.3.3.
-  2. `Breeze.sample` can crash on a non-finite position; it needs a finite guard.
-  3. `Meadowland.bloom(time:)` overwrites the land's own clock.
-  4. A clicked flower's index can be reused after it is replaced, so T3 must tolerate stale indices.
-  5. The check `breezeWriteIsLocal` passes mostly because of truncation; it is weak.
-- From t1-2's re-check (2026-11-20): the morpho could be held to "sinks at least 0 pt" with frozen wings instead of
-  skipping that part; the white's surge comment cites a between-flight speed spread, not a beat-to-beat one.
-- From t5's restart review (2026-11-20): over 128 seeds the white's turning ratio passes on all but seed 54 (1.28
-  against 1.25); the check's pinned seeds pass with room.
-- From t5's restart 2 (2026-11-20): an earlier finished worktree (t3-988a7193…) still has `meadow-t5r` checked out
-  with uncommitted edits in 4 files; left alone. Clean it up only after checking nothing there is wanted.
-- From t5 and t5v (2026-11-20): at the top of a wingbeat the wings snap shut in one step, the colour flips in 1–2
-  steps (the morpho's brown flash), and the folded wing can jump sides; the director watched and did not raise it.
+- Source comments and `Sources/OceanChecks/Fixtures/README.md` still point at `meadow-sketch` @ 4e1b869; they can
+  point at `Tools/meadow-sketch/` with the next task that touches them.
+- The allocation checks' tracker crashes the run instead of reporting a FAIL; fix with the next task in the checks'
+  helper.
