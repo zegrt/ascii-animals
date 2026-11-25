@@ -132,6 +132,7 @@ func updateChecks() {
     reportRound1Checks()
     updateRound2Checks()
     reportRound2Checks()
+    logFreshStartChecks()
     // Last: on 971a216 an extreme saved fps traps (overflow), which ends the run.
     settingsExtremeChecks()
 }
@@ -725,4 +726,85 @@ private func reportRound2Checks() {
         try expect(shown.contains("Code=4") && shown.contains("\(stamp) next"), "the entries around it are missing")
     }
     check("reportLogMessageCannotForgeAnEntry", messageCannotForgeAnEntry)
+
+    func legacyForgedEntry() throws {
+        let message: String = "could not restore wallpaper: Error Domain=NSCocoaErrorDomain Code=4 x "
+            + "UserInfo={NSFilePath=/Volumes/Family's\n\(stamp) Family Photos/Walls/a.png}"
+        let shown: String = form(LogEntries.last(60, in: file(["launched", message, "next"])))
+        try expect(!shown.contains("Family Photos"), "legacy continuation exposed the synthetic volume name")
+    }
+    check("reviewLegacyForgedEntry", legacyForgedEntry)
+
+    func incompleteLastEntry() throws {
+        let text: String = file(["launched"]) + "\(stamp) partial diagnostic"
+        let shown: String = form(LogEntries.last(60, in: text))
+        try expect(!shown.contains("partial diagnostic"), "unterminated append is included")
+    }
+    check("reviewIncompleteLastEntry", incompleteLastEntry)
+
+}
+
+/// Round 3: a report reads only entries this version wrote. Its first start (a fresh install or an upgrade) starts a
+/// fresh log once, the old one deleted; later launches keep the log. On a scratch folder, never the real log.
+private func logFreshStartChecks() {
+    let stamp: String = "2026-11-25T10:00:00Z"
+    let fm: FileManager = FileManager.default
+    func entries(_ file: URL) -> [String] {
+        let text: String = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+        return LogEntries.last(60, in: text)
+    }
+    func entry(_ message: String) -> String { LogEntries.entry(stamp: stamp, message: message) }
+    func scratch() -> URL {
+        fm.temporaryDirectory.appendingPathComponent("ocean-check-log-\(getpid())-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    func freshStartOnce() throws {
+        let root: URL = scratch()
+        defer { try? fm.removeItem(at: root) }
+        for upgrade in [false, true] {
+            let name: String = upgrade ? "upgrade" : "fresh install"
+            let folder: URL = root.appendingPathComponent(upgrade ? "upgrade" : "install", isDirectory: true)
+            let file: URL = folder.appendingPathComponent("ascii-animals.log")
+            let backup: URL = folder.appendingPathComponent("ascii-animals.1.log")
+            if upgrade {
+                // The previous writer's log: no indentation, so a volume name's stamp-shaped line reads as an entry.
+                let old: String = "\(stamp) launch 3.0 (11)\n\(stamp) could not set wallpaper: Error Domain=NSCocoaErrorDomain "
+                    + "Code=4 UserInfo={NSFilePath=/Volumes/Jane's\n\(stamp) Photos/Walls/a.png}\n"
+                try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+                try Data(old.utf8).write(to: file)
+                try Data(old.utf8).write(to: backup)
+            }
+            let started: Bool = LogFile.start(file: file, backup: backup)
+            try expect(started, "\(name): the first start of this version didn't start a fresh log")
+            try expect(!fm.fileExists(atPath: backup.path), "\(name): the old backup was kept")
+            let left: String = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+            try expect(!left.contains("Photos") && !left.contains("launch 3.0"), "\(name): the old log was kept: \(left)")
+            try expect(entries(file).isEmpty, "\(name): the fresh log has entries: \(entries(file))")
+            LogFile.append(entry("launch 3.1 (12)"), file: file, backup: backup, limit: 512 * 1024)
+            for launch in 2...3 {
+                let again: Bool = LogFile.start(file: file, backup: backup)
+                try expect(!again, "\(name): launch \(launch) started a fresh log again")
+                LogFile.append(entry("launch \(launch)"), file: file, backup: backup, limit: 512 * 1024)
+            }
+            let wanted: [String] = ["\(stamp) launch 3.1 (12)", "\(stamp) launch 2", "\(stamp) launch 3"]
+            try expect(entries(file) == wanted, "\(name): the log after three launches: \(entries(file))")
+        }
+    }
+    check("logFreshStartOnce", freshStartOnce)
+
+    // The log rolling over to its backup starts a file a report still reads (and the next launch keeps it).
+    func rolledOverLogIsRead() throws {
+        let root: URL = scratch()
+        defer { try? fm.removeItem(at: root) }
+        let file: URL = root.appendingPathComponent("ascii-animals.log")
+        let backup: URL = root.appendingPathComponent("ascii-animals.1.log")
+        LogFile.start(file: file, backup: backup)
+        for i in 0..<40 { LogFile.append(entry("entry \(i)"), file: file, backup: backup, limit: 200) }
+        try expect(fm.fileExists(atPath: backup.path), "the log never rolled over")
+        let read: [String] = entries(file)
+        try expect(read.last == "\(stamp) entry 39", "the newest entry isn't read after the roll-over: \(read)")
+        let again: Bool = LogFile.start(file: file, backup: backup)
+        try expect(!again && entries(file) == read, "the next launch started a fresh log after a roll-over")
+    }
+    check("logRolledOverIsRead", rolledOverLogIsRead)
 }

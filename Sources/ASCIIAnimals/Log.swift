@@ -11,6 +11,7 @@ enum Log {
             .appendingPathComponent("Logs", isDirectory: true)
             .appendingPathComponent(Launch.identity.folderName, isDirectory: true)
     static let file = folder.appendingPathComponent("ascii-animals.log")
+    static let backup = folder.appendingPathComponent("ascii-animals.1.log")
     private static let queue = DispatchQueue(label: "ascii-animals.log")
     private static let limit = 512 * 1024
     private static let stamp: ISO8601DateFormatter = {
@@ -22,20 +23,7 @@ enum Log {
     static func write(_ message: String) {
         let line = LogEntries.entry(stamp: stamp.string(from: Date()), message: message)
         queue.async {
-            let fm = FileManager.default
-            try? fm.createDirectory(at: folder, withIntermediateDirectories: true)
-            if let size = (try? fm.attributesOfItem(atPath: file.path))?[.size] as? Int, size > limit {
-                let backup = folder.appendingPathComponent("ascii-animals.1.log")
-                try? fm.removeItem(at: backup)
-                try? fm.moveItem(at: file, to: backup)
-            }
-            if let h = try? FileHandle(forWritingTo: file) {
-                h.seekToEndOfFile()
-                h.write(Data(line.utf8))
-                try? h.close()
-            } else {
-                try? Data(line.utf8).write(to: file)
-            }
+            LogFile.append(line, file: file, backup: backup, limit: limit)
         }
     }
 

@@ -360,6 +360,32 @@ public enum LogEntries {
     }
 }
 
+/// The log file on disk, `file` with one backup: `Log` calls these on its queue, the checks on a scratch folder.
+public enum LogFile {
+    /// Call before the run's first read or write of the log. True when it started a fresh log.
+    @discardableResult
+    public static func start(file: URL, backup: URL) -> Bool {
+        false
+    }
+
+    /// Appends `entry` (`LogEntries.entry`) to `file`, first moving a file over `limit` bytes to `backup`.
+    public static func append(_ entry: String, file: URL, backup: URL, limit: Int) {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let size = (try? fm.attributesOfItem(atPath: file.path))?[.size] as? Int, size > limit {
+            try? fm.removeItem(at: backup)
+            try? fm.moveItem(at: file, to: backup)
+        }
+        if let h = try? FileHandle(forWritingTo: file) {
+            h.seekToEndOfFile()
+            h.write(Data(entry.utf8))
+            try? h.close()
+        } else {
+            try? Data(entry.utf8).write(to: file)
+        }
+    }
+}
+
 // MARK: - The updater's decisions, behind a seam the checks drive with fakes (the app's UpdateService is the host).
 
 /// Where the updater is.
