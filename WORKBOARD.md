@@ -49,7 +49,7 @@ Last approved state: tag `v3.0.1`.
 |---|---|---|
 | Meadow, card, welcome, energy (t11 stack) | meadow-t11 @ 20cdb3c | approved (review-t11-r3 @ b03d17f); live card look at the join |
 | Pointer input (r1b) | meadow-r1b @ afa861f | approved (review-r1b-r2 @ d158c7c); banner re-test with the director |
-| Updates, settings, diagnostics (r3) | meadow-r3 @ 633a682 | fix round 3 running (go 2026-11-25; briefs/r3.md "Fix round 3": a report reads only entries this version wrote; an unfinished last entry dropped; proof from briefs/r3-recheck2-probe-checks.patch); then one privacy re-check |
+| Updates, settings, diagnostics (r3) | meadow-r3 @ 655e787 | fix round 3 done (proof e371d58 fails 3 on 633a682, fix d79834d: the log starts fresh once with a format header, old logs never read and deleted, an unfinished write dropped and cut at the next start; 314 checks, selftest 0 failed; pushed); one privacy re-check waits for a go |
 | Wallpaper recovery (r2) | meadow-r2 @ bb6df14 | re-check review-r2-r1 @ 1086bf7: changes requested (4 open, all from deleting stills and per-still records); rebuild briefed (briefs/r2.md "Rebuild on the root fix", go 2026-11-25), starts after r3's builder; then one review, a re-check only for data loss |
 
 Trial join (2026-11-25, scratch only, on t11 20cdb3c + r1b afa861f + r3 633a682 + r2 d9e05a0): one conflict
@@ -58,8 +58,8 @@ selftest 0 failed.
 
 ## Next, in order
 
-Paused after r3's fix round 3 reports in (the director: "after the fix pause"); nothing below starts without a go.
-1. r3 fix round 3 (running), then its one re-check (privacy).
+PAUSED (the director: "after the fix pause"); nothing below starts without a go.
+1. r3's one privacy re-check (review-r3-r3 from origin/review-r3-r2, diff 633a682..655e787).
 2. r2 rebuilt on the root fix: two reused files per display, written alternately, never deleted in normal use; the
    covered wallpaper in the file name; a file in our folder is ours, anything else is the person's; restore each
    Space on its next visit; do nothing when a read fails; uninstall restores the Space in view, keeps the small
