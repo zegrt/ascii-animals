@@ -633,10 +633,13 @@ private func reportRound2Checks() {
         IssueReport.form(facts(log), includeLog: true, homePath: "/Users/jdoe", userName: "jdoe",
                          fullName: "Jane Doe", base: base, title: "Problem: ")
     }
-    /// The log file's text as Log.write leaves it: each message stamped, ending in a newline.
+    /// Each message stamped, ending in a newline, as the writer before round 3 left it: no header, so this is an
+    /// older version's log unless `started` marks it as this version's.
     func file(_ messages: [String]) -> String {
         messages.map { (m: String) -> String in "\(stamp) \(m)\n" }.joined()
     }
+    /// A log this version started: its header (`LogFile.start`), then `text`.
+    func started(_ text: String) -> String { LogEntries.header + text }
     /// The lines between the log's fences in a form.
     func logLines(_ text: String) -> [String] {
         let lines: [String] = text.components(separatedBy: "\n")
@@ -663,7 +666,7 @@ private func reportRound2Checks() {
         for error in [real, byHand] {
             let errorLines: Int = error.components(separatedBy: "\n").count
             let newer: [String] = (0..<(60 - (errorLines - 1))).map { (i: Int) -> String in "frame \(i)" }
-            let text: String = file(["launched", error] + newer)
+            let text: String = started(file(["launched", error] + newer))
             let picked: [String] = LogEntries.last(60, in: text)
             let shown: String = form(picked)
             for leak in ["Jane", "Photos", "Walls", "NSURL", "NSFilePath"] {
@@ -680,7 +683,7 @@ private func reportRound2Checks() {
     // Whole entries only: the last n entries (never a line count), each with its own lines, and nothing from an
     // entry whose stamp isn't in the text (the file starting inside one).
     func wholeEntries() throws {
-        let text: String = "Photos/Walls (the end of an entry cut off)\nmore of it\n"
+        let text: String = started("Photos/Walls (the end of an entry cut off)\nmore of it\n")
             + file(["one", "two\n  two's detail\n  more detail", "three", "four\n  four's detail"])
         let three: [String] = LogEntries.last(3, in: text)
         let wanted: [String] = ["\(stamp) two\n  two's detail\n  more detail", "\(stamp) three", "\(stamp) four\n  four's detail"]
@@ -697,7 +700,7 @@ private func reportRound2Checks() {
             let messages: [String] = (0..<120).map { (i: Int) -> String in
                 "entry \(i) " + String(repeating: "x", count: 150 + 7 * pad) + "\n  detail of \(i)"
             }
-            let shown: [String] = logLines(form(LogEntries.last(60, in: file(messages))))
+            let shown: [String] = logLines(form(LogEntries.last(60, in: started(file(messages)))))
             try expect(!shown.isEmpty, "pad \(pad): no log left")
             try expect(isStamped(shown[0]), "pad \(pad): the log starts inside an entry: \(shown[0])")
             for (i, line) in shown.enumerated() where isStamped(line) {
@@ -714,7 +717,7 @@ private func reportRound2Checks() {
     func messageCannotForgeAnEntry() throws {
         let message: String = "could not set wallpaper: Error Domain=NSCocoaErrorDomain Code=4 \"x\" "
             + "UserInfo={NSFilePath=/Volumes/Jane's\n\(stamp) Photos/Walls/a.png}"
-        let text: String = LogEntries.entry(stamp: stamp, message: "launched")
+        let text: String = started(LogEntries.entry(stamp: stamp, message: "launched"))
             + LogEntries.entry(stamp: stamp, message: message)
             + LogEntries.entry(stamp: stamp, message: "next")
         let picked: [String] = LogEntries.last(60, in: text)
@@ -807,4 +810,21 @@ private func logFreshStartChecks() {
         try expect(!again && entries(file) == read, "the next launch started a fresh log after a roll-over")
     }
     check("logRolledOverIsRead", rolledOverLogIsRead)
+
+    // Added with the fix: an unfinished write left in this version's log is cut at the next start, so the next entry
+    // can't run on from it (the fragment would otherwise lead the next launch's first line).
+    func unfinishedWriteCutAtStart() throws {
+        let root: URL = scratch()
+        defer { try? fm.removeItem(at: root) }
+        let file: URL = root.appendingPathComponent("ascii-animals.log")
+        let backup: URL = root.appendingPathComponent("ascii-animals.1.log")
+        LogFile.start(file: file, backup: backup)
+        LogFile.append(entry("launch 3.1 (12)"), file: file, backup: backup, limit: 512 * 1024)
+        LogFile.append("\(stamp) could not set wallpaper: /Volumes/Jane's\n  Pho", file: file, backup: backup, limit: 512 * 1024)
+        let again: Bool = LogFile.start(file: file, backup: backup)
+        LogFile.append(entry("launch 2"), file: file, backup: backup, limit: 512 * 1024)
+        let read: [String] = entries(file)
+        try expect(!again && read == ["\(stamp) launch 3.1 (12)", "\(stamp) launch 2"], "after an unfinished write: \(read)")
+    }
+    check("logUnfinishedWriteCutAtStart", unfinishedWriteCutAtStart)
 }

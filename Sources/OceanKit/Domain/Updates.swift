@@ -322,12 +322,18 @@ extension IssueReport {
     }
 }
 
-/// The recent log as Report a Problem picks it, from the log file's text: whole entries only. An entry is a line that
-/// starts with the stamp `Log.write` puts on it ("2026-11-25T10:00:00Z ") and the lines after it up to the next one
-/// (a message that ran over several lines). Lines before the first stamp are the end of an entry whose start isn't
-/// there: they go.
+/// The recent log as Report a Problem picks it, from the log file's text: only entries this version wrote, whole. The
+/// file must start with `header` (this version's first start begins the log with it, `LogFile.start`); a file without
+/// it was written before, and none of it is read. An entry is a line that starts with the stamp `Log.write` puts on
+/// it ("2026-11-25T10:00:00Z ") and the lines after it up to the next one (a message that ran over several lines,
+/// indented). Lines before the first stamp are the end of an entry whose start isn't there: they go. An entry that
+/// doesn't end with the writer's newline is an unfinished write: it goes too.
 public enum LogEntries {
     static let stamp: String = #"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(Z|[+-]\d\d:?\d\d) "#
+
+    /// The log's first line, written by this version when it starts a log: the mark that every entry after it is
+    /// this writer's (stamped, a message's later lines indented).
+    public static let header: String = "ASCII Animals log: each entry stamped, a message's later lines indented\n"
 
     /// One entry as `Log.write` puts it in the file: the stamp, the message and a newline. The message's later lines
     /// are indented, so none of them can pass for an entry of its own (a volume name with a newline and a stamp in it).
@@ -341,10 +347,22 @@ public enum LogEntries {
         line.range(of: stamp, options: .regularExpression) != nil
     }
 
-    /// The last `n` entries of the log (`text`), oldest first, each whole (its lines joined with newlines).
+    /// `text` without an unfinished last entry: when it doesn't end with the writer's newline, its last entry goes
+    /// from the stamp on (only the last line, if no line before it starts an entry).
+    public static func finished(_ text: String) -> String {
+        if text.isEmpty || text.hasSuffix("\n") { return text }
+        let lines: [Substring] = text.split(separator: "\n", omittingEmptySubsequences: false)
+        let cut: Int = lines.indices.last { (i: Int) -> Bool in starts(String(lines[i])) } ?? (lines.count - 1)
+        if cut == 0 { return "" }
+        return lines[..<cut].joined(separator: "\n") + "\n"
+    }
+
+    /// The last `n` entries of the log (`text`), oldest first, each whole (its lines joined with newlines). Nothing
+    /// from a log this version didn't start (no `header`).
     public static func last(_ n: Int, in text: String) -> [String] {
+        guard text.hasPrefix(header) else { return [] }
         var entries: [[String]] = []
-        for sub in text.split(separator: "\n", omittingEmptySubsequences: false) {
+        for sub in finished(String(text.dropFirst(header.count))).split(separator: "\n", omittingEmptySubsequences: false) {
             let line: String = String(sub)
             if starts(line) {
                 entries.append([line])
@@ -362,13 +380,29 @@ public enum LogEntries {
 
 /// The log file on disk, `file` with one backup: `Log` calls these on its queue, the checks on a scratch folder.
 public enum LogFile {
-    /// Call before the run's first read or write of the log. True when it started a fresh log.
+    /// Call before the run's first read or write of the log. A log this version started (it begins with
+    /// `LogEntries.header`) is kept, less an unfinished last entry, so the next entry can't run on from it. Anything
+    /// else (an older version's log, or none: an upgrade or a fresh install) is deleted with its backup and a fresh
+    /// log begun. True when it started a fresh log: once, on this version's first start.
     @discardableResult
     public static func start(file: URL, backup: URL) -> Bool {
-        false
+        let fm = FileManager.default
+        if let data = try? Data(contentsOf: file), data.starts(with: Data(LogEntries.header.utf8)) {
+            if data.last != UInt8(ascii: "\n") {
+                let text: String = String(decoding: data, as: UTF8.self)
+                try? Data(LogEntries.finished(text).utf8).write(to: file, options: .atomic)
+            }
+            return false
+        }
+        try? fm.removeItem(at: backup)
+        try? fm.removeItem(at: file)
+        try? fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? Data(LogEntries.header.utf8).write(to: file, options: .atomic)
+        return true
     }
 
-    /// Appends `entry` (`LogEntries.entry`) to `file`, first moving a file over `limit` bytes to `backup`.
+    /// Appends `entry` (`LogEntries.entry`) to `file`, first moving a file over `limit` bytes to `backup`. A new file
+    /// begins with `LogEntries.header`.
     public static func append(_ entry: String, file: URL, backup: URL, limit: Int) {
         let fm = FileManager.default
         try? fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -376,12 +410,12 @@ public enum LogFile {
             try? fm.removeItem(at: backup)
             try? fm.moveItem(at: file, to: backup)
         }
-        if let h = try? FileHandle(forWritingTo: file) {
+        if fm.fileExists(atPath: file.path), let h = try? FileHandle(forWritingTo: file) {
             h.seekToEndOfFile()
             h.write(Data(entry.utf8))
             try? h.close()
         } else {
-            try? Data(entry.utf8).write(to: file)
+            try? Data((LogEntries.header + entry).utf8).write(to: file)
         }
     }
 }
