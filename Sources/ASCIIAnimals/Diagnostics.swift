@@ -27,7 +27,7 @@ enum Diagnostics {
             model: String(cString: model),
             displays: displays, power: power.joined(separator: ", "), mode: mode,
             settingsJSON: String(decoding: SettingsCodec.encode(app.store.settings), as: UTF8.self),
-            crashedLastTime: app.crashedLastTime, logTail: Log.tail(60),
+            crashedLastTime: app.crashedLastTime, logTail: Log.entries(60),
             displaySizes: sizes)
     }
 

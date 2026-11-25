@@ -707,4 +707,22 @@ private func reportRound2Checks() {
         }
     }
     check("reportFittingDropsWholeEntries", fittingDropsWholeEntries)
+
+    // Added with the fix (not in the proof): a message can't forge an entry. A volume name with a newline and a
+    // stamp in it, written as Log.write writes it, stays inside its own entry, and that entry's error is scrubbed whole.
+    func messageCannotForgeAnEntry() throws {
+        let message: String = "could not set wallpaper: Error Domain=NSCocoaErrorDomain Code=4 \"x\" "
+            + "UserInfo={NSFilePath=/Volumes/Jane's\n\(stamp) Photos/Walls/a.png}"
+        let text: String = LogEntries.entry(stamp: stamp, message: "launched")
+            + LogEntries.entry(stamp: stamp, message: message)
+            + LogEntries.entry(stamp: stamp, message: "next")
+        let picked: [String] = LogEntries.last(60, in: text)
+        try expect(picked.count == 3, "a message started an entry of its own: \(picked)")
+        let shown: String = form(picked)
+        for leak in ["Jane", "Photos", "Walls", "NSFilePath"] {
+            try expect(!shown.contains(leak), "\(leak) shown:\n\(logLines(shown).joined(separator: "\n"))")
+        }
+        try expect(shown.contains("Code=4") && shown.contains("\(stamp) next"), "the entries around it are missing")
+    }
+    check("reportLogMessageCannotForgeAnEntry", messageCannotForgeAnEntry)
 }

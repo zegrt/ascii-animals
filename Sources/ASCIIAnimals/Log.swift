@@ -3,7 +3,7 @@ import OceanKit
 
 /// A small rolling log at ~/Library/Logs/ASCII Animals/ascii-animals.log
 /// (512 KB, one backup). It stays on this Mac; Report a Problem includes
-/// its last lines only when the user asks. The energy-test copy keeps its log in its own folder under the checkout's
+/// its last entries only when the user asks. The energy-test copy keeps its log in its own folder under the checkout's
 /// `build/energy-test/app` (`Launch.testFolder`), where Tools/energy.sh reads it.
 enum Log {
     static let folder: URL = Launch.testFolder?.appendingPathComponent(EnergyTestFolder.appFolder, isDirectory: true)
@@ -20,7 +20,7 @@ enum Log {
     }()
 
     static func write(_ message: String) {
-        let line = "\(stamp.string(from: Date())) \(message)\n"
+        let line = LogEntries.entry(stamp: stamp.string(from: Date()), message: message)
         queue.async {
             let fm = FileManager.default
             try? fm.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -36,6 +36,15 @@ enum Log {
             } else {
                 try? Data(line.utf8).write(to: file)
             }
+        }
+    }
+
+    /// The last `n` entries, oldest first, each whole: its stamped line and the lines its message ran on to
+    /// (`LogEntries`). Report a Problem takes the log this way, never by lines.
+    static func entries(_ n: Int) -> [String] {
+        queue.sync {
+            guard let text = try? String(contentsOf: file, encoding: .utf8) else { return [] }
+            return LogEntries.last(n, in: text)
         }
     }
 

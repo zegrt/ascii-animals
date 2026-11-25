@@ -42,6 +42,10 @@ public struct LatestRelease: Equatable, Sendable {
     public var zipSHA256: String?
     public var notes: String
     public static func == (a: LatestRelease, b: LatestRelease) -> Bool { a.tag == b.tag && a.version == b.version }
+    /// The same release with the same download: its link and the checksum it's checked against match too.
+    public func sameDownload(as other: LatestRelease) -> Bool {
+        self == other && zipURL == other.zipURL && zipSHA256 == other.zipSHA256
+    }
 }
 
 public enum UpdateFeed {
@@ -156,6 +160,7 @@ public struct DiagnosticFacts: Sendable {
     public var mode: String
     public var settingsJSON: String
     public var crashedLastTime: Bool
+    /// The recent log, oldest first: whole entries (`LogEntries`), each its stamped line and the lines after it.
     public var logTail: [String]
     /// Each display's size, scale and refresh rate, without its name ("2560x1440 @2x 60 Hz").
     public var displaySizes: [String]
@@ -199,13 +204,20 @@ public enum IssueReport {
         if d.crashedLastTime { lines.append("| Note | Quit unexpectedly last time |") }
         lines += ["", "<details><summary>Settings</summary>", "", "```json", d.settingsJSON, "```", "</details>"]
         if !d.logTail.isEmpty {
-            lines += ["", "<details><summary>Recent log</summary>", "", "```"] + d.logTail + ["```", "</details>"]
+            let entries: [String] = d.logTail.map { (e: String) -> String in
+                scrub(e, homePath: homePath, userName: userName, fullName: fullName, wholeEntry: true)
+            }
+            lines += ["", "<details><summary>Recent log</summary>", "", "```"] + entries + ["```", "</details>"]
         }
         return scrub(lines.joined(separator: "\n"), homePath: homePath, userName: userName, fullName: fullName)
     }
 
     /// The home folder becomes `~`; the account's short and full names, other accounts' folders and volume names go.
-    static func scrub(_ text: String, homePath: String, userName: String, fullName: String = "") -> String {
+    /// `wholeEntry`: `text` is one log entry, scrubbed as a unit: an error keeps only its domain and code and the rest
+    /// of the entry goes (its message, its details, every line after), and a volume name runs to the next `/` even
+    /// across the entry's lines.
+    static func scrub(_ text: String, homePath: String, userName: String, fullName: String = "",
+                      wholeEntry: Bool = false) -> String {
         var t = text
         if !homePath.isEmpty {
             t = t.replacingOccurrences(of: homePath, with: "~")
@@ -215,11 +227,13 @@ public enum IssueReport {
             }
         }
         // An error keeps only its domain and code: its message and details can name files, folders and volumes.
-        t = t.replacingOccurrences(of: #"(Error Domain=\S+ Code=-?\d+).*"#, with: "$1", options: .regularExpression)
+        let errorRest: String = wholeEntry ? #"[\s\S]*"# : ".*"
+        t = t.replacingOccurrences(of: #"(Error Domain=\S+ Code=-?\d+)"# + errorRest, with: "$1", options: .regularExpression)
         if fullName.count >= 2 { t = t.replacingOccurrences(of: fullName, with: "<user>", options: .caseInsensitive) }
         if userName.count >= 2 { t = t.replacingOccurrences(of: userName, with: "<user>", options: .caseInsensitive) }
         t = t.replacingOccurrences(of: #"/Users/[^/\s]+"#, with: "/Users/<user>", options: .regularExpression)
-        t = t.replacingOccurrences(of: #"/Volumes/[^/\n]+"#, with: "/Volumes/<volume>", options: .regularExpression)
+        let volume: String = wholeEntry ? #"/Volumes/[^/]+"# : #"/Volumes/[^/\n]+"#
+        t = t.replacingOccurrences(of: volume, with: "/Volumes/<volume>", options: .regularExpression)
         return t
     }
 
@@ -260,12 +274,12 @@ public enum IssueReport {
 extension IssueReport {
     /// The text that goes into the GitHub form (`base`, `title`) from Report a Problem, exactly: the person reviews
     /// this before anything leaves the Mac, and it already fits the link, so nothing is cut after. Only the app version,
-    /// macOS, the displays' sizes and the settings; the recent log only when the person chose it (`includeLog`), with
-    /// the home folder, the account's names, other accounts' folders and volume names removed.
+    /// macOS, the displays' sizes and the settings; the recent log only when the person chose it (`includeLog`): whole
+    /// entries only, each scrubbed as a unit (`scrub(wholeEntry:)`), and the oldest entries go first to fit the link.
     public static func form(_ d: DiagnosticFacts, includeLog: Bool, homePath: String, userName: String, fullName: String,
-                            base: URL, title: String) -> String {
+                            base: URL, title: String, limit: Int = 6000) -> String {
         let displays: String = "\(d.displaySizes.count): " + d.displaySizes.joined(separator: "<br>")
-        var lines: [String] = [
+        let head: [String] = [
             "**What happened**",
             "",
             "<!-- Describe what you saw and what you expected. -->",
@@ -280,42 +294,69 @@ extension IssueReport {
             "",
             "<details><summary>Settings</summary>", "", "```json", d.settingsJSON, "```", "</details>",
         ]
-        if includeLog && !d.logTail.isEmpty {
-            // A fence longer than any run of backticks in the log, so no line can close it.
-            var longest: Int = 0
-            for line in d.logTail {
-                var run: Int = 0
-                for ch in line { run = ch == "`" ? run + 1 : 0; longest = max(longest, run) }
+        let entries: [String] = includeLog ? d.logTail.map { (e: String) -> String in
+            scrub(e, homePath: homePath, userName: userName, fullName: fullName, wholeEntry: true)
+        } : []
+        var first: Int = 0
+        while true {
+            let kept: ArraySlice<String> = entries[first...]
+            var lines: [String] = head
+            if !kept.isEmpty { lines += logSection(Array(kept)) }
+            let text: String = scrub(lines.joined(separator: "\n"), homePath: homePath, userName: userName, fullName: fullName)
+            if kept.isEmpty || make(base, title, text).absoluteString.count <= limit {
+                return fitted(base: base, title: title, body: text, limit: limit)
             }
-            let fence: String = String(repeating: "`", count: max(3, longest + 1))
-            lines += ["", "<details><summary>Recent log</summary>", "", fence] + withoutErrorDetails(d.logTail) + [fence, "</details>"]
+            first += 1
         }
-        let text: String = scrub(lines.joined(separator: "\n"), homePath: homePath, userName: userName, fullName: fullName)
-        return fitted(base: base, title: title, body: text)
+    }
+
+    /// The log's part of the form: `entries` in a fence longer than any run of backticks in them, so none can close it.
+    private static func logSection(_ entries: [String]) -> [String] {
+        var longest: Int = 0
+        for entry in entries {
+            var run: Int = 0
+            for ch in entry { run = ch == "`" ? run + 1 : 0; longest = max(longest, run) }
+        }
+        let fence: String = String(repeating: "`", count: max(3, longest + 1))
+        return ["", "<details><summary>Recent log</summary>", "", fence] + entries + [fence, "</details>"]
     }
 }
 
-extension IssueReport {
-    /// An error written into the log can run over several lines (its details); everything after the line that names
-    /// it goes, up to the next stamped line. (`scrub` then keeps only the error's domain and code.)
-    static func withoutErrorDetails(_ log: [String]) -> [String] {
-        var kept: [String] = []
-        var inError: Bool = false
-        for line in log {
-            let stamped: Bool = line.range(of: #"^\d{4}-\d\d-\d\dT"#, options: .regularExpression) != nil
-            if inError && !stamped { continue }
-            inError = line.contains("Error Domain=")
-            kept.append(line)
-        }
-        return kept
-    }
-}
-
-/// The recent log as Report a Problem picks it, from the log file's text.
+/// The recent log as Report a Problem picks it, from the log file's text: whole entries only. An entry is a line that
+/// starts with the stamp `Log.write` puts on it ("2026-11-25T10:00:00Z ") and the lines after it up to the next one
+/// (a message that ran over several lines). Lines before the first stamp are the end of an entry whose start isn't
+/// there: they go.
 public enum LogEntries {
-    /// The last `n` of the log (`text`), oldest first. (For now the last `n` lines, as `Log.tail` reads them.)
+    static let stamp: String = #"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(Z|[+-]\d\d:?\d\d) "#
+
+    /// One entry as `Log.write` puts it in the file: the stamp, the message and a newline. The message's later lines
+    /// are indented, so none of them can pass for an entry of its own (a volume name with a newline and a stamp in it).
+    public static func entry(stamp: String, message: String) -> String {
+        let body: String = message.replacingOccurrences(of: "\n", with: "\n  ")
+        return "\(stamp) \(body)\n"
+    }
+
+    /// Whether `line` starts an entry.
+    public static func starts(_ line: String) -> Bool {
+        line.range(of: stamp, options: .regularExpression) != nil
+    }
+
+    /// The last `n` entries of the log (`text`), oldest first, each whole (its lines joined with newlines).
     public static func last(_ n: Int, in text: String) -> [String] {
-        Array(text.split(separator: "\n").suffix(n).map(String.init))
+        var entries: [[String]] = []
+        for sub in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line: String = String(sub)
+            if starts(line) {
+                entries.append([line])
+            } else if !entries.isEmpty {
+                entries[entries.count - 1].append(line)
+            }
+        }
+        return entries.suffix(max(0, n)).map { (lines: [String]) -> String in
+            var kept: [String] = lines
+            while kept.count > 1, kept.last?.isEmpty == true { kept.removeLast() }
+            return kept.joined(separator: "\n")
+        }
     }
 }
 
@@ -546,7 +587,9 @@ public final class UpdateEngine {
         }
         let running: String = host.runningVersion
         let latest: LatestRelease? = UpdateFeed.parse(data).flatMap { UpdatePolicy.isNewer($0.version, than: running) ? $0 : nil }
-        if held?.release != latest { dropHeld() }
+        // A held download goes unless it is this release's current download (its link and checksum still match).
+        let stillCurrent: Bool = latest.map { (r: LatestRelease) -> Bool in held?.release.sameDownload(as: r) == true } ?? false
+        if !stillCurrent { dropHeld() }
         guard let r = latest else {
             state = .upToDate
             if userInitiated { host.tell(.upToDate(version: host.runningVersion)) }
@@ -626,7 +669,7 @@ public final class UpdateEngine {
                 }
             }
         }
-        if let kept = held, kept.release == r {
+        if let kept = held, kept.release.sameDownload(as: r) {
             held = nil
             ready(.success(kept))
         } else {
