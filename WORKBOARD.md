@@ -39,7 +39,7 @@ Last approved state: tag `v3.0.1`.
 - Commits use the repo's author identity and end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
   (Codex reviewers: `Co-Authored-By: Codex <noreply@openai.com>`).
 - Plan and prep is not a go. Nothing starts without the director's go.
-- (Proposed 2026-11-25, in force once the director approves.) One review and one fix round per task. A re-check
+- In force from 2026-11-25 (the director: "ok to all three"): one review and one fix round per task. A re-check
   only for a crash, data loss, a privacy leak or a broken habitat. A finding is fixed in 3.1 only if a user would hit
   it in normal use; the rest goes to 3.1.1. The board holds only what's pending.
 
@@ -49,21 +49,22 @@ Last approved state: tag `v3.0.1`.
 |---|---|---|
 | Meadow, card, welcome, energy (t11 stack) | meadow-t11 @ 20cdb3c | approved (review-t11-r3 @ b03d17f); live card look at the join |
 | Pointer input (r1b) | meadow-r1b @ afa861f | approved (review-r1b-r2 @ d158c7c); banner re-test with the director |
-| Updates, settings, diagnostics (r3) | meadow-r3 @ 633a682 | fix round 3 briefed (briefs/r3.md "Fix round 3": a report reads only entries this version wrote; an unfinished last entry dropped); the reviewer's two reproducing checks: briefs/r3-recheck2-probe-checks.patch; waits for a go |
-| Wallpaper recovery (r2) | meadow-r2 @ bb6df14 | re-check review-r2-r1 @ 1086bf7: changes requested (4 open, all from deleting stills and per-still records); to be rebuilt on the root fix, waits for the director's go |
+| Updates, settings, diagnostics (r3) | meadow-r3 @ 633a682 | fix round 3 running (go 2026-11-25; briefs/r3.md "Fix round 3": a report reads only entries this version wrote; an unfinished last entry dropped; proof from briefs/r3-recheck2-probe-checks.patch); then one privacy re-check |
+| Wallpaper recovery (r2) | meadow-r2 @ bb6df14 | re-check review-r2-r1 @ 1086bf7: changes requested (4 open, all from deleting stills and per-still records); rebuild briefed (briefs/r2.md "Rebuild on the root fix", go 2026-11-25), starts after r3's builder; then one review, a re-check only for data loss |
 
 Trial join (2026-11-25, scratch only, on t11 20cdb3c + r1b afa861f + r3 633a682 + r2 d9e05a0): one conflict
 (`Sources/OceanChecks/main.swift`, `greetingChecks()` and `pointerChecks()`, keep both); build passes, 334 checks,
 selftest 0 failed.
 
-## Next, in order (each waits for a go)
+## Next, in order
 
-1. r3 fix round 3, then its one re-check (privacy).
+1. r3 fix round 3 (running), then its one re-check (privacy).
 2. r2 rebuilt on the root fix: two reused files per display, written alternately, never deleted in normal use; the
    covered wallpaper in the file name; a file in our folder is ours, anything else is the person's; restore each
    Space on its next visit; do nothing when a read fails; uninstall restores the Space in view, keeps the small
    folder and says so; 3.0 and Sharks stills left on disk, restored to their display's saved original. The brief
    checks 3.0's limit of 3 stills per display. Then one review.
+Steps 3-5 wait for the director's go.
 3. The join: `meadow-3.1` from meadow-t11 plus r1b, r3, r2; a draft PR for CI; one Codex review of the merge only.
 4. Copy, with the director's OK: briefs/copy-unslop.patch (the director's /unslop, 29 lines in 10 files, made on the
    trial join; re-apply after r2 and r3 change their files) plus three README/CHANGELOG fixes (the card "once": an
@@ -95,6 +96,11 @@ selftest 0 failed.
 - t11 minor: Reduce Motion turned on during the tour's pointer or splash step leaves that step's words over a still.
 - The WhatsNewCard debug probe (about 380 lines) moved out; one copy of `air-flowers.json`; `Tools/energy.sh` cut
   to the modes still used.
+
+## After the release tag (approved 2026-11-25)
+
+- Delete the local branches merged into main or a join head with `git branch -d`, from a list regenerated then.
+  The unmerged superseded branches stay; ask the director about them.
 
 ## Noticed (still open)
 
