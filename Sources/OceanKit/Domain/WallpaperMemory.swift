@@ -22,9 +22,12 @@ public struct WallpaperEntry: Codable, Equatable, Sendable {
 public struct ForeignStills: Equatable, Sendable {
     public var folder: URL
     public var memory: WallpaperMemory
-    public init(folder: URL, memory: WallpaperMemory = WallpaperMemory()) {
+    /// The memory is the hand-over's copy: the other app's own went with it, so this is the only one left.
+    public var memoryIsOurCopy: Bool
+    public init(folder: URL, memory: WallpaperMemory = WallpaperMemory(), memoryIsOurCopy: Bool = false) {
         self.folder = folder
         self.memory = memory
+        self.memoryIsOurCopy = memoryIsOurCopy
     }
 
     func contains(_ url: URL) -> Bool { WallpaperMemory.isOurs(url, stillsFolder: folder) }
@@ -182,8 +185,9 @@ public protocol DesktopImages: AnyObject {
     func current(on display: String) -> WallpaperEntry?
     /// Shows `entry` on the display's Space in view.
     func set(_ entry: WallpaperEntry, on display: String) throws
-    /// The files in the stills folder.
-    func stillFiles() -> [URL]
+    /// The files in a stills folder (ours, or the other app's): empty only when it is readable and empty, or
+    /// doesn't exist. Throws when it can't be read.
+    func stillFiles(in folder: URL) throws -> [URL]
     func removeFile(_ url: URL) throws
 }
 
@@ -241,10 +245,13 @@ public final class WallpaperKeeper {
         self.save = save
         self.log = log
         if memory.predatesStillRecords {
-            self.memory.adopt(desktop.stillFiles())
+            self.memory.adopt(((try? desktop.stillFiles(in: stillsFolder)) ?? []))
             save(self.memory)
         }
     }
+
+    /// Uninstall began (proof seam: nothing is gated yet).
+    public func beginUninstall() {}
 
     /// Before rendering: may a still replace what this display shows? The original is saved before anything changes.
     public func mayApply(on display: String) -> Bool {
@@ -272,7 +279,7 @@ public final class WallpaperKeeper {
     public func commit(_ still: URL, on display: String) -> Bool {
         inFlight.remove(still.lastPathComponent)
         // Re-check: the wallpaper may have changed, or the display gone, while the still rendered.
-        let written: Bool = desktop.stillFiles().contains { WallpaperMemory.same($0, still) }
+        let written: Bool = ((try? desktop.stillFiles(in: stillsFolder)) ?? []).contains { WallpaperMemory.same($0, still) }
         guard written, desktop.displays.contains(display), let current = desktop.current(on: display),
               memory.decide(screen: display, current: current, stillsFolder: stillsFolder, foreign: foreign) == .apply else {
             discard(still)
@@ -313,7 +320,7 @@ public final class WallpaperKeeper {
 
     /// Delete this display's stills that nothing shows: not recorded as up, not rendering, not the new one.
     private func prune(display: String, keep: URL) {
-        for file in desktop.stillFiles() where file.lastPathComponent.hasPrefix("still-\(display)-") {
+        for file in ((try? desktop.stillFiles(in: stillsFolder)) ?? []) where file.lastPathComponent.hasPrefix("still-\(display)-") {
             let name = file.lastPathComponent
             guard memory.stills[name] == nil, !inFlight.contains(name), !WallpaperMemory.same(file, keep) else { continue }
             try? desktop.removeFile(file)

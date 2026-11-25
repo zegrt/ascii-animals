@@ -145,8 +145,9 @@ final class SystemWallpaper {
             try NSWorkspace.shared.setDesktopImageURL(entry.url, for: s, options: options)
         }
 
-        func stillFiles() -> [URL] {
-            (try? FileManager.default.contentsOfDirectory(at: stillsFolder, includingPropertiesForKeys: nil)) ?? []
+        func stillFiles(in folder: URL) throws -> [URL] {
+            guard FileManager.default.fileExists(atPath: folder.path) else { return [] }
+            return try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
         }
 
         func removeFile(_ url: URL) throws { try FileManager.default.removeItem(at: url) }

@@ -109,7 +109,13 @@ final class FakeDesktop: DesktopImages {
     var setFails: Set<String> = []
     /// Displays where setting a picture says yes but nothing changes.
     var setIgnored: Set<String> = []
+    /// Displays where setting a picture throws after it took effect (or, with `setIgnored`, after doing nothing).
+    var setThrowsAfter: Set<String> = []
+    /// Runs inside each set that gets as far as the picture (before `setThrowsAfter` throws).
+    var onSet: ((String) -> Void)?
     var removeFails = false
+    /// Listing a stills folder throws.
+    var listFails = false
 
     /// A display with `spaces` Spaces, each showing `picture`, the first in view.
     func attach(_ display: String, spaces count: Int = 1, showing picture: WallpaperEntry) {
@@ -135,10 +141,14 @@ final class FakeDesktop: DesktopImages {
     }
     func set(_ entry: WallpaperEntry, on display: String) throws {
         guard attached.contains(display), !setFails.contains(display), let s = inView[display] else { throw Failure() }
-        if setIgnored.contains(display) { return }
-        spaces[display]![s] = entry
+        if !setIgnored.contains(display) { spaces[display]![s] = entry }
+        onSet?(display)
+        if setThrowsAfter.contains(display) { throw Failure() }
     }
-    func stillFiles() -> [URL] { files.sorted { $0.path < $1.path } }
+    func stillFiles(in folder: URL) throws -> [URL] {
+        if listFails { throw Failure() }
+        return files.filter { WallpaperMemory.isOurs($0, stillsFolder: folder) }.sorted { $0.path < $1.path }
+    }
     func removeFile(_ url: URL) throws {
         if removeFails { throw Failure() }
         files.remove(url.standardizedFileURL)
@@ -325,5 +335,207 @@ func wallpaperKeeperChecks() {
         // The user's own picture is never touched by a restore.
         let again: RestoreOutcome = k.restoreAll()
         try expect(again.restored.isEmpty && again.failed.isEmpty, "restored over the user's own picture: \(again)")
+    }
+
+    // MARK: fix round 1 (review-r2 @ e004c95)
+
+    /// A memory as 3.0 wrote it: originals only, no still records.
+    func legacy(_ originals: [String: WallpaperEntry]) throws -> WallpaperMemory {
+        var m = WallpaperMemory()
+        for (display, entry) in originals { _ = m.decide(screen: display, current: entry, stillsFolder: stills) }
+        let full = try JSONSerialization.jsonObject(with: JSONEncoder().encode(m)) as? [String: Any] ?? [:]
+        let v1: Data = try JSONSerialization.data(withJSONObject: ["originals": full["originals"] ?? [:]])
+        return try JSONDecoder().decode(WallpaperMemory.self, from: v1)
+    }
+    /// A 3.0 still (`still-<display>-<milliseconds>.png`) left up on a Space.
+    func legacyStill(_ desk: FakeDesktop, on display: String, space: Int, millis: Int) throws -> URL {
+        let url: URL = stills.appendingPathComponent("still-\(display)-\(millis).png")
+        desk.write(url)
+        desk.view(space: space, on: display)
+        try desk.set(WallpaperKeeper.stillEntry(url), on: display)
+        return url
+    }
+
+    // F1 (finding 1). An adopted 3.0 still puts back the picture saved for its display when it was adopted, never
+    // what the display's original became later.
+    check("wallpaperAdoptedStillKeepsItsOriginal") {
+        let desk = FakeDesktop()
+        desk.attach("S", spaces: 3, showing: a)
+        _ = try legacyStill(desk, on: "S", space: 0, millis: 1_700_000_000_000)
+        _ = try legacyStill(desk, on: "S", space: 1, millis: 1_700_000_000_001)
+        desk.view(space: 2, on: "S")
+        try desk.set(b, on: "S")   // the person's own B on Space 3
+        let k = keeper(desk, try legacy(["S": a]))
+        desk.view(space: 0, on: "S")
+        k.restoreAll()
+        try expect(desk.picture(on: "S", space: 0) == a, "Space 1 not restored")
+        desk.view(space: 2, on: "S")
+        try expect(applyStill(k, desk, on: "S") != nil, "no still went up over B")
+        desk.view(space: 1, on: "S")
+        k.restoreAll()
+        let back: WallpaperEntry = desk.picture(on: "S", space: 1)
+        try expect(back == a, "Space 2's 3.0 still was put back to \(back.url.lastPathComponent), not A")
+        // No original known for its display (3.0 forgot it): the still stays, and the restore says it failed.
+        let lost = FakeDesktop()
+        lost.attach("S", showing: a)
+        let kept: URL = try legacyStill(lost, on: "S", space: 0, millis: 1_700_000_000_002)
+        let k2 = keeper(lost, try legacy([:]))
+        let out: RestoreOutcome = k2.restoreAll()
+        try expect(out.failed == ["S"] && out.keepsRecovery && lost.exists(kept), "a still with no known original: \(out)")
+    }
+
+    // F2 (finding 2). A stills folder that can't be read isn't empty: adoption waits, is retried before anything is
+    // deleted, and uninstall keeps recovery while it waits.
+    check("wallpaperFailedFolderReadIsNotEmpty") {
+        let desk = FakeDesktop()
+        desk.attach("S", spaces: 2, showing: a)
+        let hidden: URL = try legacyStill(desk, on: "S", space: 1, millis: 1_700_000_000_000)
+        desk.view(space: 0, on: "S")
+        desk.listFails = true
+        let k = keeper(desk, try legacy(["S": a]))
+        let again: WallpaperMemory = try JSONDecoder().decode(WallpaperMemory.self, from: JSONEncoder().encode(k.memory))
+        desk.listFails = false
+        applyStill(k, desk, on: "S")
+        try expect(desk.exists(hidden), "Space 2's 3.0 still was deleted after the folder failed to read once")
+        try expect(again.predatesStillRecords, "a failed read was saved as a finished adoption")
+        // Uninstall while the folder still can't be read: recovery stays.
+        let desk2 = FakeDesktop()
+        desk2.attach("S", spaces: 2, showing: a)
+        _ = try legacyStill(desk2, on: "S", space: 1, millis: 1_700_000_000_000)
+        desk2.view(space: 0, on: "S")
+        desk2.listFails = true
+        let k2 = keeper(desk2, try legacy(["S": a]))
+        let out: RestoreOutcome = k2.restoreAll()
+        try expect(out.keepsRecovery, "uninstall would discard recovery with the stills folder unread: \(out)")
+    }
+
+    // F3 (finding 3). Under an ASCII Sharks still, Sharks' own original comes back, not an Animals original from
+    // another Space; and its copied memory stays while a Sharks still is unresolved.
+    let sharksStills = URL(fileURLWithPath: "/tmp/ascii-animals-check/Sharks/Stills", isDirectory: true)
+    check("wallpaperSharksUpgraderKeepsSharksOriginal") {
+        var sharksMemory = WallpaperMemory()
+        _ = sharksMemory.decide(screen: "S", current: a, stillsFolder: sharksStills)
+        let copy = ForeignStills(folder: sharksStills, memory: sharksMemory, memoryIsOurCopy: true)
+        let sharksStill: URL = sharksStills.appendingPathComponent("still-S-1690000000000.png")
+        let desk = FakeDesktop()
+        desk.attach("S", spaces: 2, showing: b)   // B: the person's own on Space 1
+        desk.write(sharksStill)
+        desk.view(space: 1, on: "S")
+        try desk.set(WallpaperKeeper.stillEntry(sharksStill), on: "S")   // Sharks, force-quit, left it on Space 2
+        let k = WallpaperKeeper(memory: WallpaperMemory(), stillsFolder: stills, foreign: copy, desktop: desk)
+        let direct: WallpaperEntry? = k.memory.restoreTarget(screen: "S", current: WallpaperKeeper.stillEntry(sharksStill),
+                                                             stillsFolder: stills, foreign: copy)
+        desk.view(space: 0, on: "S")
+        applyStill(k, desk, on: "S")   // Animals records B for S
+        let underB: WallpaperEntry? = k.memory.restoreTarget(screen: "S", current: WallpaperKeeper.stillEntry(sharksStill),
+                                                             stillsFolder: stills, foreign: copy)
+        try expect(direct == a && underB == a, "under a Sharks still: \(underB?.url.lastPathComponent ?? "nothing"), not A")
+        desk.view(space: 1, on: "S")
+        try expect(applyStill(k, desk, on: "S") != nil, "no still over the Sharks still")
+        k.restoreAll()
+        let back: WallpaperEntry = desk.picture(on: "S", space: 1)
+        try expect(back == a, "Space 2 got \(back.url.lastPathComponent) instead of Sharks' original A")
+
+        // Uninstall with a Sharks still on a Space not in view and no Animals records: the copy must stay.
+        let desk2 = FakeDesktop()
+        desk2.attach("S", spaces: 2, showing: b)
+        desk2.write(sharksStill)
+        desk2.view(space: 1, on: "S")
+        try desk2.set(WallpaperKeeper.stillEntry(sharksStill), on: "S")
+        desk2.view(space: 0, on: "S")
+        let k2 = WallpaperKeeper(memory: WallpaperMemory(), stillsFolder: stills, foreign: copy, desktop: desk2)
+        let out: RestoreOutcome = k2.restoreAll()
+        try expect(out.keepsRecovery, "uninstall would discard the only copy of Sharks' original: \(out)")
+        // Controls: Sharks still installed (its own memory is there), or no Sharks still left: nothing to keep.
+        let own = ForeignStills(folder: sharksStills, memory: sharksMemory, memoryIsOurCopy: false)
+        let k3 = WallpaperKeeper(memory: WallpaperMemory(), stillsFolder: stills, foreign: own, desktop: desk2)
+        try expect(!k3.restoreAll().keepsRecovery, "kept recovery for Sharks' memory while Sharks keeps its own")
+        let desk4 = FakeDesktop()
+        desk4.attach("S", showing: b)
+        let k4 = WallpaperKeeper(memory: WallpaperMemory(), stillsFolder: stills, foreign: copy, desktop: desk4)
+        try expect(!k4.restoreAll().keepsRecovery, "kept recovery with no Sharks still left")
+    }
+
+    // F4 (finding 5). A set that throws is read back before anything is deleted.
+    check("wallpaperSetThatThrowsIsReadBack") {
+        // It threw after selecting the still: the still is up, so its file and record stay.
+        let desk = FakeDesktop()
+        desk.attach("S", showing: a)
+        desk.setThrowsAfter = ["S"]
+        let k = keeper(desk)
+        try expect(k.mayApply(on: "S"), "not applied")
+        let still: URL = k.newStill(for: "S")
+        desk.write(still)
+        k.commit(still, on: "S")
+        let shown: WallpaperEntry = desk.picture(on: "S", space: 0)
+        try expect(WallpaperMemory.same(shown.url, still), "control: the fake shows the still")
+        try expect(desk.exists(still), "the still a throwing set selected was deleted")
+        try expect(k.memory.stills[still.lastPathComponent] != nil, "the selected still lost its record")
+        desk.setThrowsAfter = []
+        k.restoreAll()
+        try expect(desk.picture(on: "S", space: 0) == a, "not restored after a set that threw")
+        // It threw and the result can't be read: keep the file and the record.
+        let desk2 = FakeDesktop()
+        desk2.attach("S", showing: a)
+        desk2.setThrowsAfter = ["S"]
+        desk2.onSet = { desk2.unreadable.insert($0) }
+        let k2 = keeper(desk2)
+        _ = k2.mayApply(on: "S")
+        let still2: URL = k2.newStill(for: "S")
+        desk2.write(still2)
+        k2.commit(still2, on: "S")
+        try expect(desk2.exists(still2) && k2.memory.stills[still2.lastPathComponent] != nil,
+                   "a still whose set threw and can't be read back was dropped")
+        // Control: it threw before selecting anything (read back: never selected): dropped.
+        let desk3 = FakeDesktop()
+        desk3.attach("S", showing: a)
+        desk3.setFails = ["S"]
+        let k3 = keeper(desk3)
+        _ = k3.mayApply(on: "S")
+        let still3: URL = k3.newStill(for: "S")
+        desk3.write(still3)
+        try expect(!k3.commit(still3, on: "S") && !desk3.exists(still3) && k3.memory.stills.isEmpty,
+                   "a still that was never selected was kept")
+    }
+
+    // F5 (finding 6). Once uninstall begins, no still goes up and nothing reconciles.
+    check("wallpaperNothingChangesOnceUninstallBegins") {
+        let desk = FakeDesktop()
+        desk.attach("S", showing: a)
+        desk.attach("T", showing: b)
+        let k = keeper(desk)
+        applyStill(k, desk, on: "S")
+        _ = k.mayApply(on: "T")
+        let rendering: URL = k.newStill(for: "T")   // still rendering when uninstall starts
+        desk.write(rendering)
+        k.beginUninstall()
+        let out: RestoreOutcome = k.restoreAll()
+        try expect(out.restored == ["S"], "uninstall's restore: \(out)")
+        let late: URL? = applyStill(k, desk, on: "S")
+        try expect(late == nil && desk.picture(on: "S", space: 0) == a, "a look change during uninstall put a still up")
+        let committed: Bool = k.commit(rendering, on: "T")
+        try expect(!committed && desk.picture(on: "T", space: 0) == b, "a still rendered before uninstall went up after it")
+        try expect(k.reconcile(matching: false) == nil, "a reconcile ran during uninstall")
+    }
+
+    // "Show on all Spaces" is unproven: a still's file stays after a single replacement or restore, and goes only
+    // once a restore puts everything back.
+    check("wallpaperReplacedStillFileKept") {
+        let desk = FakeDesktop()
+        desk.attach("S", showing: a)
+        let k = keeper(desk)
+        guard let first = applyStill(k, desk, on: "S") else { throw CheckFailure(detail: "no still went up") }
+        guard let second = applyStill(k, desk, on: "S") else { throw CheckFailure(detail: "no second still") }
+        try expect(desk.exists(first), "the replaced still's file was deleted; another Space may show it")
+        desk.attach("T", showing: b)
+        guard let third = applyStill(k, desk, on: "T") else { throw CheckFailure(detail: "no still on T") }
+        desk.setFails = ["T"]
+        let partial: RestoreOutcome = k.restoreAll()
+        try expect(partial.restored == ["S"] && desk.exists(second) && desk.exists(third), "a file went before everything was back: \(partial)")
+        desk.setFails = []
+        let clean: RestoreOutcome = k.restoreAll()
+        try expect(clean.restored == ["T"] && !clean.keepsRecovery, "not all back: \(clean)")
+        let left: [URL] = try desk.stillFiles(in: stills)
+        try expect(left.isEmpty, "a clean restore left \(left.count) stills")
     }
 }
