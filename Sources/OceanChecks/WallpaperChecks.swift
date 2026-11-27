@@ -538,4 +538,183 @@ func wallpaperKeeperChecks() {
         let left: [URL] = try desk.stillFiles(in: stills)
         try expect(left.isEmpty, "a clean restore left \(left.count) stills")
     }
+
+    // MARK: rebuild on the root fix (briefs/r2.md "Rebuild on the root fix", go 2026-11-27)
+
+    /// A refresh as the app runs it: plan, render (here: write), put up. Returns the file written, if any.
+    func refresh(_ k: WallpaperKeeper, _ desk: FakeDesktop, on display: String) -> URL? {
+        guard k.mayApply(on: display) else { return nil }
+        let url: URL = k.newStill(for: display)
+        desk.write(url)
+        k.commit(url, on: display)
+        return url
+    }
+    func gone(_ desk: FakeDesktop, _ written: [URL]) -> [String] {
+        written.filter { !desk.exists($0) }.map { $0.lastPathComponent }
+    }
+
+    // R1. No file is deleted by a refresh, a restore, a failed read or uninstall.
+    func noFileIsDeleted() throws {
+        let desk = FakeDesktop()
+        desk.attach("S", spaces: 2, showing: a)
+        let k = keeper(desk)
+        var written: [URL] = []
+        for _ in 0..<3 { if let u = refresh(k, desk, on: "S") { written.append(u) } }
+        try expect(gone(desk, written).isEmpty, "a refresh deleted \(gone(desk, written))")
+        desk.setIgnored = ["S"]   // a set that says yes and changes nothing
+        if let u = refresh(k, desk, on: "S") { written.append(u) }
+        desk.setIgnored = []
+        try expect(gone(desk, written).isEmpty, "a refresh whose set didn't take deleted \(gone(desk, written))")
+        k.restoreAll()   // quit
+        try expect(gone(desk, written).isEmpty, "a restore deleted \(gone(desk, written))")
+        if let u = refresh(k, desk, on: "S") { written.append(u) }
+        desk.unreadable = ["S"]
+        _ = refresh(k, desk, on: "S")
+        k.restoreAll()
+        desk.unreadable = []
+        desk.listFails = true
+        if let u = refresh(k, desk, on: "S") { written.append(u) }
+        desk.listFails = false
+        try expect(gone(desk, written).isEmpty, "a failed read deleted \(gone(desk, written))")
+        k.beginUninstall()
+        k.restoreAll()
+        try expect(gone(desk, written).isEmpty, "uninstall deleted \(gone(desk, written))")
+        try expect(desk.picture(on: "S", space: 0) == a, "uninstall didn't put A back on the Space in view")
+    }
+    check("wallpaperNoFileIsDeleted", noFileIsDeleted)
+
+    // R2. The folder holds at most two files per display per covered wallpaper after 100 refreshes.
+    func atMostTwoFilesPerCoveredWallpaper() throws {
+        let desk = FakeDesktop()
+        desk.attach("S", spaces: 2, showing: a)
+        desk.view(space: 1, on: "S")
+        try desk.set(b, on: "S")   // S covers A on Space 1 and B on Space 2
+        desk.attach("T", showing: b)   // T covers B
+        let k = keeper(desk)
+        for i in 0..<100 {
+            desk.view(space: i % 2, on: "S")
+            _ = refresh(k, desk, on: "S")
+            _ = refresh(k, desk, on: "T")
+        }
+        let files: [URL] = try desk.stillFiles(in: stills)
+        try expect(files.count <= 6, "100 refreshes left \(files.count) files for 3 covered wallpapers")
+        try expect(isStill(desk.picture(on: "S", space: 0)) && isStill(desk.picture(on: "S", space: 1))
+                   && isStill(desk.picture(on: "T", space: 0)), "a Space didn't get the habitat")
+    }
+    check("wallpaperAtMostTwoFilesPerCoveredWallpaper", atMostTwoFilesPerCoveredWallpaper)
+
+    // R3. A hidden Space's still restores to its own covered wallpaper on visit.
+    func hiddenSpaceRestoresOnVisit() throws {
+        let c = WallpaperEntry(url: URL(fileURLWithPath: "/Users/me/Pictures/C.png"), scaling: 1, allowClipping: false, fillColor: nil)
+        // The same still on two Spaces (a still on show elsewhere, or "Show on all Spaces"), both over A.
+        let desk = FakeDesktop()
+        desk.attach("S", spaces: 2, showing: a)
+        let k = keeper(desk)
+        guard let x = refresh(k, desk, on: "S") else { throw CheckFailure(detail: "no still went up") }
+        desk.view(space: 1, on: "S")
+        try desk.set(WallpaperKeeper.stillEntry(x), on: "S")
+        desk.view(space: 0, on: "S")
+        k.restoreAll()   // matching off on Space 1
+        try desk.set(c, on: "S")   // the person picks C there
+        _ = refresh(k, desk, on: "S")   // matching on again
+        k.restoreAll()   // and off
+        try expect(desk.picture(on: "S", space: 0) == c, "Space 1 didn't get C back")
+        desk.view(space: 1, on: "S")
+        k.reconcile(matching: false)   // a visit
+        let back: WallpaperEntry = desk.picture(on: "S", space: 1)
+        try expect(back == a, "Space 2 got \(back.url.lastPathComponent) on its visit, not its own A")
+        // Two Spaces with different pictures each get the habitat, then their own picture back on a visit.
+        let desk2 = FakeDesktop()
+        desk2.attach("S", spaces: 2, showing: a)
+        desk2.view(space: 1, on: "S")
+        try desk2.set(b, on: "S")
+        let k2 = keeper(desk2)
+        desk2.view(space: 0, on: "S")
+        _ = refresh(k2, desk2, on: "S")
+        desk2.view(space: 1, on: "S")
+        _ = refresh(k2, desk2, on: "S")   // a look change on Space 2
+        try expect(isStill(desk2.picture(on: "S", space: 1)), "Space 2's own B got no still")
+        desk2.view(space: 0, on: "S")
+        _ = refresh(k2, desk2, on: "S")
+        k2.restoreAll()   // quit on Space 1
+        let k3 = keeper(desk2, k2.memory)   // the next launch, matching off
+        desk2.view(space: 1, on: "S")
+        k3.reconcile(matching: false)
+        try expect(desk2.picture(on: "S", space: 0) == a && desk2.picture(on: "S", space: 1) == b,
+                   "after a visit: \(desk2.picture(on: "S", space: 0).url.lastPathComponent), \(desk2.picture(on: "S", space: 1).url.lastPathComponent)")
+    }
+    check("wallpaperHiddenSpaceRestoresOnVisit", hiddenSpaceRestoresOnVisit)
+
+    // R4. A failed read changes nothing: no set, no restore, no forgetting, no file gone; tried again at the next event.
+    func failedReadChangesNothing() throws {
+        let desk = FakeDesktop()
+        desk.attach("S", showing: a)
+        let k = keeper(desk)
+        guard let first = refresh(k, desk, on: "S") else { throw CheckFailure(detail: "no still went up") }
+        let before: WallpaperMemory = k.memory
+        desk.unreadable = ["S"]
+        try expect(!k.mayApply(on: "S"), "a still was planned over a picture that couldn't be read")
+        let out: RestoreOutcome = k.restoreAll()
+        desk.unreadable = []
+        try expect(out.restored.isEmpty && WallpaperMemory.same(desk.picture(on: "S", space: 0).url, first),
+                   "something was set while the picture couldn't be read: \(out)")
+        try expect(k.memory == before, "the memory changed on a failed read")
+        // The stills folder can't be listed: the still being put up is not lost.
+        desk.listFails = true
+        let second: URL? = refresh(k, desk, on: "S")
+        desk.listFails = false
+        try expect(second.map { desk.exists($0) } ?? true, "a still was deleted when the folder couldn't be listed")
+        // The read-back fails after a set: the still stays.
+        desk.onSet = { desk.unreadable.insert($0) }
+        let third: URL? = refresh(k, desk, on: "S")
+        desk.onSet = nil
+        desk.unreadable = []
+        try expect(third.map { desk.exists($0) } ?? true, "a still was deleted when its set couldn't be read back")
+        let again: RestoreOutcome = k.restoreAll()   // the next event
+        try expect(again.restored == ["S"] && desk.picture(on: "S", space: 0) == a, "not put back once readable: \(again)")
+    }
+    check("wallpaperFailedReadChangesNothing", failedReadChangesNothing)
+
+    // R5. Upgrades from 3.0 and ASCII Sharks restore their originals; their stills stay on disk.
+    func upgradesRestoreTheirOriginals() throws {
+        let desk = FakeDesktop()
+        desk.attach("S", spaces: 3, showing: a)
+        let old0: URL = try legacyStill(desk, on: "S", space: 0, millis: 1_700_000_000_000)
+        let old1: URL = try legacyStill(desk, on: "S", space: 1, millis: 1_700_000_000_001)
+        desk.view(space: 2, on: "S")
+        try desk.set(b, on: "S")   // the person's own B on Space 3
+        let k = keeper(desk, try legacy(["S": a]))   // launch, matching on
+        _ = refresh(k, desk, on: "S")
+        desk.view(space: 0, on: "S")
+        _ = refresh(k, desk, on: "S")   // a look change over a 3.0 still
+        k.restoreAll()   // matching off
+        for space in [1, 2] {
+            desk.view(space: space, on: "S")
+            k.reconcile(matching: false)
+        }
+        let shown: [String] = (0..<3).map { desk.picture(on: "S", space: $0).url.lastPathComponent }
+        try expect(shown == ["A.heic", "A.heic", "B.jpg"], "after the upgrade, the Spaces show \(shown)")
+        try expect(desk.exists(old0) && desk.exists(old1), "a 3.0 still was deleted")
+        // ASCII Sharks: its still on Space 2 goes back to what Sharks saved; the person's own B on Space 1 stays theirs.
+        let sharksStill: URL = sharksStills.appendingPathComponent("still-S-1690000000000.png")
+        let desk2 = FakeDesktop()
+        desk2.attach("S", spaces: 2, showing: b)
+        desk2.write(sharksStill)
+        desk2.view(space: 1, on: "S")
+        try desk2.set(WallpaperKeeper.stillEntry(sharksStill), on: "S")
+        let sharks = ForeignStills(folder: sharksStills, memory: try legacy(["S": a]))
+        let k2 = WallpaperKeeper(memory: WallpaperMemory(), stillsFolder: stills, foreign: sharks, desktop: desk2)
+        desk2.view(space: 0, on: "S")
+        _ = refresh(k2, desk2, on: "S")
+        desk2.view(space: 1, on: "S")
+        _ = refresh(k2, desk2, on: "S")
+        k2.restoreAll()   // quit on Space 2
+        let k3 = WallpaperKeeper(memory: k2.memory, stillsFolder: stills, foreign: sharks, desktop: desk2)
+        desk2.view(space: 0, on: "S")
+        k3.reconcile(matching: false)   // the next launch, matching off
+        let both: [String] = (0..<2).map { desk2.picture(on: "S", space: $0).url.lastPathComponent }
+        try expect(both == ["B.jpg", "A.heic"], "after the Sharks upgrade, the Spaces show \(both)")
+        try expect(desk2.exists(sharksStill), "the Sharks still was deleted")
+    }
+    check("wallpaperUpgradesRestoreTheirOriginals", upgradesRestoreTheirOriginals)
 }
