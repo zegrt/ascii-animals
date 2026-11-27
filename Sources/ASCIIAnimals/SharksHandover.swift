@@ -39,6 +39,7 @@ enum SharksHandover {
         for step in steps {
             switch step {
             case .quitSharks:
+                // Its quit forgets the original of the display in view: keep its originals first.
                 SharksQuit.run(memory: { UserDefaults(suiteName: id)?.data(forKey: Handover.sharksWallpaperKey) },
                                copy: me.data(forKey: SystemWallpaper.sharksMemoryCopyKey),
                                keepCopy: { me.set($0, forKey: SystemWallpaper.sharksMemoryCopyKey) },
@@ -148,7 +149,8 @@ enum SharksHandover {
     /// back, removes its login item (which only Sharks itself can), settings, stills and logs, then
     /// trashes itself and exits. True if it exited on its own with success, within the time allowed.
     private static func runSharksUninstaller(_ app: URL) -> Bool {
-        // Its wallpaper memory goes with its settings: keep a copy in case its restore didn't happen.
+        // Its wallpaper memory goes with its settings: keep a copy (with the one kept before it quit) in case its
+        // restore didn't happen.
         SharksRemoval.run(sharksMemory: UserDefaults(suiteName: Handover.sharksBundleID)?.data(forKey: Handover.sharksWallpaperKey),
                           copy: UserDefaults.standard.data(forKey: SystemWallpaper.sharksMemoryCopyKey),
                           sharksStills: SystemWallpaper.sharksStillsFolder,

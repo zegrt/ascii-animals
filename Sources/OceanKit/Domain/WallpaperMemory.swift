@@ -69,6 +69,14 @@ public struct WallpaperMemory: Codable, Equatable, Sendable {
         saved = try c.decodeIfPresent([String: WallpaperEntry].self, forKey: .saved) ?? [:]
     }
 
+    /// ASCII Sharks' memory with an earlier copy filling the displays it no longer remembers (its quit forgets the
+    /// display in view): this memory's own saved original wins where both have one.
+    public func fillingSaved(from earlier: WallpaperMemory) -> WallpaperMemory {
+        var m: WallpaperMemory = self
+        m.saved.merge(earlier.saved) { mine, _ in mine }
+        return m
+    }
+
     /// The display's own wallpaper: as last seen there, else the one 3.0 saved.
     public func original(for display: String) -> WallpaperEntry? {
         own[display].flatMap { covered[$0] } ?? saved[display]
@@ -355,6 +363,15 @@ public struct RestoreData: Codable, Equatable, Sendable {
         self.sharks = sharks
     }
 
+    /// ASCII Sharks' memory as read now, with the hand-over's earlier copy for the displays Sharks forgot since (its
+    /// quit forgets the display in view). Either alone when the other is missing or unreadable.
+    public static func sharksCopy(current: Data?, copy: Data?) -> Data? {
+        func decode(_ data: Data?) -> WallpaperMemory? { data.flatMap { try? JSONDecoder().decode(WallpaperMemory.self, from: $0) } }
+        guard let now = decode(current) else { return decode(copy) != nil ? copy : current }
+        guard let kept = decode(copy) else { return current }
+        return (try? JSONEncoder().encode(now.fillingSaved(from: kept))) ?? current
+    }
+
     /// The file in the Stills folder.
     public static let fileName = "restore.json"
 
@@ -371,12 +388,12 @@ public struct RestoreData: Codable, Equatable, Sendable {
     }
 
     /// What the app starts from: the settings' memory, else what uninstall left in the Stills folder; Sharks' own
-    /// memory, else the hand-over's copy, else the folder's.
+    /// memory, with the hand-over's copy for the displays it forgot (`sharksCopy(current:copy:)`), else the folder's.
     public static func resolve(settings: Data?, sharksOwn: Data?, sharksCopy: Data?, stillsFolder: URL) -> RestoreData {
         func decode(_ data: Data?) -> WallpaperMemory? { data.flatMap { try? JSONDecoder().decode(WallpaperMemory.self, from: $0) } }
         let file: RestoreData? = (decode(settings) == nil || decode(sharksOwn ?? sharksCopy) == nil) ? read(in: stillsFolder) : nil
         let memory: WallpaperMemory = decode(settings) ?? file?.memory ?? WallpaperMemory()
-        let sharks: WallpaperMemory? = decode(sharksOwn) ?? decode(sharksCopy) ?? file?.sharks
+        let sharks: WallpaperMemory? = decode(RestoreData.sharksCopy(current: sharksOwn, copy: sharksCopy)) ?? file?.sharks
         return RestoreData(memory: memory, sharks: sharks)
     }
 
@@ -410,11 +427,14 @@ public struct RestoreData: Codable, Equatable, Sendable {
     }
 }
 
-/// Asking a running ASCII Sharks to quit at the hand-over.
+/// Asking a running ASCII Sharks to quit at the hand-over. Its quit restores the Space in view and forgets that
+/// display's saved original, while a Space not in view may still show one of its stills: its originals are kept
+/// first, as the hand-over's copy.
 public enum SharksQuit {
-    /// Asks Sharks to quit (`quit`). `memory` reads Sharks' wallpaper memory, `copy` is the hand-over's copy so far
-    /// and `keepCopy` stores a new one.
+    /// Reads Sharks' wallpaper memory (`memory`), keeps it with the hand-over's copy so far (`copy`) as the new copy
+    /// (`keepCopy`), then asks Sharks to quit (`quit`).
     public static func run(memory: () -> Data?, copy: Data?, keepCopy: (Data) -> Void, quit: () -> Void) {
+        if let kept = RestoreData.sharksCopy(current: memory(), copy: copy) { keepCopy(kept) }
         quit()
     }
 }
@@ -424,12 +444,12 @@ public enum SharksQuit {
 /// any that went are put back at their old paths, where the wallpaper keeper restores them to Sharks' saved original
 /// on a visit.
 public enum SharksRemoval {
-    /// Keeps a copy of Sharks' wallpaper memory (`keepCopy`), sets its stills aside in `aside`, runs Sharks' own
-    /// uninstaller (`uninstall`, true when it finished) and puts back every still it removed. Returns `uninstall`'s
-    /// answer.
+    /// Keeps a copy of Sharks' wallpaper memory (`keepCopy`), with the hand-over's copy so far (`copy`, taken before
+    /// Sharks quit) for the displays it forgot, sets its stills aside in `aside`, runs Sharks' own uninstaller
+    /// (`uninstall`, true when it finished) and puts back every still it removed. Returns `uninstall`'s answer.
     public static func run(sharksMemory: Data?, copy: Data? = nil, sharksStills: URL, aside: URL, keepCopy: (Data) -> Void,
                            log: (String) -> Void = { _ in }, uninstall: () -> Bool) -> Bool {
-        if let sharksMemory { keepCopy(sharksMemory) }
+        if let kept = RestoreData.sharksCopy(current: sharksMemory, copy: copy) { keepCopy(kept) }
         let fm: FileManager = .default
         let names: [String] = (try? fm.contentsOfDirectory(atPath: sharksStills.path)) ?? []
         var setAside: [String] = []
