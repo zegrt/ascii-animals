@@ -60,8 +60,8 @@ All four parts approved 2026-11-27. Go for the join: the director's "ok", 2026-1
    "ok", 2026-11-27); 354 checks, selftest 0 failed; draft PR #10.
 4. Performance before 3.1 ships (the director, 2026-11-27: "before we push 3.1 we need to massively improve
    performance and reduce cost without sacrificing the motion and quality and fidelity"; then "research and think
-   and plan and getback to me"). Research under way; a written plan goes to the director for approval. Nothing is
-   built before that.
+   and plan and getback to me"). Plan: `docs/plans/2026-11-27-performance-plan.md`, with the director for approval.
+   Nothing is built before that.
 5. Release notes and the 3.1.1 list.
 
 ## With the director
