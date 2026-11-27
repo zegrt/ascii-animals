@@ -20,6 +20,18 @@ public final class CellCanvas {
     public var overGlyph: [UInt8]
     /// RGBA8 packed like `ink`, for `overGlyph`.
     public var overInk: [UInt32]
+    /// The ground under each cell, RGBA8 packed like `block`: shown wherever the
+    /// cell would show `background` (the strip around its inset block, an empty
+    /// cell, under the grid line and the glyphs), mixed over `background` by a;
+    /// a == 0 (`noGround`): plain `background`. Grow-only: empty until the first
+    /// `putGround` or `growGround()`, then `cols * rows` for this canvas's life,
+    /// so a habitat that never writes it (Ocean, Web) costs nothing.
+    public private(set) var ground: [UInt32] = []
+    public static let noGround: UInt32 = 0
+    /// Whether anything wrote the ground (`putGround`, `withGround`) since the
+    /// last `clear()`. The renderer uploads the ground only then, so a painter
+    /// without one (Web after a Meadow on the same screen) uploads nothing.
+    public private(set) var hasGround = false
     public var background = SIMD3<Float>(0, 0, 0)
     /// The one-device-pixel line at each cell's top and left edge; a == 0: no grid.
     public var gridColor = SIMD4<Float>(0, 0, 0, 0)
@@ -35,8 +47,14 @@ public final class CellCanvas {
         overInk = [UInt32](repeating: 0, count: n)
     }
 
-    /// Empties every cell (keeps `background` and `gridColor`), in place.
+    /// Empties every cell, its ground included (keeps `background` and
+    /// `gridColor`), in place.
     public func clear() {
+        // Only `putGround` and `withGround` write the ground, and both set `hasGround`.
+        if hasGround {
+            ground.withUnsafeMutableBufferPointer { $0.update(repeating: CellCanvas.noGround) }
+            hasGround = false
+        }
         block.withUnsafeMutableBufferPointer { $0.update(repeating: 0) }
         ink.withUnsafeMutableBufferPointer { $0.update(repeating: 0) }
         glyph.withUnsafeMutableBufferPointer { $0.update(repeating: CellCanvas.noGlyph) }
@@ -53,6 +71,29 @@ public final class CellCanvas {
         glyph[i] = GlyphAtlas.index(g) ?? CellCanvas.noGlyph
         ink[i] = CellCanvas.pack(color)
         block[i] = fill.map { CellCanvas.pack(SIMD4($0, 1)) } ?? 0
+    }
+
+    /// Sets one cell's ground: `color` mixed over `background` by its a (1:
+    /// the ground alone; 0: no ground). Cells outside the grid are ignored.
+    public func putGround(_ col: Int, _ row: Int, ground color: SIMD4<Float>) {
+        guard col >= 0, col < cols, row >= 0, row < rows else { return }
+        growGround()
+        ground[row * cols + col] = CellCanvas.pack(color)
+        hasGround = true
+    }
+
+    /// Makes `ground` `cols * rows` long (all `noGround`) if it is still empty,
+    /// for a painter that fills it in bulk with `withGround`. Allocates once.
+    public func growGround() {
+        if ground.isEmpty { ground = [UInt32](repeating: CellCanvas.noGround, count: cols * rows) }
+    }
+
+    /// Grows `ground` if needed and hands it over for writing in place. Counts
+    /// as a ground write (`hasGround`), whatever `body` writes.
+    public func withGround<R>(_ body: (inout UnsafeMutableBufferPointer<UInt32>) throws -> R) rethrows -> R {
+        growGround()
+        hasGround = true
+        return try ground.withUnsafeMutableBufferPointer(body)
     }
 
     /// Sets one cell's overlay: `glyph` in `ink` drawn over whatever the
