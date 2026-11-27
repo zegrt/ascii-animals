@@ -50,7 +50,7 @@ Last approved state: tag `v3.0.1`.
 | Meadow, card, welcome, energy (t11 stack) | meadow-t11 @ 20cdb3c | approved (review-t11-r3 @ b03d17f); live card look at the join |
 | Pointer input (r1b) | meadow-r1b @ afa861f | approved (review-r1b-r2 @ d158c7c); banner re-test with the director |
 | Updates, settings, diagnostics (r3) | meadow-r3 @ 655e787 | approved 2026-11-27 (privacy re-check review-r3-r3 @ 8ade43f; 314 checks, selftest 0 failed). The log starts fresh on a format change, not every version (the director: "ok go", 2026-11-27) |
-| Wallpaper recovery (r2) | meadow-r2 @ 9e3a466 | fix round (briefs/r2.md "Fix round", 2026-11-27): review-r2-r2 @ 08884b3 changes requested; fix: uninstall keeps the restore data with the kept stills (findings 1, 3); the Sharks hand-over leaves its stills on disk (finding 2). Then a data-loss re-check |
+| Wallpaper recovery (r2) | meadow-r2 @ 59e16bb | fix round done (proof b6e63da fails 4 on 9e3a466; fix: restore.json kept with the kept stills, Sharks stills put back after its uninstaller; 299 checks, selftest 0 failed; pushed). In its one data-loss re-check (review-r2-r3) |
 
 Trial join (2026-11-25, scratch only, on t11 20cdb3c + r1b afa861f + r3 633a682 + r2 d9e05a0): one conflict
 (`Sources/OceanChecks/main.swift`, `greetingChecks()` and `pointerChecks()`, keep both); build passes, 334 checks,
@@ -58,7 +58,7 @@ selftest 0 failed.
 
 ## Next, in order
 
-r3 approved 2026-11-27; r2 in its fix round.
+r3 approved 2026-11-27; r2 in its data-loss re-check.
 2. r2 rebuilt on the root fix: two reused files per display, written alternately, never deleted in normal use; the
    covered wallpaper in the file name; a file in our folder is ours, anything else is the person's; restore each
    Space on its next visit; do nothing when a read fails; uninstall restores the Space in view, keeps the small
