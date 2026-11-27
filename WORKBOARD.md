@@ -52,14 +52,12 @@ Last approved state: tag `v3.0.1`.
 | Updates, settings, diagnostics (r3) | meadow-r3 @ 655e787 | approved 2026-11-27 (privacy re-check review-r3-r3 @ 8ade43f; 314 checks, selftest 0 failed). The log starts fresh on a format change, not every version (the director: "ok go", 2026-11-27) |
 | Wallpaper recovery (r2) | meadow-r2 @ 7d9c8d8 | approved 2026-11-27 (re-check review-r2-r4 @ d5340ef; 301 checks, selftest 0 failed) |
 
-Trial join (2026-11-25, scratch only, on t11 20cdb3c + r1b afa861f + r3 633a682 + r2 d9e05a0): one conflict
-(`Sources/OceanChecks/main.swift`, `greetingChecks()` and `pointerChecks()`, keep both); build passes, 334 checks,
-selftest 0 failed.
-
 ## Next, in order
 
-All four parts approved 2026-11-27. Steps 3-5 wait for the director's go.
-3. The join: `meadow-3.1` from meadow-t11 plus r1b, r3, r2; a draft PR for CI; one Codex review of the merge only.
+All four parts approved 2026-11-27. Go for the join: the director's "ok", 2026-11-27.
+3. The join: `meadow-3.1` @ b763f6a (merges a90d5f6 r1b, keeping both check calls; fc74544 r3; 8e3434c r2; b763f6a
+   drops two blank lines at file ends); 354 checks, selftest 0 failed; draft PR #10 for CI; in review (review-join,
+   the merge only).
 4. Copy, with the director's OK: briefs/copy-unslop.patch (the director's /unslop, 29 lines in 10 files, made on the
    trial join; re-apply after r2 and r3 change their files) plus three README/CHANGELOG fixes (the card "once": an
    unanswered card can come back twice; "deletes everything it saved": uninstall can keep the stills folder, also the uninstall confirmation's "saved stills" and the menu tooltip "everything it saved" (r2 report, Noticed); the
@@ -109,7 +107,6 @@ All four parts approved 2026-11-27. Steps 3-5 wait for the director's go.
 
 ## Noticed (still open)
 
-- `Sources/OceanChecks/main.swift` ends with a blank line on meadow-r3 (`git diff --check`); fix at the join.
 
 - Source comments and `Sources/OceanChecks/Fixtures/README.md` still point at `meadow-sketch` @ 4e1b869; they can
   point at `Tools/meadow-sketch/` with the next task that touches them.
