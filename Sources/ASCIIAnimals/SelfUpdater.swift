@@ -18,6 +18,7 @@ enum SelfUpdater {
 
     /// Why this copy can't replace itself, or nil when it can.
     static func blocker() -> String? {
+        guard Launch.plan.startsUpdates else { return "The energy-test copy never updates itself." }
         let bundle = Bundle.main.bundleURL
         if let why = SelfUpdate.blocker(bundlePath: bundle.path) { return why }
         let folder = bundle.deletingLastPathComponent()
@@ -35,6 +36,7 @@ enum SelfUpdater {
     /// the installed app's location.
     static func install(_ r: LatestRelease, done: @escaping (Result<URL, Failure>) -> Void) {
         let finish: (Result<URL, Failure>) -> Void = { result in DispatchQueue.main.async { done(result) } }
+        guard Launch.plan.startsUpdates else { return finish(.failure(Failure("The energy-test copy never updates itself."))) }
         guard let url = r.zipURL, SelfUpdate.isTrustedDownload(url, repoPath: repoPath) else {
             return finish(.failure(Failure("This release can't be installed from inside the app.")))
         }
@@ -133,6 +135,7 @@ enum SelfUpdater {
     /// Opens `app` once this process has gone, then quits. Waiting matters:
     /// a second copy that starts while this one runs quits straight away.
     static func relaunch(_ app: URL) {
+        guard Launch.plan.startsUpdates else { return }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
         p.arguments = ["-c", #"i=0; while /bin/kill -0 "$1" 2>/dev/null && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done; exec /usr/bin/open "$2""#,

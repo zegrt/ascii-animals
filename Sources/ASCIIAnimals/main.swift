@@ -5,8 +5,11 @@ import OceanKit
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    /// Lazy: the hand-over imports ASCII Sharks' settings first, then the store loads them.
-    lazy var store = SettingsStore()
+    /// Lazy: the hand-over imports ASCII Sharks' settings first, then the store loads them. The what's-new preview
+    /// holds the defaults in memory instead (`LaunchPlan.transientSettings`): nothing read, nothing saved.
+    lazy var store: SettingsStore = Launch.plan.transientSettings ? SettingsStore(transient: .defaults) : SettingsStore()
+    /// How this person came to 3.1 (`Arrival`): decided at launch, after the hand-over.
+    var arrival: Arrival = .since31
     let signals = SystemSignals()
     var director: OceanDirector?
     var wallpaper: SystemWallpaper?
@@ -15,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     lazy var settingsWindow = SettingsWindowController(model: settingsModel)
     var startupError: String?
     let updates = UpdateService()
+    /// The energy-test copy's frame-rate log (`LaunchPlan.reportsFrameRate`).
+    private var frameMeter: Timer?
     /// The last session ended without a clean quit.
     var crashedLastTime = false
     /// Set while uninstalling, so quitting writes nothing back.
@@ -28,19 +33,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
+        // What this copy may do is decided once from its bundle ID (`Launch.plan`). The energy-test copy is quiet or
+        // previews the what's-new card: the welcome, the cards and `arrival.v1` are left alone (the arrival is taken as
+        // an upgrade in memory), and the hand-over never runs (`SharksHandover.enabled`).
+        let plan: LaunchPlan = Launch.plan
         SharksHandover.run(app: self)
+        arrival = plan.greeting == .asSaved ? SettingsStore.decideArrival() : .before31
         SharksHandover.watch()
         crashedLastTime = CrashMarker.launch()
+        if plan.identity.isEnergyTest {
+            // Tools/energy.sh checks this line against the mode it asked for (every flag is set on each launch).
+            Log.write(EnergyLog.plan(pid: getpid(), plan))
+        }
         Log.write("launch \(AppInfo.version) (\(AppInfo.build))\(crashedLastTime ? " after an unclean exit" : "")")
         do {
             guard let device = MTLCreateSystemDefaultDevice() else { throw RenderError(description: "This Mac has no Metal device.") }
             let renderer = try OceanRenderer(device: device)
             let d = OceanDirector(renderer: renderer, store: store, signals: signals)
             director = d
-            let wp = SystemWallpaper(renderer: renderer)
-            wallpaper = wp
+            wallpaper = SystemWallpaper(renderer: renderer)   // nil in the energy-test copy
             d.onLooksSettled = { [weak self] in self?.refreshSystemWallpaper(delay: 1) }
-            signals.onChange = { [weak d] inputs in d?.apply(PowerPolicy.mode(inputs)) }
+            signals.onChange = { [weak d] inputs in
+                d?.apply(PowerPolicy.mode(inputs))
+                WhatsNewCard.powerChanged(inputs)
+            }
             store.onChange = { [weak self] old, new in self?.settingsChanged(old, new) }
             let nc = NotificationCenter.default
             observers.append(nc.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
@@ -63,9 +79,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu = StatusMenu(app: self)
         menu?.apply(store.settings)
         hotKey.setEnabled(store.settings.pauseShortcut)
-        updates.start(enabled: { [weak self] in self?.store.settings.checkForUpdates ?? false },
-                      autoInstall: { [weak self] in self?.store.settings.autoInstallUpdates ?? false })
-        OnboardingController.showIfNeeded(app: self)
+        if plan.startsUpdates {
+            updates.start(enabled: { [weak self] in self?.store.settings.checkForUpdates ?? false },
+                          autoInstall: { [weak self] in self?.store.settings.autoInstallUpdates ?? false })
+        }
+        if plan.reportsFrameRate { startFrameMeter() }
+        switch plan.greeting {
+        case .asSaved: OnboardingController.showIfNeeded(app: self)
+        case .whatsNewPreview:
+            Log.write("what's-new preview: the card once, settings in memory, nothing saved")
+            WhatsNewCard.showWhenSeen(app: self)
+        case .quiet: break
+        }
+    }
+
+    /// The energy-test copy logs, every 5 seconds (menus open or not), the power state and the frames actually drawn per second on each
+    /// display (`EnergyLog.reading`), so Tools/energy.sh can check what was measured: the mode, every display at the
+    /// asked rate, the displays drawn against those attached, never on battery or in Low Power Mode.
+    private func startFrameMeter() {
+        var last: [CGDirectDisplayID: Int] = director?.framesByDisplay ?? [:]
+        var lastTime: TimeInterval = ProcessInfo.processInfo.systemUptime
+        let pid: Int32 = getpid()
+        let launch: String? = Launch.plan.launchID
+        // In the run loop's common modes: a reading never stalls while one of the test copy's menus is open.
+        frameMeter = CommonTimer.repeating(every: 5) { [weak self] _ in
+            guard let self, let d = self.director else { return }
+            let now: TimeInterval = ProcessInfo.processInfo.systemUptime
+            let elapsed: Double = max(0.001, now - lastTime)
+            let counts: [CGDirectDisplayID: Int] = d.framesByDisplay
+            var displays: [EnergyLog.Display] = []
+            for screen in d.screens {
+                let id: CGDirectDisplayID = screen.displayID
+                let frames: Int = counts[id, default: 0] - last[id, default: 0]
+                let fps: Double = Double(frames) / elapsed
+                displays.append(EnergyLog.Display(id: id, builtIn: CGDisplayIsBuiltin(id) != 0, fps: fps))
+            }
+            last = counts
+            lastTime = now
+            let s: OceanKit.Settings = self.store.settings
+            Log.write(EnergyLog.reading(pid: pid, launch: launch, mode: d.mode, setting: s.fps, habitat: s.habitat.rawValue,
+                                        count: s.meadowCount, attached: NSScreen.screens.count, displays: displays,
+                                        inputs: self.signals.inputs))
+        }
     }
 
     /// Opening the app again (Finder, Spotlight, Launchpad) shows Settings —
@@ -76,7 +131,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func showAbout() { AboutWindow.show(app: self) }
-    func showWelcome() { OnboardingController.show(app: self) }
+    /// The welcome from Help. Off in the energy-test copy: it saves the welcome's flags and would draw over a run.
+    func showWelcome() {
+        if Launch.plan.greeting != .asSaved {
+            Log.write("welcome from Help: off in this developer run")
+            return
+        }
+        OnboardingController.show(app: self)
+    }
     /// Opens a prefilled GitHub issue in the browser (nothing is sent until the user submits it).
     func reportProblem() {
         NSWorkspace.shared.open(IssueReport.url(base: AppInfo.issuesURL, title: "Problem: ", body: Diagnostics.body(app: self)))
@@ -90,13 +152,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Confirms, restores the wallpaper, removes everything, trashes the app and quits.
     func uninstall() {
-        guard Uninstaller.confirm() else { return }
+        guard Launch.plan.offersUninstall, Uninstaller.confirm() else { return }
         Uninstaller.run(app: self)
         exit(0)
     }
 
     func settingsChanged(_ old: OceanKit.Settings, _ new: OceanKit.Settings) {
         director?.settingsChanged(old: old, new: new)
+        WhatsNewCard.settingsChanged(new)
         settingsModel.refresh()
         menu?.apply(new)
         if old.pauseShortcut != new.pauseShortcut { hotKey.setEnabled(new.pauseShortcut) }
@@ -141,9 +204,19 @@ sigterm.resume()
 
 let app = NSApplication.shared
 
+/// A `--snapshot-*` output path, or (the energy-test copy, a path outside `build/energy-test`) a refusal and exit 1
+/// before anything is drawn or written (`Launch.snapshotOutput`).
+func snapshotOutputOrExit(_ path: String) -> URL {
+    if let url = Launch.snapshotOutput(path) { return url }
+    let folder: String = Launch.testFolder?.path ?? "?"
+    FileHandle.standardError.write(Data("refused: the energy-test copy writes snapshots only inside \(folder) (got \(path))\n".utf8))
+    exit(1)
+}
+
 // Debug: render the settings window to a PNG and exit (the UI can't be
 // screenshotted from a terminal without Screen Recording permission).
 if let i = CommandLine.arguments.firstIndex(of: "--snapshot-settings"), i + 1 < CommandLine.arguments.count {
+    let out: URL = snapshotOutputOrExit(CommandLine.arguments[i + 1])
     app.setActivationPolicy(.prohibited)
     let model = SettingsModel(store: SettingsStore.snapshot())
     let view = NSHostingView(rootView: SettingsView(model: model))
@@ -154,7 +227,7 @@ if let i = CommandLine.arguments.firstIndex(of: "--snapshot-settings"), i + 1 < 
     view.layoutSubtreeIfNeeded()
     if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
         view.cacheDisplay(in: view.bounds, to: rep)
-        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: CommandLine.arguments[i + 1]))
+        try? rep.representation(using: .png, properties: [:])?.write(to: out)
     }
     exit(0)
 }
@@ -162,6 +235,10 @@ if let i = CommandLine.arguments.firstIndex(of: "--snapshot-settings"), i + 1 < 
 // `ASCIIAnimals --uninstall [--yes]`: scripted removal (Tools/uninstall.sh).
 // A running copy is asked to quit first so it puts the wallpaper back.
 if CommandLine.arguments.contains("--uninstall") {
+    guard Launch.plan.offersUninstall else {
+        print("The energy-test copy has no uninstaller; Tools/energy.sh removes what it made.")
+        exit(1)
+    }
     app.setActivationPolicy(.accessory)
     if let id = Bundle.main.bundleIdentifier {
         for other in NSRunningApplication.runningApplications(withBundleIdentifier: id) where other != .current {
@@ -171,7 +248,7 @@ if CommandLine.arguments.contains("--uninstall") {
     }
     if CommandLine.arguments.contains("--yes") || Uninstaller.confirm() {
         let renderer = MTLCreateSystemDefaultDevice().flatMap { try? OceanRenderer(device: $0) }
-        let wp = renderer.map { SystemWallpaper(renderer: $0) }
+        let wp = renderer.flatMap { SystemWallpaper(renderer: $0) }
         wp?.restoreAll()
         let problems = Uninstaller.run(app: nil)
         print(problems.isEmpty ? "ASCII Animals uninstalled." : "Uninstalled, except: \(problems.joined(separator: "; "))")
@@ -179,11 +256,19 @@ if CommandLine.arguments.contains("--uninstall") {
     exit(0)
 }
 
-// Debug: render the welcome or About screen to a PNG and exit.
-for (flag, render) in [("--snapshot-onboarding", OnboardingController.snapshot(to:)), ("--snapshot-about", AboutWindow.snapshot(to:))] {
+// Debug: render the welcome, the what's-new card or About to a PNG, or write the menu's outline, and exit.
+let snapshots: [(String, (URL) -> Void)] = [("--snapshot-onboarding", OnboardingController.snapshot(to:)),
+                                            ("--snapshot-whatsnew", WhatsNewCard.snapshot(to:)),
+                                            ("--snapshot-whatsnew-probe", WhatsNewCard.probe(to:)),
+                                            ("--snapshot-whatsnew-drawn", WhatsNewCard.drawnProbe(to:)),
+                                            ("--snapshot-identity", IdentityProbe.run(to:)),
+                                            ("--snapshot-about", AboutWindow.snapshot(to:)),
+                                            ("--snapshot-menu", StatusMenu.snapshot(to:))]
+for (flag, render) in snapshots {
     if let i = CommandLine.arguments.firstIndex(of: flag), i + 1 < CommandLine.arguments.count {
+        let out: URL = snapshotOutputOrExit(CommandLine.arguments[i + 1])
         app.setActivationPolicy(.prohibited)
-        render(URL(fileURLWithPath: CommandLine.arguments[i + 1]))
+        render(out)
         exit(0)
     }
 }

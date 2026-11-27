@@ -11,11 +11,9 @@ enum SharksHandover {
     /// How long Sharks' own uninstaller may take (it starts Metal to put the wallpaper back).
     private static let uninstallTimeout: TimeInterval = 30
 
-    /// Only the real app acts on Sharks: never a bare dev binary (no bundle ID, its own defaults),
-    /// and never a test run that opts out with ASCII_ANIMALS_NO_HANDOVER=1.
-    private static var enabled: Bool {
-        Handover.enabled(bundleID: Bundle.main.bundleIdentifier, environment: ProcessInfo.processInfo.environment)
-    }
+    /// Only the real app acts on Sharks: never a bare dev binary (no bundle ID, its own defaults), never the
+    /// energy-test copy, and never a test run that opts out with ASCII_ANIMALS_NO_HANDOVER=1 (`Launch.plan`).
+    static var enabled: Bool { Launch.plan.runsHandover }
 
     /// Synchronous; returns once Sharks has quit (or there was nothing to do).
     /// Must run before `AppDelegate.store` is first touched, so the imported settings are what it loads.
@@ -78,6 +76,8 @@ enum SharksHandover {
     // MARK: While running
 
     private static var watcher: NSKeyValueObservation?
+    /// Whether the watcher is on (the identity probe looks).
+    static var isWatching: Bool { watcher != nil }
     private static var quitting = false
 
     /// From launch on: ASCII Sharks opening (its login item, or out of habit) is asked to quit at once,

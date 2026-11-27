@@ -37,8 +37,16 @@ final class UpdateService: NSObject, UNUserNotificationCenterDelegate {
 
     /// The app bundle can post notifications; a bare debug binary can't.
     private var canNotify: Bool { Bundle.main.bundleIdentifier != nil }
+    /// False in the energy-test copy (`LaunchPlan.startsUpdates`): every way in (start, Check for Updates, a notice,
+    /// install) does nothing, so it never checks, prompts, writes an update key, replaces itself or restarts.
+    private let allowed: Bool = Launch.plan.startsUpdates
+    /// Whether the hourly check is scheduled (the identity probe looks).
+    var isStarted: Bool { timer != nil }
+    /// Whether a check is under way (the identity probe looks).
+    var isChecking: Bool { inFlight }
 
     func start(enabled: @escaping () -> Bool, autoInstall: @escaping () -> Bool) {
+        guard allowed else { return }
         self.enabled = enabled
         self.autoInstall = autoInstall
         if canNotify { UNUserNotificationCenter.current().delegate = self }
@@ -61,7 +69,7 @@ final class UpdateService: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func checkNow(userInitiated: Bool) {
-        guard !inFlight, installing == nil else { return }
+        guard allowed, !inFlight, installing == nil else { return }
         inFlight = true
         if userInitiated { state = .checking }
         var req = URLRequest(url: AppInfo.latestAPI, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
@@ -119,7 +127,7 @@ final class UpdateService: NSObject, UNUserNotificationCenterDelegate {
     /// Installs the available release without asking, when the policy allows.
     @discardableResult
     private func autoInstallIfAllowed() -> Bool {
-        guard let r = available else { return false }
+        guard allowed, let r = available else { return false }
         let go = UpdatePolicy.shouldAutoInstall(
             checking: enabled(), autoInstall: autoInstall(),
             installable: r.zipURL != nil && r.zipSHA256 != nil && SelfUpdater.blocker() == nil,
@@ -133,7 +141,7 @@ final class UpdateService: NSObject, UNUserNotificationCenterDelegate {
     /// by the user: when this copy can't replace itself, or the install fails,
     /// says why and offers the DMG. Automatic: fails quietly to the notice.
     func install(automatic: Bool = false) {
-        guard let r = available else { return }
+        guard allowed, let r = available else { return }
         if !automatic, let why = SelfUpdater.blocker() { return offerDownload(r, why) }
         state = .installing(r)
         Log.write("installing \(r.tag)\(automatic ? " (automatic)" : "")")

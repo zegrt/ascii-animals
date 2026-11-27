@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import OceanKit
 
@@ -210,6 +211,103 @@ func handoverChecks() {
         try expect(welcome(onboarded: true, handedOver: true, habitat: .web) == .nothing, "already on the Web")
         try expect(Handover.webCardKey == "whatsNew.web.v1", "the flag's name")
     }
+
+    // 3.1's Meadow card (t9): what a launch shows, from what is saved. Each launch below is a fresh decision, as at a
+    // real launch, with the flags the earlier launches left.
+    struct Saved {
+        var onboarded: Bool
+        var handedOver: Bool
+        var webShown = false
+        var meadowShown = false
+        var habitat: HabitatKind = .ocean
+        var meadowTried = false
+        var arrival: Arrival
+    }
+    func launch(_ s: Saved) -> LaunchWelcome {
+        Handover.launchWelcome(onboarded: s.onboarded, handedOver: s.handedOver, webCardShown: s.webShown, habitat: s.habitat,
+                               arrival: s.arrival, meadowCardShown: s.meadowShown, meadowTried: s.meadowTried)
+    }
+    func meadowCardOnceForUpgraders() throws {
+        // A 3.0 user: the welcome seen, settings saved.
+        let arrival: Arrival = Arrival.decide(stored: nil, savedSettings: true, onboarded: true, handedOver: false)
+        try expect(arrival == .before31, "a 3.0 user is an upgrade")
+        var s = Saved(onboarded: true, handedOver: false, arrival: arrival)
+        try expect(launch(s) == .meadowCard, "first 3.1 launch: the card")
+        s.meadowShown = true
+        try expect(launch(s) == .nothing, "shown once, never again")
+        var picked = Saved(onboarded: true, handedOver: false, arrival: .before31)
+        picked.habitat = .meadow
+        picked.meadowTried = true
+        try expect(launch(picked) == .nothing, "on the Meadow already")
+        picked.habitat = .ocean
+        try expect(launch(picked) == .nothing, "picked the Meadow once, then went back: never")
+        var web = Saved(onboarded: true, handedOver: false, arrival: .before31)
+        web.habitat = .web
+        try expect(launch(web) == .meadowCard, "someone on the Web gets it too")
+        try expect(Handover.meadowCardKey == "whatsNew.meadow.v1", "the flag's name (d1)")
+        try expect(Handover.meadowCardKey != Handover.webCardKey, "its own flag")
+    }
+    check("meadowCardOnceForUpgraders", meadowCardOnceForUpgraders)
+    func meadowCardNeverForNewUsers() throws {
+        let fresh: Arrival = Arrival.decide(stored: nil, savedSettings: false, onboarded: false, handedOver: false)
+        try expect(fresh == .since31, "a fresh install")
+        var s = Saved(onboarded: false, handedOver: false, arrival: fresh)
+        try expect(launch(s) == .tour, "a new user gets the tour")
+        // The tour marks itself and both cards seen (OnboardingController); and even if the Meadow flag were lost,
+        // a fresh install's arrival is kept, so saved settings since never make it an upgrade.
+        s.onboarded = true
+        s.webShown = true
+        try expect(launch(s) == .nothing, "after the tour")
+        let later: Arrival = Arrival.decide(stored: fresh.rawValue, savedSettings: true, onboarded: true, handedOver: false)
+        let lost = Saved(onboarded: true, handedOver: false, arrival: later)
+        try expect(launch(lost) == .nothing, "a new user never gets the card, flag or not")
+    }
+    check("meadowCardNeverForNewUsers", meadowCardNeverForNewUsers)
+    func meadowCardLeavesTheSharksHandoverIntact() throws {
+        // Someone coming from ASCII Sharks straight to 3.1: the hand-over skips the tour, then the Web card as ever;
+        // the Meadow card waits for the next launch, so only one card shows at a time.
+        let steps: [HandoverStep] = Handover.plan(facts(app: url, running: true, settings: Data("{}".utf8)))
+        try expect(steps.contains(.skipWelcome) && steps.contains(.quitSharks) && steps.contains(.importSettings), "plan \(steps)")
+        let arrival: Arrival = Arrival.decide(stored: nil, savedSettings: true, onboarded: true, handedOver: true)
+        try expect(arrival == .before31, "a Sharks user is an upgrade")
+        var s = Saved(onboarded: true, handedOver: true, arrival: arrival)
+        try expect(launch(s) == .webCard, "the Web card first, unchanged")
+        s.webShown = true
+        try expect(launch(s) == .meadowCard, "the Meadow card on the next launch")
+        s.meadowShown = true
+        try expect(launch(s) == .nothing, "then nothing")
+        var tried = Saved(onboarded: true, handedOver: true, arrival: arrival)
+        tried.habitat = .web
+        try expect(launch(tried) == .meadowCard, "found the Web already: straight to the Meadow card")
+        // The old entry point (no arrival) still decides exactly as before 3.1.
+        try expect(welcome(onboarded: true, handedOver: true) == .webCard && welcome(onboarded: true, handedOver: false) == .nothing,
+                   "the four-argument decision is unchanged")
+    }
+    check("meadowCardLeavesTheSharksHandoverIntact", meadowCardLeavesTheSharksHandoverIntact)
+    // t9 fix round 1, finding 5: a 3.0 user whose tour was never marked seen gets the card, not the tour.
+    func meadowCardForAnUpgraderWhoNeverFinishedTheTour() throws {
+        let arrival: Arrival = Arrival.decide(stored: nil, savedSettings: true, onboarded: false, handedOver: false)
+        try expect(arrival == .before31, "saved 3.0 settings: an upgrade")
+        var s = Saved(onboarded: false, handedOver: false, arrival: arrival)
+        try expect(launch(s) == .meadowCard, "the card, not the full tour: \(launch(s))")
+        s.meadowShown = true
+        try expect(launch(s) == .nothing, "and then nothing, tour mark or not")
+        var web = Saved(onboarded: false, handedOver: false, arrival: arrival)
+        web.habitat = .web
+        try expect(launch(web) == .meadowCard, "on the Web too")
+        var tried = Saved(onboarded: false, handedOver: false, arrival: arrival)
+        tried.meadowTried = true
+        try expect(launch(tried) == .nothing, "found the Meadow already")
+        // The Sharks Web card still goes first for someone handed over.
+        let sharks = Saved(onboarded: false, handedOver: true, arrival: .before31)
+        try expect(launch(sharks) == .webCard, "handed over, never onboarded: the Web card first: \(launch(sharks))")
+        // A fresh install whose tour never reached the screen still gets the tour.
+        let fresh = Saved(onboarded: false, handedOver: false, arrival: .since31)
+        try expect(launch(fresh) == .tour, "a new user: the tour")
+    }
+    check("meadowCardForAnUpgraderWhoNeverFinishedTheTour", meadowCardForAnUpgraderWhoNeverFinishedTheTour)
+    whatsNewCardChecks()
+    cardDrawnChecks()
     check("handoverLoginItemOnlyFromAnInstalledCopy") {
         try expect(Handover.canAddLoginItem(bundlePath: "/Applications/ASCII Animals.app", onReadOnlyVolume: false), "Applications")
         try expect(Handover.canAddLoginItem(bundlePath: "/Users/x/Applications/ASCII Animals.app", onReadOnlyVolume: false), "~/Applications")
@@ -217,4 +315,459 @@ func handoverChecks() {
         try expect(!Handover.canAddLoginItem(bundlePath: "/private/var/folders/ab/T/AppTranslocation/1234/d/ASCII Animals.app", onReadOnlyVolume: false), "translocated")
         try expect(!Handover.canAddLoginItem(bundlePath: "/Users/x/repo/.build/release", onReadOnlyVolume: false), "bare binary")
     }
+}
+
+/// t9 fix round 1: the what's-new card's rules that need no screen (`WhatsNew`): when a waiting card opens and is
+/// marked, where it goes, what its preview does, and how its still is framed.
+func whatsNewCardChecks() {
+    let clear = WhatsNew.Moment(seeable: true, screens: 1, shown: false, habitat: .ocean, tried: false, welcomeUp: false,
+                                canDraw: true)
+
+    /// A launch's card driven look by look: `moments` the state at each look; `opens` whether each opening reaches
+    /// a usable display. Returns each look's step, how many times it opened and how many times it was marked.
+    func run(_ moments: [WhatsNew.Moment], opens: [Bool] = []) -> (steps: [WhatsNew.Step], opened: Int, marked: Int) {
+        var i = 0, opened = 0, marked = 0, tries = 0
+        var shown = false
+        let p = WhatsNew.Presenter(moment: {
+            var m = moments[min(i, moments.count - 1)]
+            m.shown = m.shown || shown
+            return m
+        }, open: {
+            let ok: Bool = tries < opens.count ? opens[tries] : true
+            tries += 1
+            if ok { opened += 1 }
+            return ok
+        }, mark: {
+            marked += 1
+            shown = true
+        })
+        var steps: [WhatsNew.Step] = []
+        while i < moments.count + 2 {
+            let st: WhatsNew.Step = p.look()
+            steps.append(st)
+            i += 1
+            if st != .keepWaiting { break }
+        }
+        return (steps, opened, marked)
+    }
+
+    func whatsNewOpensAtOnceWhenClear() throws {
+        let r = run([clear])
+        try expect(r.steps == [.open] && r.opened == 1 && r.marked == 1, "first look clear: opened and marked once \(r)")
+    }
+    check("whatsNewOpensAtOnceWhenClear", whatsNewOpensAtOnceWhenClear)
+
+    func whatsNewWaitsOutARelock() throws {
+        // Finding 1: locked at launch, a wake that relocks within the second spends nothing.
+        var locked = clear
+        locked.seeable = false
+        let r = run([locked, locked, clear, locked, clear, clear])
+        try expect(r.steps == [.keepWaiting, .keepWaiting, .keepWaiting, .keepWaiting, .keepWaiting, .open],
+                   "opens only after a full clear second: \(r.steps)")
+        try expect(r.opened == 1 && r.marked == 1, "once: \(r)")
+        let never = run([locked, clear, locked, clear, locked])
+        try expect(never.opened == 0 && never.marked == 0, "a screen that keeps relocking: never opened, never marked \(never)")
+    }
+    check("whatsNewWaitsOutARelock", whatsNewWaitsOutARelock)
+
+    func whatsNewMarksOnlyWhatReachedTheScreen() throws {
+        // Finding 1: an opening that didn't reach a usable display (it went at once) is not marked; it waits again.
+        let r = run([clear, clear, clear, clear], opens: [false, true])
+        try expect(r.steps == [.keepWaiting, .keepWaiting, .open], "failed, then a clear second, then open: \(r.steps)")
+        try expect(r.opened == 1 && r.marked == 1, "marked once, for the one that reached the screen: \(r)")
+        let none = run([clear, clear, clear], opens: [false, false, false, false])
+        try expect(none.marked == 0, "never reached the screen: never marked \(none)")
+    }
+    check("whatsNewMarksOnlyWhatReachedTheScreen", whatsNewMarksOnlyWhatReachedTheScreen)
+
+    func whatsNewWaitsWithNoScreens() throws {
+        var noScreens = clear
+        noScreens.screens = 0
+        try expect(WhatsNew.verdict(noScreens) == .wait, "no displays: wait")
+        let r = run([noScreens, noScreens, clear, clear])
+        try expect(r.opened == 1 && r.steps.last == .open, "a display attached: opens \(r.steps)")
+        var noRenderer = clear
+        noRenderer.canDraw = false
+        try expect(WhatsNew.verdict(noRenderer) == .drop, "nothing to draw with: a later launch")
+    }
+    check("whatsNewWaitsWithNoScreens", whatsNewWaitsWithNoScreens)
+
+    func whatsNewYieldsToTheWelcome() throws {
+        // Finding 2: the welcome from Help is up: the card waits; the welcome marks the flag: it never comes.
+        var welcome = clear
+        welcome.welcomeUp = true
+        var after = clear
+        after.shown = true
+        let r = run([welcome, welcome, after])
+        try expect(r.steps == [.keepWaiting, .keepWaiting, .stop] && r.opened == 0, "never over or after the welcome: \(r.steps)")
+        var meadow = clear
+        meadow.habitat = .meadow
+        meadow.tried = true
+        try expect(run([meadow]).steps == [.stop], "the Meadow picked meanwhile: nothing to tell")
+        let p = WhatsNew.Presenter(moment: { clear }, open: { true }, mark: {})
+        p.cancel()
+        try expect(p.look() == .stop, "cancelled (the welcome opened): no more looks")
+    }
+    check("whatsNewYieldsToTheWelcome", whatsNewYieldsToTheWelcome)
+
+    func whatsNewPlacement() throws {
+        // Finding 6. A laptop screen and a narrow one beside it, in AppKit's bottom-left coordinates.
+        let main: (frame: CGRect, visible: CGRect) = (CGRect(x: 0, y: 0, width: 1512, height: 982),
+                                                      CGRect(x: 0, y: 0, width: 1512, height: 949))
+        let narrow: (frame: CGRect, visible: CGRect) = (CGRect(x: 1512, y: 0, width: 400, height: 700),
+                                                        CGRect(x: 1512, y: 0, width: 400, height: 667))
+        let screens: [MenuBarScreen] = [MenuBarScreen(frame: main.frame, visible: main.visible),
+                                         MenuBarScreen(frame: narrow.frame, visible: narrow.visible)]
+        let icon = CGRect(x: 1298, y: 949, width: 30, height: 33)
+        let a = MenuBarIcon.place(icon: icon, screens: screens, focused: 0)
+        try expect(a?.icon == icon && a?.screen == 0, "an icon in the menu bar anchors on its screen")
+        func noArrow(_ f: CGRect?) -> Bool { MenuBarIcon.place(icon: f, screens: screens, focused: 0)?.icon == nil }
+        try expect(noArrow(CGRect(x: 5000, y: 949, width: 30, height: 33)), "a stale frame on no screen: the top-right fallback")
+        try expect(noArrow(CGRect(x: 1298, y: 400, width: 30, height: 33)), "a frame inside the visible frame (not in the menu bar): the fallback")
+        try expect(noArrow(CGRect(x: 1298, y: 949, width: 0, height: 0)), "a zero-size frame: the fallback")
+        try expect(noArrow(nil), "hidden: the fallback")
+
+        for v in [main.visible, narrow.visible, CGRect(x: 0, y: 0, width: 300, height: 200)] {
+            let w: CGFloat = WhatsNew.width(visible: v)
+            let room: CGFloat = v.width - 16
+            try expect(w <= WhatsNew.width && w <= room + 0.001, "width \(w) fits \(v.width)")
+            let size = CGSize(width: w, height: 333)
+            let top = WhatsNew.placement(size: size, icon: nil, visible: v)
+            try expect(top.arrowX == nil, "the fallback has no arrow")
+            try expect(top.frame.minX >= v.minX && top.frame.maxX <= v.maxX, "fallback inside \(v): \(top.frame)")
+            try expect(top.frame.minY >= v.minY, "never below the screen: \(top.frame)")
+            if v.height >= 333 + 10 { try expect(top.frame.maxY <= v.maxY, "under the top: \(top.frame)") }
+        }
+        try expect(WhatsNew.width(visible: main.visible) == WhatsNew.width, "the design's width where it fits")
+        try expect(WhatsNew.width(visible: narrow.visible) == 384, "a 400 pt screen: 384")
+        let fallback = WhatsNew.placement(size: CGSize(width: 460, height: 333), icon: nil, visible: main.visible)
+        let right: CGFloat = main.visible.maxX - fallback.frame.maxX
+        let below: CGFloat = main.visible.maxY - fallback.frame.maxY
+        try expect(right == 12 && below == 10, "the fallback: 12 pt from the right, 10 pt from the top \(fallback.frame)")
+        let under = WhatsNew.placement(size: CGSize(width: 460, height: 333), icon: icon, visible: main.visible)
+        let belowIcon: Bool = under.frame.maxY <= icon.minY
+        let onScreen: Bool = under.frame.minX >= main.visible.minX && under.frame.maxX <= main.visible.maxX
+        try expect(belowIcon && onScreen, "under the icon, inside the screen \(under.frame)")
+        if let x = under.arrowX {
+            let off: CGFloat = under.frame.minX + x - icon.midX
+            try expect(abs(off) < 0.5, "the arrow points at the icon")
+        } else {
+            try expect(false, "an arrow under the icon")
+        }
+    }
+    check("whatsNewPlacement", whatsNewPlacement)
+
+    func whatsNewPreviewFollowsTheMachine() throws {
+        // Finding 4.
+        let calm = PowerInputs()
+        try expect(WhatsNew.preview(calm) == .live, "live")
+        var low = calm
+        low.lowPowerMode = true
+        try expect(WhatsNew.preview(low) == .still, "Low Power Mode: a still")
+        low.lowPowerAnimates = true
+        try expect(WhatsNew.preview(low) == .live, "Low Power Mode, kept animating in Settings: live")
+        var hot = calm
+        hot.thermal = .critical
+        try expect(WhatsNew.preview(hot) == .still, "too hot: a still")
+        let hidden: [(String, (inout PowerInputs) -> Void)] = [
+            ("locked", { $0.screenLocked = true }), ("displays asleep", { $0.displaysAsleep = true }),
+            ("screensaver", { $0.screensaverRunning = true }), ("another session", { $0.sessionActive = false }),
+        ]
+        for (what, change) in hidden {
+            var i = calm
+            change(&i)
+            try expect(WhatsNew.preview(i) == .stopped, "\(what): stops drawing")
+            i.lowPowerMode = true
+            try expect(WhatsNew.preview(i) == .stopped, "\(what) in Low Power Mode: stops drawing")
+        }
+        var paused = calm
+        paused.userPaused = true
+        paused.anyWindowVisible = false
+        try expect(WhatsNew.preview(paused) == .live, "a paused or covered desktop doesn't stop a card being read")
+    }
+    check("whatsNewPreviewFollowsTheMachine", whatsNewPreviewFollowsTheMachine)
+
+    func whatsNewStillFramesAButterflyAndABloom() throws {
+        // Finding 7: for each line-up, a whole butterfly with open wings, most of a bloom, no other butterfly cut,
+        // at the live preview's own cell size.
+        let preview = CGSize(width: WhatsNew.width - 32, height: 150)
+        let area: CGSize = WhatsNew.stillArea(preview)
+        let cell: CGSize = GridSpec.cell(forWidth: area.width)
+        try expect(cell == GridSpec.cell(forWidth: preview.width), "the still's cell is the live preview's: \(cell)")
+        let narrow = CGSize(width: 384 - 32, height: 150)
+        try expect(GridSpec.cell(forWidth: WhatsNew.stillArea(narrow).width) == GridSpec.cell(forWidth: narrow.width),
+                   "on a narrow screen too")
+        let started = Date()
+        for lineUp in MeadowLineUp.all {
+            var s = Settings.defaults
+            lineUp.apply(to: &s)
+            s.habitat = .meadow
+            guard let pick = WhatsNew.stillFrame(s, preview: preview, cell: cell) else {
+                try expect(false, "\(lineUp.title): a frame")
+                continue
+            }
+            let f = pick.frame
+            let c: CGRect = f.crop
+            let inMeadow: Bool = c.minX >= 0 && c.minY >= 0 && c.maxX <= area.width && c.maxY <= area.height
+            try expect(inMeadow, "\(lineUp.title): inside the meadow \(c)")
+            try expect(c.size == preview, "\(lineUp.title): the preview's size")
+            try expect(f.cut == 0, "\(lineUp.title): no butterfly cut at the edge (\(f.cut))")
+            try expect(f.kind != .white || lineUp.butterflies == [.white], "\(lineUp.title): a bold butterfly, not the pale white (\(f.kind.name))")
+            // Check the frame against the world itself, laid out again from its seed.
+            let world: MeadowWorld = WhatsNew.stillWorld(s, seed: pick.seed, area: area, cell: cell)
+            guard let b = world.flies.first(where: { $0.id == f.butterfly }) else {
+                try expect(false, "\(lineUp.title): its butterfly is there again")
+                continue
+            }
+            let e = WhatsNew.extent(b, in: world)
+            let cx0: Double = Double(c.minX), cx1: Double = Double(c.maxX), cy0: Double = Double(c.minY), cy1: Double = Double(c.maxY)
+            let wholeAcross: Bool = b.x - e.x >= cx0 && b.x + e.x <= cx1
+            let wholeDown: Bool = b.y - e.y >= cy0 && b.y + e.y <= cy1
+            try expect(wholeAcross && wholeDown, "\(lineUp.title): the \(b.sp.kind.name) whole in the crop")
+            try expect(WhatsNew.openness(b) >= 0.6, "\(lineUp.title): wings open (\(WhatsNew.openness(b)))")
+            let bloom: Bool = world.flowers.all.contains { fl in
+                let r: Double = fl.radius * 1.12 * 0.6
+                let x: Double = fl.x + fl.ox, y: Double = fl.y + fl.oy
+                let across: Bool = x - r >= cx0 && x + r <= cx1
+                let down: Bool = y - r >= cy0 && y + r <= cy1
+                return !fl.fading && across && down
+            }
+            try expect(bloom, "\(lineUp.title): most of a bloom in the crop")
+            print("    \(lineUp.title): seed \(pick.seed), a \(f.kind.name), \(f.flowersInside) whole blooms, \(f.cutBlooms) cut")
+        }
+        let took: Double = Date().timeIntervalSince(started)
+        print("    three line-ups framed in \(String(format: "%.2f", took)) s")
+    }
+    check("whatsNewStillFramesAButterflyAndABloom", whatsNewStillFramesAButterflyAndABloom)
+}
+
+/// t11: the live preview's evidence (the card's drawn check and why it went, `EnergyLog.cardDrawn`, `cardClosed`) and
+/// the test copy's readings in the run loop's common modes (`CommonTimer`), so an open menu no longer pauses them.
+func cardDrawnChecks() {
+    let root: URL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    func source(_ path: String) -> String {
+        (try? String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)) ?? ""
+    }
+
+    func cardDrawnLogShapes() throws {
+        // energy.sh's selftest parses these exact lines; a change here must change it too.
+        let drawn: String = EnergyLog.cardDrawn(pid: 501, launch: "0a1b2c3d4e5f6789", share: 0.97666, width: 460, height: 333)
+        try expect(drawn == "energy-card: pid=501 launch=0a1b2c3d4e5f6789 drawn=0.977 size=460x333", drawn)
+        let empty: String = EnergyLog.cardDrawn(pid: 501, launch: nil, share: 0, width: 460, height: 333)
+        try expect(empty == "energy-card: pid=501 launch=none drawn=0.000 size=460x333", empty)
+        let wild: String = EnergyLog.cardDrawn(pid: 501, launch: nil, share: Double.nan, width: 1, height: 1)
+        try expect(wild.contains(" drawn=0.000 "), "a share that is not a number logs as 0: \(wild)")
+        let over: String = EnergyLog.cardDrawn(pid: 501, launch: nil, share: 1.5, width: 1, height: 1)
+        try expect(over.contains(" drawn=1.000 "), "a share over 1 logs as 1: \(over)")
+        let closed: String = EnergyLog.cardClosed(pid: 501, launch: "0a1b2c3d4e5f6789", reason: .timeout, after: 20.4)
+        try expect(closed == "energy-card: pid=501 launch=0a1b2c3d4e5f6789 closed=timeout after=20s", closed)
+        let reasons: [String] = WhatsNew.CloseReason.allCases.map { (r: WhatsNew.CloseReason) -> String in r.rawValue }
+        let wordy: Bool = reasons.allSatisfy { (r: String) -> Bool in
+            !r.isEmpty && r.unicodeScalars.allSatisfy { (c: Unicode.Scalar) -> Bool in (c >= "a" && c <= "z") || c == "-" }
+        }
+        try expect(wordy && Set(reasons).count == reasons.count, "close reasons are distinct lowercase words: \(reasons)")
+        let energy: String = source("Tools/energy.sh")
+        try expect(energy.contains("drawn=0.977 size=460x333") && energy.contains("closed=timeout after=20s"),
+                   "energy.sh's selftest uses the same drawn and closed shapes")
+    }
+    check("cardDrawnLogShapes", cardDrawnLogShapes)
+
+    func cardDrawnShare() throws {
+        let clear: [UInt8] = [UInt8](repeating: 0, count: 4 * 100)
+        try expect(WhatsNew.drawnShare(rgba: clear) == 0, "a transparent bitmap: nothing drawn")
+        try expect(WhatsNew.drawnShare(rgba: []) == 0, "an empty bitmap: nothing drawn")
+        var quarter: [UInt8] = clear
+        for i in 0..<25 { quarter[i * 4 + 3] = 255 }
+        try expect(WhatsNew.drawnShare(rgba: quarter) == 0.25, "a quarter opaque: \(WhatsNew.drawnShare(rgba: quarter))")
+        var faint: [UInt8] = clear
+        for i in 0..<100 { faint[i * 4 + 3] = 8 }
+        try expect(WhatsNew.drawnShare(rgba: faint) == 0, "alpha at the threshold (8 of 255) does not count")
+        var colourOnly: [UInt8] = clear
+        for i in 0..<100 { colourOnly[i * 4] = 255; colourOnly[i * 4 + 1] = 255 }
+        try expect(WhatsNew.drawnShare(rgba: colourOnly) == 0, "colour with no alpha is not drawn")
+    }
+    check("cardDrawnShare", cardDrawnShare)
+
+    func cardPreviewWiring() throws {
+        let card: String = source("Sources/ASCIIAnimals/WhatsNewCard.swift")
+        try expect(card.contains("if preview { watchPreview(session) }"), "the live preview measures and watches the card it opened")
+        try expect(card.contains("EnergyLog.cardDrawn(pid: pid, launch: launch"), "the preview logs the drawn line with its launch id")
+        try expect(card.contains("EnergyLog.cardClosed(pid: pid, launch: launch"), "the preview logs why the card went")
+        // Every way the card goes names its reason (the probe's and a failed opening's teardown need none).
+        let reasons: [String] = ["reason: .timeout", "reason: .close", "reason: .screens", "reason: .esc", "reason: .meadow",
+                                 "reason: .tryMeadow", "reason: .keep", "reason: .welcome"]
+        for r in reasons { try expect(card.contains(r), "a close with \(r)") }
+        // Fix round 1: a click elsewhere no longer closes it.
+        try expect(!card.contains("addGlobalMonitorForEvents"), "no global click monitor on the card")
+        let energy: String = source("Tools/energy.sh")
+        try expect(energy.contains("launch_test 0 1 0 preview bg") && energy.contains("exec open ${5:+-g} "),
+                   "the preview opens the test copy in the background (the director answers without a click)")
+        try expect(energy.contains("card_drawn_check \"$APPLOG\" \"$TEST_PID\" \"$LAUNCH_ID\""), "the preview checks the drawn line before asking")
+    }
+    check("cardPreviewWiring", cardPreviewWiring)
+
+    func readingTimerCommonModes() throws {
+        // A stand-in for AppKit's event-tracking mode (a menu open): a mode of its own, made common.
+        let loop: RunLoop = RunLoop.current
+        let tracking = RunLoop.Mode("OceanChecks.tracking")
+        CFRunLoopAddCommonMode(loop.getCFRunLoop(), CFRunLoopMode(tracking.rawValue as CFString))
+        var common = 0, plain = 0
+        let a: Timer = CommonTimer.repeating(every: 0.01, on: loop) { (_: Timer) in common += 1 }
+        let b = Timer(timeInterval: 0.01, repeats: true) { (_: Timer) in plain += 1 }
+        loop.add(b, forMode: .default)
+        let until: Date = Date().addingTimeInterval(0.2)
+        while Date() < until { _ = loop.run(mode: tracking, before: until) }
+        a.invalidate()
+        b.invalidate()
+        try expect(common >= 3, "a common-mode timer fires while the loop tracks (\(common) times)")
+        try expect(plain == 0, "a default-mode timer waits while the loop tracks (\(plain) times): the old gap")
+        let app: String = source("Sources/ASCIIAnimals/main.swift")
+        try expect(app.contains("frameMeter = CommonTimer.repeating(every: 5)"), "the test copy's readings use the common modes")
+    }
+    check("readingTimerCommonModes", readingTimerCommonModes)
+    cardLifetimeChecks()
+}
+
+/// t11 fix round 1: the card's 20 s on screen, its return after 3 h of awake time (at most three showings), and where
+/// it and the welcome go: the screen in focus, an arrow only to an icon really showing there (never behind a notch).
+func cardLifetimeChecks() {
+    func cardCountdown() throws {
+        var c = WhatsNew.Countdown()
+        try expect(c.fraction == 1 && !c.expired, "starts full")
+        // A fake clock: 30 ticks a second.
+        func run(_ seconds: Double, paused: Bool = false) {
+            let ticks: Int = Int((seconds * 30).rounded())
+            for _ in 0..<ticks { c.advance(by: 1.0 / 30, paused: paused) }
+        }
+        run(10)
+        try expect(abs(c.remaining - 10) < 0.01 && abs(c.fraction - 0.5) < 0.001, "half way at 10 s (\(c.remaining))")
+        run(120, paused: true)
+        try expect(abs(c.remaining - 10) < 0.01, "the pointer over it: paused (\(c.remaining))")
+        c.advance(by: 3600, paused: false)
+        try expect(abs(c.remaining - 9.75) < 0.001, "a stall (a sleep) takes a quarter second at most (\(c.remaining))")
+        c.advance(by: -5, paused: false)
+        c.advance(by: Double.nan, paused: false)
+        try expect(abs(c.remaining - 9.75) < 0.001, "negative or not a number: nothing")
+        run(9.7)
+        try expect(!c.expired, "not yet")
+        run(0.1)
+        try expect(c.expired && c.fraction == 0, "20 s untouched: run out")
+    }
+    check("cardCountdown", cardCountdown)
+
+    func cardShowingsReturn() throws {
+        var s = WhatsNew.Showings()
+        try expect(s.due && !s.finished, "never shown: due")
+        s.shown()
+        try expect(!s.due && s.count == 1, "up: not due again")
+        s.closed(.timeout)
+        try expect(!s.due && !s.finished, "unanswered: waits")
+        // A fake clock: an awake, unlocked minute at a time.
+        for _ in 0..<179 { s.accrue(60, seeable: true) }
+        try expect(!s.due, "2 h 59 min: not yet (\(s.awake))")
+        s.accrue(8 * 3600, seeable: false)
+        try expect(!s.due, "locked, asleep or the screensaver: not counted")
+        s.accrue(8 * 3600, seeable: true)
+        try expect(abs(s.awake - 3 * 3600) < 0.001 && s.due, "a step spanning a sleep counts one minute at most; 3 h: back")
+        s.shown()
+        try expect(s.awake == 0 && s.count == 2, "the second showing starts the count again")
+        s.closed(.screens)
+        try expect(!s.due && !s.finished, "the displays changed: unanswered, it comes back")
+        for _ in 0..<180 { s.accrue(60, seeable: true) }
+        s.shown()
+        s.closed(.timeout)
+        for _ in 0..<600 { s.accrue(60, seeable: true) }
+        try expect(s.count == 3 && s.finished && !s.due, "three showings unanswered: never again")
+        let answers: [WhatsNew.CloseReason] = [.tryMeadow, .keep, .esc, .close, .meadow]
+        for r in answers {
+            var a = WhatsNew.Showings()
+            a.shown()
+            a.closed(r)
+            for _ in 0..<600 { a.accrue(60, seeable: true) }
+            try expect(a.finished && !a.due, "\(r.rawValue): never again")
+        }
+        let unanswered: [WhatsNew.CloseReason] = WhatsNew.CloseReason.allCases.filter { (r: WhatsNew.CloseReason) -> Bool in !answers.contains(r) }
+        try expect(unanswered == [.timeout, .screens, .welcome], "only a timeout, a display change or the welcome come back: \(unanswered)")
+        var never = WhatsNew.Showings()
+        never.accrue(10 * 3600, seeable: true)
+        try expect(never.awake == 0 && never.due, "nothing counts before the first showing")
+    }
+    check("cardShowingsReturn", cardShowingsReturn)
+
+    func cardShowingsSaved() throws {
+        var s = WhatsNew.Showings()
+        s.shown()
+        s.closed(.timeout)
+        s.accrue(600, seeable: true)
+        let back: WhatsNew.Showings = WhatsNew.Showings.load(s.encoded(), legacyShown: false)
+        try expect(back == s, "saved and read back across a relaunch: \(back)")
+        try expect(WhatsNew.Showings.load(nil, legacyShown: false) == WhatsNew.Showings(), "nothing saved: fresh, due")
+        try expect(WhatsNew.Showings.load(Data("junk".utf8), legacyShown: false) == WhatsNew.Showings(), "junk: fresh")
+        try expect(WhatsNew.Showings.load(nil, legacyShown: true).finished, "the old flag (the tour seen, t9's card): ended")
+        let bad = Data(#"{"count":-4,"ended":false,"awake":-7}"#.utf8)
+        let fixed: WhatsNew.Showings = WhatsNew.Showings.load(bad, legacyShown: false)
+        try expect(fixed.count == 0 && fixed.awake == 0, "negative values read as none: \(fixed)")
+        try expect(Handover.meadowShowingsKey != Handover.meadowCardKey, "a key of its own")
+        // The launch decision reads "finished", so an unanswered card still waiting starts its clock each launch.
+        func welcome(_ finished: Bool) -> LaunchWelcome {
+            Handover.launchWelcome(onboarded: true, handedOver: false, webCardShown: true, habitat: .ocean, arrival: .before31,
+                                   meadowCardShown: finished, meadowTried: false)
+        }
+        try expect(welcome(false) == .meadowCard && welcome(true) == .nothing, "launch: the card waits until finished")
+    }
+    check("cardShowingsSaved", cardShowingsSaved)
+
+    // A MacBook with a notch (the built-in, main) and a monitor above it, as the director's office desk.
+    let laptop = MenuBarScreen(frame: CGRect(x: 0, y: 0, width: 1800, height: 1169),
+                               visible: CGRect(x: 0, y: 0, width: 1800, height: 1130),
+                               besideNotch: [CGRect(x: 0, y: 1131, width: 790, height: 38),
+                                             CGRect(x: 1010, y: 1131, width: 790, height: 38)])
+    let monitor = MenuBarScreen(frame: CGRect(x: -375, y: 1169, width: 2560, height: 1440),
+                                visible: CGRect(x: -375, y: 1169, width: 2560, height: 1415))
+
+    func cardNotchHidesTheIcon() throws {
+        let clear = CGRect(x: 1389, y: 1131, width: 30, height: 38)
+        try expect(MenuBarIcon.usable(clear, on: laptop) == clear, "right of the notch: pointed at")
+        let behind = CGRect(x: 880, y: 1131, width: 30, height: 38)
+        try expect(MenuBarIcon.usable(behind, on: laptop) == nil, "behind the notch (a crowded menu bar): hidden, no arrow")
+        let straddle = CGRect(x: 995, y: 1131, width: 30, height: 38)
+        try expect(MenuBarIcon.usable(straddle, on: laptop) == nil, "half under the notch's edge: hidden")
+        let left = CGRect(x: 600, y: 1131, width: 30, height: 38)
+        try expect(MenuBarIcon.usable(left, on: laptop) == left, "left of the notch (beside the app menus): pointed at")
+        let noNotch = MenuBarScreen(frame: laptop.frame, visible: laptop.visible)
+        try expect(MenuBarIcon.usable(behind, on: noNotch) == behind, "the same place on a display without a notch: pointed at")
+        // AppKit's notch areas in the screen's own space on a display that isn't at the origin: moved onto it.
+        let side = MenuBarScreen(frame: CGRect(x: 2560, y: 0, width: 1512, height: 982),
+                                 visible: CGRect(x: 2560, y: 0, width: 1512, height: 944),
+                                 besideNotch: [CGRect(x: 0, y: 945, width: 660, height: 37),
+                                               CGRect(x: 852, y: 945, width: 660, height: 37)])
+        try expect(side.besideNotch.first?.minX == 2560, "local notch areas moved to global: \(side.besideNotch)")
+        try expect(MenuBarIcon.usable(CGRect(x: 2560 + 740, y: 945, width: 30, height: 37), on: side) == nil, "behind that notch: hidden")
+        try expect(MenuBarIcon.usable(CGRect(x: 2560 + 1200, y: 945, width: 30, height: 37), on: side) != nil, "beside it: pointed at")
+        try expect(MenuBarScreen(frame: laptop.frame, visible: laptop.visible, besideNotch: [.zero, .null]).besideNotch.isEmpty,
+                   "empty areas mean no notch")
+    }
+    check("cardNotchHidesTheIcon", cardNotchHidesTheIcon)
+
+    func cardAndWelcomeOnTheScreenInFocus() throws {
+        let screens: [MenuBarScreen] = [laptop, monitor]
+        let onLaptop = CGRect(x: 1389, y: 1131, width: 30, height: 38)
+        let onMonitor = CGRect(x: 1700, y: 2585, width: 30, height: 24)
+        let a = MenuBarIcon.place(icon: onMonitor, screens: screens, focused: 1)
+        try expect(a?.screen == 1 && a?.icon == onMonitor, "working on the monitor, the fish there: on the monitor, arrow to it")
+        let b = MenuBarIcon.place(icon: onLaptop, screens: screens, focused: 1)
+        try expect(b?.screen == 1 && b?.icon == nil, "working on the monitor, the fish on the laptop: the monitor, top right, no arrow")
+        let c = MenuBarIcon.place(icon: onLaptop, screens: screens, focused: 0)
+        try expect(c?.screen == 0 && c?.icon == onLaptop, "working on the laptop: the laptop, arrow to the fish")
+        let d = MenuBarIcon.place(icon: CGRect(x: 880, y: 1131, width: 30, height: 38), screens: screens, focused: 0)
+        try expect(d?.screen == 0 && d?.icon == nil, "the fish behind the laptop's notch: no arrow (the welcome's hidden-icon words)")
+        try expect(MenuBarIcon.place(icon: onLaptop, screens: screens, focused: nil)?.screen == 0, "no screen in focus known: the first")
+        try expect(MenuBarIcon.place(icon: onLaptop, screens: screens, focused: 7)?.screen == 0, "a stale index: the first")
+        try expect(MenuBarIcon.place(icon: onLaptop, screens: [], focused: 0) == nil, "no screens: nowhere")
+        let source: String = (try? String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("ASCIIAnimals/OnboardingController.swift"), encoding: .utf8)) ?? ""
+        try expect(source.contains("MenuBarIcon.place(icon: icon, screens: bars, focused: focused)"),
+                   "the welcome takes its screen and icon from the same rule")
+    }
+    check("cardAndWelcomeOnTheScreenInFocus", cardAndWelcomeOnTheScreenInFocus)
 }
