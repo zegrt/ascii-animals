@@ -50,7 +50,7 @@ Last approved state: tag `v3.0.1`.
 | Meadow, card, welcome, energy (t11 stack) | meadow-t11 @ 20cdb3c | approved (review-t11-r3 @ b03d17f); live card look at the join |
 | Pointer input (r1b) | meadow-r1b @ afa861f | approved (review-r1b-r2 @ d158c7c); banner re-test with the director |
 | Updates, settings, diagnostics (r3) | meadow-r3 @ 655e787 | approved 2026-11-27 (privacy re-check review-r3-r3 @ 8ade43f; 314 checks, selftest 0 failed). The log starts fresh on a format change, not every version (the director: "ok go", 2026-11-27) |
-| Wallpaper recovery (r2) | meadow-r2 @ 59e16bb | fix round done (proof b6e63da fails 4 on 9e3a466; fix: restore.json kept with the kept stills, Sharks stills put back after its uninstaller; 299 checks, selftest 0 failed; pushed). In its one data-loss re-check (review-r2-r3) |
+| Wallpaper recovery (r2) | meadow-r2 @ 59e16bb | re-check review-r2-r3 @ 26fbe17: findings 1 and 3 fixed; 2 open on one path (Sharks running at the hand-over: its quit forgets the shown display's original before Animals copies its memory, so a hidden Space on a Sharks still keeps it; since 3.0). pending: a second fix round breaks the working rule, asked director; recommended: copy Sharks' memory before asking it to quit, check failing first, a re-check of that alone |
 
 Trial join (2026-11-25, scratch only, on t11 20cdb3c + r1b afa861f + r3 633a682 + r2 d9e05a0): one conflict
 (`Sources/OceanChecks/main.swift`, `greetingChecks()` and `pointerChecks()`, keep both); build passes, 334 checks,
@@ -94,6 +94,9 @@ Steps 3-5 wait for the director's go.
 - r2 rebuild review (review-r2-r2 @ 08884b3), none in normal use: a 3.0 still named for one display but shown on
   another restores that display's original; a Space switch mid-render can show the planned file before it is
   replaced; with the restore table already lost, a still stays in place.
+- r2 re-check (review-r2-r3 @ 26fbe17), none in normal use: with blocked paths, staging the Sharks stills can fail
+  open or a put-back can leave the old file missing, its backup replaceable by a second hand-over and read as a 3.0
+  still; a rollback to 3.0 lets old settings mask the newer file table.
 - r2 finding 4 (a force quit between saving the original and setting the still), if the rebuild leaves it.
 - r3 finding 7 (cleanup on the main thread after the split).
 - r3 privacy re-check (review-r3-r3 @ 8ade43f), none in normal use: a rollback to 3.0 and back can admit old-format
