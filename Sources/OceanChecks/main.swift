@@ -41,4 +41,3 @@ if ProcessInfo.processInfo.environment["OCEAN_SKIP_GPU"] == nil {
 
 print("\(Runner.passed) passed, \(Runner.failed) failed")
 exit(Runner.failed == 0 ? 0 : 1)
-
