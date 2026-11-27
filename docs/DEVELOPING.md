@@ -69,7 +69,7 @@ The **Meadow** is drawn the same way as the Web. It was designed first as a sket
 
 **Web reference tooling.** [`Tools/web-reference/`](../Tools/web-reference) runs the original ascii-spiders under node with the port's seeded random stream, producing the reference numbers `OceanChecks` compares the port against, plus a side-by-side parity page for Chrome. Its README has the steps.
 
-**Updates** come from GitHub's `releases/latest`. The app downloads `ASCII-Animals.zip` (a mounted DMG can't be read by an app without a permission prompt), checks GitHub's SHA-256, the bundle identifier and version and the code signature, then swaps itself in with one atomic rename and restarts.
+**Updates** come from GitHub's `releases/latest`. The app downloads `ASCII-Animals.zip` (a mounted DMG can't be read by an app without a permission prompt), checks GitHub's SHA-256, the bundle identifier and version and the code signature, then swaps itself in with one atomic rename and restarts. An automatic update waits while the app is in use (Settings open, focused or not, a menu open, the welcome or the what's-new card up) and looks again right before the swap; a failed or unreadable check is retried within the hour and never reads as "up to date"; if the new copy can't be started, the old one keeps running and says so.
 
 ## Energy
 
@@ -111,7 +111,7 @@ Memory here is the app's footprint as `top` reports it; most of it is the displa
 
 - **Spaces:** macOS changes wallpapers one Space at a time and gives apps no way to identify Spaces. So the matching still goes on the Space where the app starts. Wallpapers it doesn't recognise are never touched, and only what it set is restored.
 - **Aerial and dynamic wallpapers** come back as whatever image macOS reports for them.
-- **Signing:** the app is signed ad hoc, not with a Developer ID. That's why macOS asks for Open Anyway the first time.
+- **Signing:** the app is signed ad hoc, not with a Developer ID. That's why macOS asks for Open Anyway the first time. It also limits what a self-update can prove: the checksum comes from the same GitHub release as the download, and an ad hoc signature shows the app is intact, not who made it. So an update is as trustworthy as the GitHub repository and its releases; it is not separately authenticated as ours. Developer ID signing (or a separately signed release manifest) would close that, and is not planned for 3.1.
 - **On the list:** a screensaver edition.
 
 The design and its review are in [`plans/`](plans).

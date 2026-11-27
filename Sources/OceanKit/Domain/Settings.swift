@@ -56,8 +56,9 @@ public struct Settings: Codable, Equatable, Sendable {
         var s = self
         s.fishDensity = min(2.0, max(0.5, fishDensity.isFinite ? fishDensity : 1))
         s.speed = min(1.5, max(0.5, speed.isFinite ? speed : 1))
-        // Nearest option; ties go up.
-        s.fps = Settings.fpsOptions.min { abs($0 - fps) < abs($1 - fps) || (abs($0 - fps) == abs($1 - fps) && $0 > $1) }!
+        // Nearest option; ties go up. Clamped first, so a stored extreme can't overflow the subtraction.
+        let f: Int = min(1000, max(0, fps))
+        s.fps = Settings.fpsOptions.min { abs($0 - f) < abs($1 - f) || (abs($0 - f) == abs($1 - f) && $0 > $1) }!
         s.sharks = Array(sharks.prefix(Settings.maxSharks))
         if s.sharks.isEmpty { s.sharks = Settings.defaults.sharks }
         s.webSpiders = Array(webSpiders.prefix(Settings.maxSpiders))
