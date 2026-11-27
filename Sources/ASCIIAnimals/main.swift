@@ -7,6 +7,8 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Lazy: the hand-over imports ASCII Sharks' settings first, then the store loads them.
     lazy var store = SettingsStore()
+    /// How this person came to 3.1 (`Arrival`): decided at launch, after the hand-over.
+    var arrival: Arrival = .since31
     let signals = SystemSignals()
     var director: OceanDirector?
     var wallpaper: SystemWallpaper?
@@ -29,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         SharksHandover.run(app: self)
+        arrival = SettingsStore.decideArrival()
         SharksHandover.watch()
         crashedLastTime = CrashMarker.launch()
         Log.write("launch \(AppInfo.version) (\(AppInfo.build))\(crashedLastTime ? " after an unclean exit" : "")")
@@ -40,7 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let wp = SystemWallpaper(renderer: renderer)
             wallpaper = wp
             d.onLooksSettled = { [weak self] in self?.refreshSystemWallpaper(delay: 1) }
-            signals.onChange = { [weak d] inputs in d?.apply(PowerPolicy.mode(inputs)) }
+            signals.onChange = { [weak d] inputs in
+                d?.apply(PowerPolicy.mode(inputs))
+                WhatsNewCard.powerChanged(inputs)
+            }
             store.onChange = { [weak self] old, new in self?.settingsChanged(old, new) }
             let nc = NotificationCenter.default
             observers.append(nc.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
@@ -97,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func settingsChanged(_ old: OceanKit.Settings, _ new: OceanKit.Settings) {
         director?.settingsChanged(old: old, new: new)
+        WhatsNewCard.settingsChanged(new)
         settingsModel.refresh()
         menu?.apply(new)
         if old.pauseShortcut != new.pauseShortcut { hotKey.setEnabled(new.pauseShortcut) }
@@ -179,8 +186,13 @@ if CommandLine.arguments.contains("--uninstall") {
     exit(0)
 }
 
-// Debug: render the welcome or About screen to a PNG and exit.
-for (flag, render) in [("--snapshot-onboarding", OnboardingController.snapshot(to:)), ("--snapshot-about", AboutWindow.snapshot(to:))] {
+// Debug: render the welcome, the what's-new card or About to a PNG, or write the menu's outline, and exit.
+let snapshots: [(String, (URL) -> Void)] = [("--snapshot-onboarding", OnboardingController.snapshot(to:)),
+                                            ("--snapshot-whatsnew", WhatsNewCard.snapshot(to:)),
+                                            ("--snapshot-whatsnew-probe", WhatsNewCard.probe(to:)),
+                                            ("--snapshot-about", AboutWindow.snapshot(to:)),
+                                            ("--snapshot-menu", StatusMenu.snapshot(to:))]
+for (flag, render) in snapshots {
     if let i = CommandLine.arguments.firstIndex(of: flag), i + 1 < CommandLine.arguments.count {
         app.setActivationPolicy(.prohibited)
         render(URL(fileURLWithPath: CommandLine.arguments[i + 1]))

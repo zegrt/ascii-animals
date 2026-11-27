@@ -96,7 +96,7 @@ final class AboutController: NSObject, NSWindowDelegate {
         if let ocean {
             // The habitat or line-up may have changed since the window was made.
             ocean.setTheme(OceanDirector.currentTheme(s))
-            ocean.rebuild(s)
+            ocean.rebuild(s, reopening: true)
             ocean.start()
         }
         model.checking = app.updates.state == .checking
