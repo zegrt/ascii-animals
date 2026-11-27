@@ -55,10 +55,10 @@ Last approved state: tag `v3.0.1`.
 ## Next, in order
 
 All four parts approved 2026-11-27. Go for the join: the director's "ok", 2026-11-27.
-3. The join: `meadow-3.1` @ b763f6a (merges a90d5f6 r1b, keeping both check calls; fc74544 r3; 8e3434c r2; b763f6a
-   drops two blank lines at file ends); 354 checks, selftest 0 failed; draft PR #10 for CI; in review (review-join,
-   the merge only).
-4. Copy, with the director's OK: briefs/copy-unslop.patch (the director's /unslop, 29 lines in 10 files, made on the
+3. The join: `meadow-3.1` @ b763f6a, approved 2026-11-27 (review-join @ 2f93435; 354 checks, selftest 0 failed);
+   draft PR #10, CI running.
+4. Copy, with the director's OK (trial on the join: the patch applies, its two uninstall hunks dropped for r2's
+   sentence; 354 checks pass; the README, CHANGELOG and uninstall wording asked of the director): briefs/copy-unslop.patch (the director's /unslop, 29 lines in 10 files, made on the
    trial join; re-apply after r2 and r3 change their files) plus three README/CHANGELOG fixes (the card "once": an
    unanswered card can come back twice; "deletes everything it saved": uninstall can keep the stills folder, also the uninstall confirmation's "saved stills" and the menu tooltip "everything it saved" (r2 report, Noticed); the
    battery claim: Meadow's WindowServer 29.7 % vs Web's 26.3 %).
