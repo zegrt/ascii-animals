@@ -10,7 +10,7 @@ enum Uninstaller {
         NSApp.activate(ignoringOtherApps: true)
         let a = NSAlert()
         a.messageText = "Uninstall ASCII Animals?"
-        a.informativeText = "Your own wallpaper comes back, and ASCII Animals removes its settings, saved stills, logs and login item, then moves itself to the Trash."
+        a.informativeText = "Your own wallpaper comes back, and ASCII Animals removes its settings, logs and login item, then moves itself to the Trash."
         a.alertStyle = .warning
         a.addButton(withTitle: "Uninstall")
         a.addButton(withTitle: "Cancel")

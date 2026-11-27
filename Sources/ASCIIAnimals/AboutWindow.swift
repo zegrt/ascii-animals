@@ -243,9 +243,9 @@ struct AboutView: View {
     /// The live strip's accessibility label: what it shows, and what the pointer does there.
     static func stripLabel(_ habitat: HabitatKind) -> String {
         switch habitat {
-        case .ocean: return "A live ocean: move the pointer over it, or click for a splash"
-        case .web: return "A live web: move the pointer over it, or click to drop a fly"
-        case .meadow: return "A live meadow: move the pointer over it, or click to bloom a flower"
+        case .ocean: return "A live ocean. Move the pointer over it, or click for a splash"
+        case .web: return "A live web. Move the pointer over it, or click to drop a fly"
+        case .meadow: return "A live meadow. Move the pointer over it, or click to bloom a flower"
         }
     }
 }

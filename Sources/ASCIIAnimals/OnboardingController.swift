@@ -205,7 +205,7 @@ enum OnboardingBeat: Int, CaseIterable {
             return web ? "Orb weavers spin, flies wander, and all of it is drawn in text."
                        : "Sharks hunt, fish school, and all of it is drawn in text."
         case .pointer:
-            if meadow { return "The air stirs: the flowers sway and the butterflies veer." }
+            if meadow { return "The air stirs. The flowers sway and the butterflies veer." }
             return web ? "The silk rings, and the spiders turn toward it." : "The fish scatter out of its way."
         case .splash:
             if meadow { return "Anywhere on the meadow." }

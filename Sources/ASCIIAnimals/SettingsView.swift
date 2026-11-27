@@ -156,7 +156,7 @@ private struct PreviewHeader: View {
                     .frame(width: 8, height: 8)
                     .accessibilityHidden(true)
                 Text(model.status.title).fontWeight(.medium)
-                    + Text(model.status.detail.isEmpty ? "" : (model.status.tone == .live ? " · " : " — ") + model.status.detail)
+                    + Text(model.status.detail.isEmpty ? "" : " · " + model.status.detail)
                     .foregroundColor(.secondary)
                 Spacer(minLength: 8)
                 Button {
@@ -265,7 +265,7 @@ private struct SharksSection: View {
                 .help("Start from a ready-made line-up")
             }
         } footer: {
-            Text("Biggest first: each shark is a little smaller than the one above it.")
+            Text("Biggest first. Each shark is a little smaller than the one above it.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.leading)
@@ -696,11 +696,11 @@ private struct AppSection: View {
             }
             Toggle(isOn: model.binding(\.checkForUpdates)) {
                 Text("Check for updates daily")
-                Text("Only asks GitHub for the latest version number. Nothing about you is sent.")
+                Text("It asks GitHub only for the latest version number and sends nothing about you.")
             }
             Toggle(isOn: model.binding(\.autoInstallUpdates)) {
                 Text("Install updates automatically")
-                Text("A new version installs itself and the wallpaper is back in a second. It waits while Settings is open.")
+                Text("A new version installs itself and the wallpaper is back in a second. It waits while you're using ASCII Animals.")
             }
             .disabled(!model.s.checkForUpdates)
             LabeledContent {

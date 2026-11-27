@@ -612,11 +612,11 @@ public final class UpdateEngine {
             body = store.data(forKey: Self.cachedKey).flatMap { UpdateFeed.read($0) == .garbled ? nil : $0 }
             if body == nil {
                 store.removeObject(forKey: Self.cachedKey)
-                why = "GitHub said nothing changed, but no readable earlier answer is kept."
+                why = "GitHub said nothing changed, but ASCII Animals has no earlier answer it can read."
             }
         } else if response.status == 200, let data = response.body {
             if UpdateFeed.read(data) == .garbled {
-                why = "GitHub's answer couldn't be read."
+                why = "ASCII Animals couldn't read GitHub's answer."
             } else {
                 body = data
                 store.set(data, forKey: Self.cachedKey)

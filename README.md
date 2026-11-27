@@ -69,11 +69,11 @@ It's all in the 🐟 menu and in **Settings**.
 
 ## Good to know
 
-- **Easy on your battery.** It stops when the desktop is covered or your Mac is locked or asleep. It slows down on battery and holds still in Low Power Mode. The Meadow costs the app the least of the three; the Web costs a little more than the Ocean at 30 fps and the same at 15.
+- **Easy on your battery.** It stops when the desktop is covered or your Mac is locked or asleep. It slows down on battery and holds still in Low Power Mode. All three cost about the same: the Meadow uses the least of the app's own CPU, while macOS spends a little more drawing it.
 - **Your lock screen matches.** While it runs, a still of your habitat becomes your wallpaper too. Quit, and your own wallpaper comes back.
 - **It keeps itself up to date.** New versions install themselves in a second or two. Rather choose when? Turn that off in Settings.
 - **Private.** No accounts, no ads, no tracking. The only thing it ever asks the internet is "is there a new version?"
-- **Easy to remove.** 🐟 menu → Help → **Uninstall ASCII Animals…** puts your wallpaper back and deletes everything it saved.
+- **Easy to remove.** 🐟 menu → Help → **Uninstall ASCII Animals…** puts your wallpaper back and deletes its settings and logs. If a desktop might still show the animals, it keeps its small pictures folder and tells you where it is.
 
 <details>
 <summary><b>Privacy, in detail</b></summary>

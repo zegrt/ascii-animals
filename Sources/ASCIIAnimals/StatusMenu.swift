@@ -126,7 +126,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         badged.isTemplate = false
         badged.accessibilityDescription = "ASCII Animals, update available"
         item.button?.image = badged
-        item.button?.toolTip = "ASCII Animals — an update is available"
+        item.button?.toolTip = "ASCII Animals, update available"
     }
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -279,13 +279,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             help.addItem(.separator())
         }
         add(help, "Report a Problem…", #selector(reportProblem), symbol: "exclamationmark.bubble")
-            .toolTip = "Opens a GitHub issue with diagnostics filled in. You see it before anything is sent."
+            .toolTip = "Opens a GitHub issue with diagnostics filled in. You review it before anything leaves your Mac."
         add(help, "Copy Diagnostics", #selector(copyDiagnostics), symbol: "doc.on.clipboard")
             .toolTip = "Version, macOS, displays and settings, for pasting into a message."
         if plan.offersUninstall {
             help.addItem(.separator())
             add(help, "Uninstall ASCII Animals…", #selector(uninstall), symbol: "trash")
-                .toolTip = "Puts your wallpaper back and removes the app and everything it saved."
+                .toolTip = "Puts your wallpaper back and removes the app and its settings."
         }
         submenu(menu, "Help", symbol: "questionmark.circle", help)
         menu.addItem(.separator())
@@ -310,15 +310,15 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         return it
     }
 
-    /// "Quit unexpectedly last time — Report…"
+    /// "Quit unexpectedly last time · Report…"
     private func crashItem() -> NSMenuItem {
-        let it = NSMenuItem(title: "Quit unexpectedly last time — Report…", action: #selector(reportCrash), keyEquivalent: "")
+        let it = NSMenuItem(title: "Quit unexpectedly last time · Report…", action: #selector(reportCrash), keyEquivalent: "")
         it.target = self
         let font = NSFont.menuFont(ofSize: 0)
         let title = NSMutableAttributedString(string: "Quit unexpectedly last time", attributes: [
             .font: font, .foregroundColor: NSColor.labelColor,
         ])
-        title.append(NSAttributedString(string: " — Report…", attributes: [
+        title.append(NSAttributedString(string: " · Report…", attributes: [
             .font: font, .foregroundColor: NSColor.secondaryLabelColor,
         ]))
         it.attributedTitle = title
@@ -337,7 +337,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             .foregroundColor: NSColor.labelColor,
         ])
         if !status.detail.isEmpty {
-            title.append(NSAttributedString(string: (status.tone == .live ? " · " : " — ") + status.detail, attributes: [
+            title.append(NSAttributedString(string: " · " + status.detail, attributes: [
                 .font: font,
                 .foregroundColor: NSColor.secondaryLabelColor,
             ]))

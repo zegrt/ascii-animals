@@ -26,7 +26,7 @@ enum SelfUpdater {
         }
         let fm = FileManager.default
         guard fm.isWritableFile(atPath: folder.path), fm.isWritableFile(atPath: bundle.path) else {
-            return "ASCII Animals can't replace itself in “\(folder.lastPathComponent)” with your account's permissions."
+            return "ASCII Animals can't replace itself in \"\(folder.lastPathComponent)\" with your account's permissions."
         }
         return nil
     }
@@ -37,10 +37,10 @@ enum SelfUpdater {
         let finish: (Result<StagedUpdate, Failure>) -> Void = { result in DispatchQueue.main.async { done(result) } }
         guard Launch.plan.startsUpdates else { return finish(.failure(Failure("The energy-test copy never updates itself."))) }
         guard let url = r.zipURL, SelfUpdate.isTrustedDownload(url, repoPath: repoPath) else {
-            return finish(.failure(Failure("This release can't be installed from inside the app.")))
+            return finish(.failure(Failure("ASCII Animals can't install this release by itself.")))
         }
         guard let sha = r.zipSHA256 else {
-            return finish(.failure(Failure("GitHub didn't give a checksum for this download, so it can't be verified.")))
+            return finish(.failure(Failure("GitHub gave no checksum for this download, so ASCII Animals can't check it.")))
         }
         let temp: URL
         do {
@@ -134,7 +134,7 @@ enum SelfUpdater {
     private static func checkSignature(_ app: URL, identifier: String) throws {
         var code: SecStaticCode?
         guard SecStaticCodeCreateWithPath(app as CFURL, [], &code) == errSecSuccess, let code else {
-            throw Failure("The new version's signature can't be read.")
+            throw Failure("ASCII Animals can't read the new version's signature.")
         }
         let flags = SecCSFlags(rawValue: kSecCSCheckAllArchitectures | kSecCSStrictValidate | kSecCSCheckNestedCode)
         var err: Unmanaged<CFError>?
@@ -142,8 +142,8 @@ enum SelfUpdater {
             let cf: CFError? = err?.takeRetainedValue()
             let why = cf.map { CFErrorCopyDescription($0) as String } ?? "invalid"
             let logged = cf.map { Failure.code(of: $0) } ?? "invalid"
-            throw Failure("The new version's signature doesn't check out (\(why)).",
-                          log: "The new version's signature doesn't check out (\(logged)).")
+            throw Failure("The new version's signature isn't valid (\(why)).",
+                          log: "The new version's signature isn't valid (\(logged)).")
         }
         var info: CFDictionary?
         SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &info)

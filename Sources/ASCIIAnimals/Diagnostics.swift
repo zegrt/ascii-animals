@@ -60,7 +60,7 @@ enum Diagnostics {
             text = form(on)
             view.string = text
         }
-        let box = NSButton(checkboxWithTitle: "Add the recent log (your folders and names are taken out)",
+        let box = NSButton(checkboxWithTitle: "Add the recent log, without your names or folders",
                            target: toggle, action: #selector(ReviewToggle.changed(_:)))
         box.isEnabled = !f.logTail.isEmpty
         let stack = NSStackView(views: [scroll, box])
@@ -75,7 +75,7 @@ enum Diagnostics {
         let a = NSAlert()
         a.messageText = "Report a Problem"
         a.informativeText = "This is everything that goes into the GitHub form. It leaves your Mac only when the form "
-            + "opens in your browser, and nothing is posted until you submit it there."
+            + "opens in your browser, and GitHub posts nothing until you submit it there."
         a.accessoryView = stack
         a.addButton(withTitle: "Open GitHub Form")
         a.addButton(withTitle: "Cancel")
