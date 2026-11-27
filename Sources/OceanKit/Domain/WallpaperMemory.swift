@@ -17,87 +17,62 @@ public struct WallpaperEntry: Codable, Equatable, Sendable {
     }
 }
 
-/// Another app's stills: ASCII Sharks', still showing if it was force-quit, and what it remembered was
-/// underneath them. Never the user's own wallpaper.
+/// ASCII Sharks' stills (its own folder), still showing if it was force-quit, and its memory: the original it saved
+/// for each display, which its stills go back to. Never the user's own wallpaper.
 public struct ForeignStills: Equatable, Sendable {
     public var folder: URL
     public var memory: WallpaperMemory
-    /// The memory is the hand-over's copy: the other app's own went with it, so this is the only one left.
-    public var memoryIsOurCopy: Bool
-    public init(folder: URL, memory: WallpaperMemory = WallpaperMemory(), memoryIsOurCopy: Bool = false) {
+    public init(folder: URL, memory: WallpaperMemory = WallpaperMemory()) {
         self.folder = folder
         self.memory = memory
-        self.memoryIsOurCopy = memoryIsOurCopy
     }
 
     func contains(_ url: URL) -> Bool { WallpaperMemory.isOurs(url, stillsFolder: folder) }
 }
 
-/// One of our stills that went up on a display's Space, and the picture it covers there (the user's own).
-public struct StillRecord: Codable, Equatable, Sendable {
-    /// The display it went up on ("" for a still found on disk from before these records).
-    public var display: String
-    /// What to put back over it; nil when nobody knows (a foreign still with no memory under it).
-    public var covers: WallpaperEntry?
-    public init(display: String, covers: WallpaperEntry?) {
-        self.display = display
-        self.covers = covers
-    }
+/// What the Space in view on a display shows, as the wallpaper keeper reads it.
+public enum Showing: Equatable, Sendable {
+    /// Anything outside our folders: the person's own wallpaper.
+    case own(WallpaperEntry)
+    /// One of our files, `<display>-<code>-<A|B>.png`: it covers the wallpaper with that code.
+    case ours(display: String, code: String, slot: String)
+    /// A still from 3.0 (`still-…` in our folder) or from ASCII Sharks (its folder): it goes back to the original
+    /// saved for the display it shows on.
+    case old(sharks: Bool)
+    /// Some other file in our folder: nothing known.
+    case unknown
 }
 
-/// Bookkeeping that keeps the user's own wallpaper safe while the system
-/// wallpaper shows a still of the ocean.
+/// What keeps the person's own wallpaper safe while the system wallpaper shows a still of the habitat.
 ///
-/// macOS sets wallpapers per Space and offers no Space identity, so the rules
-/// are conservative: remember the first wallpaper seen on each screen; replace
-/// only that wallpaper or our own stills; never touch a wallpaper we don't
-/// recognise; restore only where our still is showing. Each still that went up
-/// is recorded with the picture it covers, so a Space restored later gets its
-/// own picture back, however many restores happened in between.
+/// A file in our folder is ours; anything else is the person's. Each of our files names the wallpaper it covers by a
+/// code, and `covered` maps the code back to that wallpaper (URL and options): no per-still records. macOS sets
+/// wallpapers per Space and offers no Space identity, so whatever a Space shows says what goes back there.
 public struct WallpaperMemory: Codable, Equatable, Sendable {
-    public enum Decision: Equatable, Sendable { case apply, leaveAlone }
+    /// The person's wallpapers our files cover, by the code in their names. Never shrinks: a Space not in view may
+    /// still show a file with any of these codes.
+    public private(set) var covered: [String: WallpaperEntry] = [:]
+    /// Each display's own wallpaper as last seen on a Space in view (its code).
+    public private(set) var own: [String: String] = [:]
+    /// The original 3.0 (or ASCII Sharks) saved for each display: what their stills go back to. Never changed.
+    public private(set) var saved: [String: WallpaperEntry] = [:]
 
-    /// The user's own picture on each display: what `decide` recognises. Recorded once; a restore keeps it.
-    public private(set) var originals: [String: WallpaperEntry] = [:]
-    /// Our stills that are up on some Space, by filename: never deleted while recorded.
-    public private(set) var stills: [String: StillRecord] = [:]
-    /// Displays whose own picture went back since their last still: a different picture seen there next is the
-    /// user's new choice.
-    public private(set) var restored: Set<String> = []
-    /// Read from a memory written before still records, and the stills on disk not yet adopted (`adopt`; their
-    /// folder may not have been readable): they may be up somewhere, unrecorded. Saved, so a relaunch retries.
-    public private(set) var predatesStillRecords = false
-
-    enum CodingKeys: String, CodingKey { case originals, stills, restored, adoptionPending }
+    /// `originals` is 3.0's key (and ASCII Sharks'), kept so a memory written by 3.0 reads as its saved originals.
+    enum CodingKeys: String, CodingKey { case covered, own, saved = "originals" }
 
     public init() {}
 
-    /// A memory that knows nothing yet, so the stills already on disk are taken as up somewhere (`adopt`).
-    public static func unrecorded() -> WallpaperMemory {
-        var m = WallpaperMemory()
-        m.predatesStillRecords = true
-        return m
-    }
-
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        originals = try c.decode([String: WallpaperEntry].self, forKey: .originals)
-        let recorded: [String: StillRecord]? = try c.decodeIfPresent([String: StillRecord].self, forKey: .stills)
-        stills = recorded ?? [:]
-        restored = try c.decodeIfPresent(Set<String>.self, forKey: .restored) ?? []
-        let pending: Bool = try c.decodeIfPresent(Bool.self, forKey: .adoptionPending) ?? false
-        predatesStillRecords = recorded == nil || pending
+        covered = try c.decodeIfPresent([String: WallpaperEntry].self, forKey: .covered) ?? [:]
+        own = try c.decodeIfPresent([String: String].self, forKey: .own) ?? [:]
+        saved = try c.decodeIfPresent([String: WallpaperEntry].self, forKey: .saved) ?? [:]
     }
 
-    public func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(originals, forKey: .originals)
-        try c.encode(stills, forKey: .stills)
-        try c.encode(restored, forKey: .restored)
-        if predatesStillRecords { try c.encode(true, forKey: .adoptionPending) }
+    /// The display's own wallpaper: as last seen there, else the one 3.0 saved.
+    public func original(for display: String) -> WallpaperEntry? {
+        own[display].flatMap { covered[$0] } ?? saved[display]
     }
-
-    public func original(for screen: String) -> WallpaperEntry? { originals[screen] }
 
     public static func isOurs(_ url: URL, stillsFolder: URL) -> Bool {
         let folder = canonical(stillsFolder.path)
@@ -123,85 +98,94 @@ public struct WallpaperMemory: Codable, Equatable, Sendable {
         return path
     }
 
-    /// Whether the still may replace `current` on this screen's current Space. A foreign still (ASCII
-    /// Sharks') is replaced too, and what it covered, if known, is remembered as the original.
-    public mutating func decide(screen: String, current: WallpaperEntry, stillsFolder: URL,
-                                foreign: ForeignStills? = nil) -> Decision {
-        if WallpaperMemory.isOurs(current.url, stillsFolder: stillsFolder) { return .apply }
-        if let foreign, foreign.contains(current.url) {
-            if originals[screen] == nil { originals[screen] = foreign.memory.original(for: screen) }
-            return .apply
+    // MARK: names
+
+    /// The code for a wallpaper: 16 hex digits of an FNV-1a hash of its URL and options. The same wallpaper always
+    /// gets the same code, so a lost table can't make a file name point at another picture.
+    public static func code(for entry: WallpaperEntry) -> String {
+        let fill: String = entry.fillColor.map { $0.map { String($0) }.joined(separator: ",") } ?? "-"
+        let key: String = "\(entry.url.standardizedFileURL.absoluteString)|\(entry.scaling.map { String($0) } ?? "-")|"
+            + "\(entry.allowClipping.map { $0 ? "1" : "0" } ?? "-")|\(fill)"
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in key.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
         }
-        guard let known = originals[screen] else {
-            originals[screen] = current
-            return .apply
+        let hex: String = String(hash, radix: 16)
+        return String(repeating: "0", count: 16 - hex.count) + hex
+    }
+
+    /// `<display>-<code>-<A|B>.png`.
+    public static func fileName(display: String, code: String, slot: String) -> String { "\(display)-\(code)-\(slot).png" }
+
+    /// The display, code and slot in one of our file names; nil for any other name.
+    static func parse(_ name: String) -> (display: String, code: String, slot: String)? {
+        guard name.hasSuffix(".png") else { return nil }
+        let parts: [Substring] = name.dropLast(4).split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count >= 3, let slot = parts.last, slot == "A" || slot == "B" else { return nil }
+        let code: Substring = parts[parts.count - 2]
+        guard code.count == 16, code.allSatisfy({ $0.isHexDigit && !$0.isUppercase }) else { return nil }
+        let display: String = parts.dropLast(2).joined(separator: "-")
+        return display.isEmpty ? nil : (display, String(code), String(slot))
+    }
+
+    // MARK: rules
+
+    /// What `current` is.
+    public static func showing(_ current: WallpaperEntry, stillsFolder: URL, foreign: ForeignStills? = nil) -> Showing {
+        let name: String = current.url.lastPathComponent
+        if isOurs(current.url, stillsFolder: stillsFolder) {
+            if let p = parse(name) { return .ours(display: p.display, code: p.code, slot: p.slot) }
+            if name.hasPrefix("still-") { return .old(sharks: false) }
+            return .unknown
         }
-        if known.url.standardizedFileURL == current.url.standardizedFileURL { return .apply }
-        // Put back, then changed by the user: their new choice. Stills still up elsewhere keep what they cover.
-        guard restored.contains(screen) else { return .leaveAlone }
-        originals[screen] = current
-        restored.remove(screen)
-        return .apply
+        if let foreign, foreign.contains(current.url) { return .old(sharks: true) }
+        return .own(current)
     }
 
-    /// The wallpaper to put back, if our still (or a foreign one) is what this screen shows.
-    public func restoreTarget(screen: String, current: WallpaperEntry, stillsFolder: URL,
-                              foreign: ForeignStills? = nil) -> WallpaperEntry? {
-        if WallpaperMemory.isOurs(current.url, stillsFolder: stillsFolder) { return covered(by: current.url, on: screen) }
-        if let foreign, foreign.contains(current.url) { return foreignOriginal(screen, foreign) }
-        return nil
-    }
-
-    /// What our still covers: what its record says (nil: not known, so it stays up), or, with no record, the
-    /// display's original.
-    func covered(by still: URL, on screen: String) -> WallpaperEntry? {
-        if let record = stills[still.lastPathComponent] { return record.covers }
-        return originals[screen]
-    }
-
-    /// What the other app's still covers: what it remembered there, else the display's original here.
-    func foreignOriginal(_ screen: String, _ foreign: ForeignStills) -> WallpaperEntry? {
-        foreign.memory.original(for: screen) ?? originals[screen]
-    }
-
-    /// The screen's own picture went back. The original stays: stills on other Spaces still cover it.
-    public mutating func forget(screen: String) { restored.insert(screen) }
-
-    /// `still` is going up over `current`: record what it covers (what our still under it covered, never our still).
-    public mutating func record(_ still: URL, on screen: String, over current: WallpaperEntry, stillsFolder: URL,
-                                foreign: ForeignStills? = nil) {
-        let covers: WallpaperEntry?
-        if WallpaperMemory.isOurs(current.url, stillsFolder: stillsFolder) {
-            covers = covered(by: current.url, on: screen)
-        } else if let foreign, foreign.contains(current.url) {
-            covers = foreignOriginal(screen, foreign)
-        } else {
-            covers = current
+    /// The person's wallpaper under a still this display shows (ours, 3.0's or Sharks'): nil when not known.
+    /// Also nil for the person's own wallpaper: check `showing` first.
+    public func under(_ current: WallpaperEntry, on display: String, stillsFolder: URL,
+                      foreign: ForeignStills? = nil) -> WallpaperEntry? {
+        switch WallpaperMemory.showing(current, stillsFolder: stillsFolder, foreign: foreign) {
+        case .own, .unknown:
+            return nil
+        case let .ours(_, code, _):
+            return covered[code]
+        case let .old(sharks):
+            return sharks ? foreign?.memory.saved[display] : saved[display]
         }
-        stills[still.lastPathComponent] = StillRecord(display: screen, covers: covers)
     }
 
-    /// The still is no longer up anywhere.
-    public mutating func drop(_ still: URL) { stills[still.lastPathComponent] = nil }
-
-    /// The still went up on the screen: it isn't showing its own picture now.
-    public mutating func shown(on screen: String) { restored.remove(screen) }
-
-    /// Stills found on disk with no record (from before the records): taken as up somewhere, so never deleted, each
-    /// with the original saved now for the display in its name (`still-<display>-…`); nil when none is known.
-    public mutating func adopt(_ files: [URL], except names: Set<String> = []) {
-        for f in files {
-            let name: String = f.lastPathComponent
-            guard name.hasPrefix("still-"), stills[name] == nil, !names.contains(name) else { continue }
-            let display: String? = originals.keys.filter { name.hasPrefix("still-\($0)-") }.max { $0.count < $1.count }
-            stills[name] = StillRecord(display: display ?? "", covers: display.flatMap { originals[$0] })
+    /// The file a refresh writes for this display over `current`: the A or B of the wallpaper it covers, whichever
+    /// isn't showing on the Space in view. The person's own wallpaper is remembered first (its code). Nil: leave it
+    /// (a still with nothing known under it).
+    public mutating func nextStill(on display: String, over current: WallpaperEntry, stillsFolder: URL,
+                                   foreign: ForeignStills? = nil) -> URL? {
+        let shows: Showing = WallpaperMemory.showing(current, stillsFolder: stillsFolder, foreign: foreign)
+        let code: String
+        var slot: String = "A"
+        switch shows {
+        case .unknown:
+            return nil
+        case let .own(entry):
+            code = WallpaperMemory.code(for: entry)
+            covered[code] = entry
+            own[display] = code
+        case let .ours(shownDisplay, shownCode, shownSlot):
+            code = shownCode
+            if shownDisplay == display, shownSlot == "A" { slot = "B" }
+        case .old:
+            guard let entry = under(current, on: display, stillsFolder: stillsFolder, foreign: foreign) else { return nil }
+            code = WallpaperMemory.code(for: entry)
+            covered[code] = entry
         }
-        predatesStillRecords = false
+        return stillsFolder.appendingPathComponent(WallpaperMemory.fileName(display: display, code: code, slot: slot))
     }
 }
 
-/// The desktop-image API as the wallpaper keeper sees it: NSWorkspace and the stills folder in the app, a fake with
-/// Spaces in the checks. Displays are named by `SystemWallpaper.key(for:)`; each call reads or changes the Space in view.
+/// The desktop-image API as the wallpaper keeper sees it: NSWorkspace in the app, a fake with Spaces in the checks.
+/// Displays are named by `SystemWallpaper.key(for:)`; each call reads or changes the Space in view.
 public protocol DesktopImages: AnyObject {
     /// The displays attached now.
     var displays: [String] { get }
@@ -209,51 +193,35 @@ public protocol DesktopImages: AnyObject {
     func current(on display: String) -> WallpaperEntry?
     /// Shows `entry` on the display's Space in view.
     func set(_ entry: WallpaperEntry, on display: String) throws
-    /// The files in a stills folder (ours, or the other app's): empty only when it is readable and empty, or
-    /// doesn't exist. Throws when it can't be read.
-    func stillFiles(in folder: URL) throws -> [URL]
-    func removeFile(_ url: URL) throws
 }
 
-/// What a restore did.
+/// What a restore did on the Spaces in view.
 public struct RestoreOutcome: Equatable, Sendable {
     /// Displays whose own picture went back (read back and checked).
     public var restored: [String] = []
-    /// Displays where it couldn't be put back, or couldn't be read.
+    /// Displays where it couldn't be put back, couldn't be read (one we covered), or nothing is known under the still.
     public var failed: [String] = []
-    /// Our stills still up somewhere: a Space not in view, a display not connected, a display that failed.
-    public var stillsLeft = 0
-    /// The stills folder couldn't be read, so stills from before the records may be up, unrecorded.
-    public var adoptionPending = false
-    /// The other app's stills are on disk (or its folder can't be read) and its memory here is the only copy.
-    public var foreignStillsLeft = false
-    /// The user's own pictures (file names) not back everywhere.
-    public var notBack: [String] = []
     public init() {}
 
-    /// Whether uninstall keeps the stills and the memory of the user's wallpaper: anything not verified back.
-    public var keepsRecovery: Bool { !failed.isEmpty || stillsLeft > 0 || adoptionPending || foreignStillsLeft }
-
-    /// What uninstall says about the wallpaper, if anything.
-    public func uninstallNote(stillsFolder: URL) -> String? {
-        guard keepsRecovery else { return nil }
-        let folder: String = (stillsFolder.path as NSString).abbreviatingWithTildeInPath
-        let yours: String = notBack.isEmpty ? "" : " (yours was \(notBack.joined(separator: ", ")))"
-        let whose: String = foreignStillsLeft ? "ASCII Animals' or ASCII Sharks' picture" : "ASCII Animals' picture"
-        return "Your own wallpaper couldn't be put back everywhere: a display that failed or isn't connected now, or a "
-            + "Space not in view, may still show \(whose). Its pictures are kept in \(folder), so nothing "
-            + "goes blank. Choose your wallpaper in System Settings > Wallpaper\(yours), then you can delete that folder."
-    }
+    /// Something on a Space in view isn't back, so the Stills folder must stay. Uninstall keeps the folder anyway
+    /// whenever it holds files: a Space not in view may show one.
+    public var keepsRecovery: Bool { !failed.isEmpty }
 }
 
 /// Changes and restores the system wallpaper through `DesktopImages`, keeping `WallpaperMemory` on disk (`save`).
-/// The app renders the stills; this decides where they go, what they cover and what comes back. Every set and
-/// restore is read back before it counts, even one that threw. A still's file stays after it is replaced or put back
-/// (one still might show on several Spaces); the files go once a restore has put everything back.
+/// The app renders the stills; this picks their files, puts them up and puts the person's wallpaper back. Two files
+/// per display per covered wallpaper, written in turn and reused: no file is ever deleted, so a Space not in view
+/// never loses its picture (at worst it shows a newer still of the animals).
 public final class WallpaperKeeper {
     /// How a still is shown: scale proportionally up or down (NSImageScaling 3), clipping allowed, black fill.
     public static func stillEntry(_ url: URL) -> WallpaperEntry {
         WallpaperEntry(url: url, scaling: 3, allowClipping: true, fillColor: [0, 0, 0, 1])
+    }
+
+    /// What uninstall says when it keeps the Stills folder (the director's words, briefs/r2.md).
+    public static func uninstallNote(stillsFolder: URL) -> String {
+        let folder: String = (stillsFolder.path as NSString).abbreviatingWithTildeInPath
+        return "If a desktop still shows the animals, choose your wallpaper in System Settings, then delete this folder: \(folder)."
     }
 
     public private(set) var memory: WallpaperMemory
@@ -262,8 +230,8 @@ public final class WallpaperKeeper {
     private let desktop: DesktopImages
     private let save: (WallpaperMemory) -> Void
     private let log: (String) -> Void
-    /// Stills named but not yet up or dropped (rendering): cleanup and adoption leave them.
-    private var inFlight: Set<String> = []
+    /// The file planned for each display by `mayApply`, while it renders.
+    private var planned: [String: URL] = [:]
     /// Uninstall began: from now on only restores run.
     private var uninstalling = false
 
@@ -276,162 +244,97 @@ public final class WallpaperKeeper {
         self.desktop = desktop
         self.save = save
         self.log = log
-        _ = adoptIfPending()
-    }
-
-    /// Takes the unrecorded stills on disk as up somewhere. Until their folder can be read, nothing changes
-    /// (a failed read is not an empty folder); retried before every change and every restore.
-    private func adoptIfPending() -> Bool {
-        guard memory.predatesStillRecords else { return true }
-        do {
-            let files: [URL] = try desktop.stillFiles(in: stillsFolder)
-            memory.adopt(files, except: inFlight)
-            save(memory)
-            return true
-        } catch {
-            log("could not read the stills folder; no still goes up until it can be read: \(error)")
-            return false
-        }
     }
 
     /// Uninstall began: no still goes up and nothing reconciles from now on; only its own restore runs.
     public func beginUninstall() { uninstalling = true }
 
-    /// Before rendering: may a still replace what this display shows? The original is saved before anything changes.
+    /// The file to write over what the display shows now, with the person's wallpaper (its code) saved first.
+    private func plan(on display: String) -> URL? {
+        guard let current = desktop.current(on: display) else { return nil }   // a failed read: do nothing
+        var m: WallpaperMemory = memory
+        guard let file = m.nextStill(on: display, over: current, stillsFolder: stillsFolder, foreign: foreign) else { return nil }
+        if m != memory {
+            memory = m
+            save(memory)
+        }
+        return file
+    }
+
+    /// Before rendering: may a still go up on this display's Space in view? Plans its file (`newStill`).
     public func mayApply(on display: String) -> Bool {
-        guard !uninstalling, adoptIfPending(), let current = desktop.current(on: display) else { return false }
-        let ok: Bool = memory.decide(screen: display, current: current, stillsFolder: stillsFolder, foreign: foreign) == .apply
-        if ok { save(memory) }
-        return ok
+        planned[display] = uninstalling ? nil : plan(on: display)
+        return planned[display] != nil
     }
 
-    /// Where the next still for this display is written: a name of its own, whatever the clock says.
+    /// The file the next still for this display is written to (after `mayApply` said yes): `<display>-<code>-A.png`
+    /// or `-B.png`, whichever isn't showing on the Space in view.
     public func newStill(for display: String) -> URL {
-        let name = "still-\(display)-\(UUID().uuidString).png"
-        inFlight.insert(name)
-        return stillsFolder.appendingPathComponent(name)
+        planned[display] ?? stillsFolder.appendingPathComponent(".unplanned-\(display).png")
     }
 
-    /// A still that won't go up (superseded, or its render failed).
+    /// A still that won't go up (superseded, or its render failed). Its file stays: it is one of the two.
     public func discard(_ still: URL) {
-        inFlight.remove(still.lastPathComponent)
-        if memory.stills[still.lastPathComponent] == nil { try? desktop.removeFile(still) }
+        planned = planned.filter { !WallpaperMemory.same($0.value, still) }
     }
 
-    /// The still is written: put it up if it still may replace what the display shows. Returns whether it is up.
+    /// The still is written: put it up if it is still the file to show on this display. Returns whether it is up.
     @discardableResult
     public func commit(_ still: URL, on display: String) -> Bool {
-        inFlight.remove(still.lastPathComponent)
-        // Re-check: the wallpaper may have changed, or the display gone, while the still rendered.
-        let written: Bool = ((try? desktop.stillFiles(in: stillsFolder)) ?? []).contains { WallpaperMemory.same($0, still) }
-        guard !uninstalling, !memory.predatesStillRecords, written, desktop.displays.contains(display),
-              let current = desktop.current(on: display),
-              memory.decide(screen: display, current: current, stillsFolder: stillsFolder, foreign: foreign) == .apply else {
-            discard(still)
-            return false
-        }
-        // Recorded before it goes up, so a quit or a crash mid-set still knows what it covers.
-        memory.record(still, on: display, over: current, stillsFolder: stillsFolder, foreign: foreign)
-        save(memory)
+        discard(still)
+        // Re-check: the picture may have changed, or the display gone, while the still rendered.
+        guard !uninstalling, desktop.displays.contains(display), let file = plan(on: display),
+              WallpaperMemory.same(file, still) else { return false }
         do {
             try desktop.set(WallpaperKeeper.stillEntry(still), on: display)
         } catch {
-            // It may have taken effect anyway: what reads back decides.
-            log("setting the wallpaper threw: \(error)")
+            log("setting the wallpaper threw: \(error)")   // it may have taken effect anyway: what reads back says
         }
         guard let now = desktop.current(on: display) else {
-            log("could not read the wallpaper back; keeping the still and its record")
+            log("could not read the wallpaper back")
             return false
         }
-        guard WallpaperMemory.same(now.url, still) else {
-            log("the wallpaper did not change")
-            memory.drop(still)
-            save(memory)
-            discard(still)
-            return false
-        }
-        // The still it replaced on this Space: its record goes, its file stays (it may show elsewhere).
-        if WallpaperMemory.isOurs(current.url, stillsFolder: stillsFolder), !WallpaperMemory.same(current.url, still) {
-            memory.drop(current.url)
-        }
-        memory.shown(on: display)
-        save(memory)
-        return true
+        return WallpaperMemory.same(now.url, still)
     }
 
-    /// Everything is back: delete the still files no record names (not the ones rendering).
-    private func cleanUp() {
-        guard let files = try? desktop.stillFiles(in: stillsFolder) else { return }
-        for file in files {
-            let name: String = file.lastPathComponent
-            guard name.hasPrefix("still-"), memory.stills[name] == nil, !inFlight.contains(name) else { continue }
-            try? desktop.removeFile(file)
-        }
-    }
-
-    /// The other app's stills on disk, when its memory here is the only copy: still needed. An unreadable folder counts.
-    private func foreignStillsOnDisk() -> Bool {
-        guard foreign.memoryIsOurCopy else { return false }
-        guard let files = try? desktop.stillFiles(in: foreign.folder) else { return true }
-        return files.contains { $0.lastPathComponent.hasPrefix("still-") }
-    }
-
-    /// Put each display's own wallpaper back wherever our still is showing. Counts only what reads back; a still
-    /// and its record stay until then.
+    /// Put the person's wallpaper back on each display's Space in view, wherever a still (ours, 3.0's or Sharks')
+    /// shows. Counts only what reads back. A Space not in view gets its own back on its next visit (`reconcile`).
     @discardableResult
     public func restoreAll() -> RestoreOutcome {
-        let before: WallpaperMemory = memory
         var out = RestoreOutcome()
-        var notBack: Set<String> = []
-        out.adoptionPending = !adoptIfPending()
         for display in desktop.displays {
             guard let current = desktop.current(on: display) else {
-                // Can't tell what it shows; if we ever changed it, it may be our still.
-                if let o = memory.original(for: display) {
+                // A failed read: do nothing. If we ever covered this display, it may show our still.
+                if memory.original(for: display) != nil {
                     out.failed.append(display)
-                    notBack.insert(o.url.lastPathComponent)
-                    log("could not read the wallpaper of a display we changed")
+                    log("could not read the wallpaper of a display we covered")
                 }
                 continue
             }
-            let ours: Bool = WallpaperMemory.isOurs(current.url, stillsFolder: stillsFolder)
-            guard ours || foreign.contains(current.url) else { continue }   // the user's own: never touched
-            guard let target = memory.restoreTarget(screen: display, current: current, stillsFolder: stillsFolder, foreign: foreign) else {
+            if case .own = WallpaperMemory.showing(current, stillsFolder: stillsFolder, foreign: foreign) { continue }
+            guard let target = memory.under(current, on: display, stillsFolder: stillsFolder, foreign: foreign) else {
                 out.failed.append(display)
-                log("no original known under a still")
+                log("no wallpaper known under a still")
                 continue
             }
             do {
                 try desktop.set(target, on: display)
             } catch {
-                log("restoring the wallpaper threw: \(error)")   // what reads back decides
+                log("restoring the wallpaper threw: \(error)")   // what reads back says
             }
             guard let now = desktop.current(on: display), WallpaperMemory.same(now.url, target.url) else {
                 log("restored wallpaper did not read back")
                 out.failed.append(display)
-                notBack.insert(target.url.lastPathComponent)
                 continue
             }
-            memory.forget(screen: display)
             out.restored.append(display)
-            if ours { memory.drop(current.url) }   // its file stays until everything is back
         }
-        for record in memory.stills.values {
-            if let c = record.covers { notBack.insert(c.url.lastPathComponent) }
-        }
-        out.stillsLeft = memory.stills.count
-        out.foreignStillsLeft = foreignStillsOnDisk()
-        if out.foreignStillsLeft {
-            for o in foreign.memory.originals.values { notBack.insert(o.url.lastPathComponent) }
-        }
-        out.notBack = notBack.sorted()
-        if memory != before { save(memory) }
-        if !out.keepsRecovery { cleanUp() }
         return out
     }
 
-    /// A display came back, the Space changed, the Mac woke or the app launched. With matching off, our still is
-    /// replaced by the user's own picture wherever it shows; with it on, the app makes a fresh still instead.
+    /// A display came back, the Space changed, the Mac woke or the app launched. With matching off, a still on the
+    /// Space in view gives way to the person's own wallpaper; with it on, nothing here (the app sets a still only on
+    /// launch, a look change, a theme or accent change or a display change).
     @discardableResult
     public func reconcile(matching: Bool) -> RestoreOutcome? {
         guard !uninstalling, !matching else { return nil }
