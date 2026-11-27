@@ -50,7 +50,7 @@ Last approved state: tag `v3.0.1`.
 | Meadow, card, welcome, energy (t11 stack) | meadow-t11 @ 20cdb3c | approved (review-t11-r3 @ b03d17f); live card look at the join |
 | Pointer input (r1b) | meadow-r1b @ afa861f | approved (review-r1b-r2 @ d158c7c); banner re-test with the director |
 | Updates, settings, diagnostics (r3) | meadow-r3 @ 655e787 | approved 2026-11-27 (privacy re-check review-r3-r3 @ 8ade43f; 314 checks, selftest 0 failed). The log starts fresh on a format change, not every version (the director: "ok go", 2026-11-27) |
-| Wallpaper recovery (r2) | meadow-r2 @ 9e3a466 | in review (review-r2-r2): rebuilt on the root fix (proof 62bc678 fails 5 on bb6df14; 297 checks, selftest 0 failed; replaced checks listed in reports/r2.md; pushed). One review, a re-check only for data loss |
+| Wallpaper recovery (r2) | meadow-r2 @ 9e3a466 | fix round (briefs/r2.md "Fix round", 2026-11-27): review-r2-r2 @ 08884b3 changes requested; fix: uninstall keeps the restore data with the kept stills (findings 1, 3); the Sharks hand-over leaves its stills on disk (finding 2). Then a data-loss re-check |
 
 Trial join (2026-11-25, scratch only, on t11 20cdb3c + r1b afa861f + r3 633a682 + r2 d9e05a0): one conflict
 (`Sources/OceanChecks/main.swift`, `greetingChecks()` and `pointerChecks()`, keep both); build passes, 334 checks,
@@ -58,7 +58,7 @@ selftest 0 failed.
 
 ## Next, in order
 
-r3 approved 2026-11-27; r2 rebuilt and in review.
+r3 approved 2026-11-27; r2 in its fix round.
 2. r2 rebuilt on the root fix: two reused files per display, written alternately, never deleted in normal use; the
    covered wallpaper in the file name; a file in our folder is ours, anything else is the person's; restore each
    Space on its next visit; do nothing when a read fails; uninstall restores the Space in view, keeps the small
@@ -91,6 +91,9 @@ Steps 3-5 wait for the director's go.
   director; option A (a deadline-driven display link) trialled after eligibility. Later, the director's product
   calls: B, E, H, G.
 - Trimmed from the 3.1 briefs (2026-11-21): the reminder checkpoint write; r2's stale-job stage checks.
+- r2 rebuild review (review-r2-r2 @ 08884b3), none in normal use: a 3.0 still named for one display but shown on
+  another restores that display's original; a Space switch mid-render can show the planned file before it is
+  replaced; with the restore table already lost, a still stays in place.
 - r2 finding 4 (a force quit between saving the original and setting the still), if the rebuild leaves it.
 - r3 finding 7 (cleanup on the main thread after the split).
 - r3 privacy re-check (review-r3-r3 @ 8ade43f), none in normal use: a rollback to 3.0 and back can admit old-format
