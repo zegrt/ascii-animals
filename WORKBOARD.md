@@ -50,7 +50,7 @@ Last approved state: tag `v3.0.1`.
 | Meadow, card, welcome, energy (t11 stack) | meadow-t11 @ 20cdb3c | approved (review-t11-r3 @ b03d17f); live card look at the join |
 | Pointer input (r1b) | meadow-r1b @ afa861f | approved (review-r1b-r2 @ d158c7c); banner re-test with the director |
 | Updates, settings, diagnostics (r3) | meadow-r3 @ 655e787 | approved 2026-11-27 (privacy re-check review-r3-r3 @ 8ade43f; 314 checks, selftest 0 failed). The log starts fresh on a format change, not every version (the director: "ok go", 2026-11-27) |
-| Wallpaper recovery (r2) | meadow-r2 @ 59e16bb | building: fix round 2 (briefs/r2.md, the director: "ok", 2026-11-27): keep Sharks' originals before asking Sharks to quit (re-check review-r2-r3 @ 26fbe17, finding 2's open path). Then a re-check of that alone |
+| Wallpaper recovery (r2) | meadow-r2 @ 7d9c8d8 | fix round 2 done (proof e76b7d8 fails 2 on 59e16bb; fix: Sharks' originals kept before its quit; 301 checks, selftest 0 failed; pushed). In its re-check of that alone (review-r2-r4) |
 
 Trial join (2026-11-25, scratch only, on t11 20cdb3c + r1b afa861f + r3 633a682 + r2 d9e05a0): one conflict
 (`Sources/OceanChecks/main.swift`, `greetingChecks()` and `pointerChecks()`, keep both); build passes, 334 checks,
@@ -58,7 +58,7 @@ selftest 0 failed.
 
 ## Next, in order
 
-r3 approved 2026-11-27; r2 in fix round 2 (the director's "ok" to one more).
+r3 approved 2026-11-27; r2 in the re-check of fix round 2.
 2. r2 rebuilt on the root fix: two reused files per display, written alternately, never deleted in normal use; the
    covered wallpaper in the file name; a file in our folder is ours, anything else is the person's; restore each
    Space on its next visit; do nothing when a read fails; uninstall restores the Space in view, keeps the small
