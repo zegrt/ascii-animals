@@ -145,9 +145,15 @@ enum SharksHandover {
     /// trashes itself and exits. True if it exited on its own with success, within the time allowed.
     private static func runSharksUninstaller(_ app: URL) -> Bool {
         // Its wallpaper memory goes with its settings: keep a copy in case its restore didn't happen.
-        if let memory = UserDefaults(suiteName: Handover.sharksBundleID)?.data(forKey: Handover.sharksWallpaperKey) {
-            UserDefaults.standard.set(memory, forKey: SystemWallpaper.sharksMemoryCopyKey)
-        }
+        SharksRemoval.run(sharksMemory: UserDefaults(suiteName: Handover.sharksBundleID)?.data(forKey: Handover.sharksWallpaperKey),
+                          sharksStills: SystemWallpaper.sharksStillsFolder,
+                          aside: SystemWallpaper.defaultStillsFolder.appendingPathComponent(".sharks-handover", isDirectory: true),
+                          keepCopy: { UserDefaults.standard.set($0, forKey: SystemWallpaper.sharksMemoryCopyKey) },
+                          log: { Log.write("hand-over: \($0)") },
+                          uninstall: { runUninstallProcess(app) })
+    }
+
+    private static func runUninstallProcess(_ app: URL) -> Bool {
         guard let exe = Bundle(url: app)?.executableURL, FileManager.default.isExecutableFile(atPath: exe.path) else {
             Log.write("hand-over: no ASCII Sharks executable in \(app.path)")
             return false

@@ -341,3 +341,59 @@ public final class WallpaperKeeper {
         return restoreAll()
     }
 }
+
+// MARK: restore data on disk (briefs/r2.md, "Fix round")
+
+/// What puts the person's wallpaper back under the stills: our memory, and ASCII Sharks' saved originals (its own
+/// memory, or the hand-over's copy once Sharks is gone).
+public struct RestoreData: Codable, Equatable, Sendable {
+    public var memory: WallpaperMemory
+    public var sharks: WallpaperMemory?
+    public init(memory: WallpaperMemory = WallpaperMemory(), sharks: WallpaperMemory? = nil) {
+        self.memory = memory
+        self.sharks = sharks
+    }
+
+    /// What the app starts from: the settings' memory, and Sharks' own memory or the hand-over's copy.
+    /// (Proof seam: 9e3a466's behaviour; the Stills folder is not read.)
+    public static func resolve(settings: Data?, sharksOwn: Data?, sharksCopy: Data?, stillsFolder: URL) -> RestoreData {
+        let memory: WallpaperMemory = settings.flatMap { try? JSONDecoder().decode(WallpaperMemory.self, from: $0) } ?? WallpaperMemory()
+        let sharks: WallpaperMemory? = (sharksOwn ?? sharksCopy).flatMap { try? JSONDecoder().decode(WallpaperMemory.self, from: $0) }
+        return RestoreData(memory: memory, sharks: sharks)
+    }
+
+    /// What uninstall keeps for the stills it leaves on disk.
+    public struct Kept: Equatable, Sendable {
+        /// The Stills folder stays.
+        public var folder: Bool
+        /// The restore data is in the folder.
+        public var written: Bool
+        /// The restore data couldn't go into the folder, so the settings keep it.
+        public var keepsSettings: Bool
+        public init(folder: Bool, written: Bool, keepsSettings: Bool) {
+            self.folder = folder
+            self.written = written
+            self.keepsSettings = keepsSettings
+        }
+    }
+
+    /// Uninstall: whether the Stills folder stays, and the restore data with it.
+    /// (Proof seam: 9e3a466's behaviour; the folder stays when it holds a file or can't be read, nothing is written.)
+    public func keepOnUninstall(stillsFolder: URL, sharksStills: URL) -> Kept {
+        let fm: FileManager = .default
+        let files: [String]? = try? fm.contentsOfDirectory(atPath: stillsFolder.path)
+        let keep: Bool = files.map { !$0.isEmpty } ?? fm.fileExists(atPath: stillsFolder.path)
+        return Kept(folder: keep, written: false, keepsSettings: false)
+    }
+}
+
+/// Removing ASCII Sharks once the person accepts the hand-over's offer.
+public enum SharksRemoval {
+    /// Keeps a copy of Sharks' wallpaper memory (`keepCopy`), then runs Sharks' own uninstaller (`uninstall`, true
+    /// when it finished). (Proof seam: 9e3a466's behaviour; its stills go with its support folder.)
+    public static func run(sharksMemory: Data?, sharksStills: URL, aside: URL, keepCopy: (Data) -> Void,
+                           log: (String) -> Void = { _ in }, uninstall: () -> Bool) -> Bool {
+        if let sharksMemory { keepCopy(sharksMemory) }
+        return uninstall()
+    }
+}

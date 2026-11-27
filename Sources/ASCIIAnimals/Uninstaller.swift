@@ -30,10 +30,9 @@ enum Uninstaller {
         wp?.restoreAll()
         let fm = FileManager.default
         let folder: URL = wp?.stillsFolder ?? CrashMarker.folder.appendingPathComponent("Stills", isDirectory: true)
-        // Kept unless it is known to be empty: an unreadable folder is kept too.
-        let files: [String]? = try? fm.contentsOfDirectory(atPath: folder.path)
-        let keep: Bool = files.map { !$0.isEmpty } ?? fm.fileExists(atPath: folder.path)
-        let stills: URL? = keep ? folder : nil
+        let data: RestoreData = SystemWallpaper.restoreData(stillsFolder: folder)
+        let kept: RestoreData.Kept = data.keepOnUninstall(stillsFolder: folder, sharksStills: SystemWallpaper.sharksStillsFolder)
+        let stills: URL? = kept.folder ? folder : nil
         if let stills { problems.append(WallpaperKeeper.uninstallNote(stillsFolder: stills)) }
         do { try LoginItem.set(false) } catch { if LoginItem.isEnabled { problems.append("login item: \(error.localizedDescription)") } }
         for url in [CrashMarker.folder, Log.folder] where fm.fileExists(atPath: url.path) {
@@ -51,6 +50,13 @@ enum Uninstaller {
             UserDefaults.standard.removePersistentDomain(forName: id)
             UserDefaults.standard.synchronize()
             CFPreferencesAppSynchronize(id as CFString)
+        }
+        if kept.keepsSettings {
+            // The restore data couldn't go into the Stills folder: the settings keep it for a reinstall.
+            let e = JSONEncoder()
+            if let m = try? e.encode(data.memory) { UserDefaults.standard.set(m, forKey: SystemWallpaper.memoryKey) }
+            if let s = data.sharks, let m = try? e.encode(s) { UserDefaults.standard.set(m, forKey: SystemWallpaper.sharksMemoryCopyKey) }
+            UserDefaults.standard.synchronize()
         }
         // Synchronous, so it's done before the process exits.
         let bundle = Bundle.main.bundleURL

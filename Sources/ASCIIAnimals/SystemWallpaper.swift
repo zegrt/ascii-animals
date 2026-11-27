@@ -25,19 +25,13 @@ final class SystemWallpaper {
     init?(renderer: OceanRenderer) {
         guard Launch.plan.matchesSystemWallpaper else { return nil }
         self.renderer = renderer
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        stillsFolder = support.appendingPathComponent("ASCII Animals/Stills", isDirectory: true)
+        stillsFolder = SystemWallpaper.defaultStillsFolder
         try? FileManager.default.createDirectory(at: stillsFolder, withIntermediateDirectories: true)
-        let memory: WallpaperMemory = UserDefaults.standard.data(forKey: SystemWallpaper.memoryKey)
-            .flatMap { try? JSONDecoder().decode(WallpaperMemory.self, from: $0) } ?? WallpaperMemory()
         // ASCII Sharks' stills: one left up (Sharks force-quit) goes back to the original Sharks saved for its display
         // (its own memory, or the hand-over's copy once Sharks is gone).
-        let sharksOwn: Data? = UserDefaults(suiteName: Handover.sharksBundleID)?.data(forKey: Handover.sharksWallpaperKey)
-        let sharksCopy: Data? = UserDefaults.standard.data(forKey: SystemWallpaper.sharksMemoryCopyKey)
-        let sharksMemory = (sharksOwn ?? sharksCopy).flatMap { try? JSONDecoder().decode(WallpaperMemory.self, from: $0) }
-        let sharks = ForeignStills(folder: support.appendingPathComponent(Handover.sharksStillsFolder, isDirectory: true),
-                                   memory: sharksMemory ?? WallpaperMemory())
-        keeper = WallpaperKeeper(memory: memory, stillsFolder: stillsFolder, foreign: sharks,
+        let data: RestoreData = SystemWallpaper.restoreData(stillsFolder: stillsFolder)
+        let sharks = ForeignStills(folder: SystemWallpaper.sharksStillsFolder, memory: data.sharks ?? WallpaperMemory())
+        keeper = WallpaperKeeper(memory: data.memory, stillsFolder: stillsFolder, foreign: sharks,
                                  desktop: Desktop(),
                                  save: { m in
                                      if let data = try? JSONEncoder().encode(m) {
@@ -45,6 +39,18 @@ final class SystemWallpaper {
                                      }
                                  },
                                  log: { Log.write($0) })
+    }
+
+    private static var support: URL { FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0] }
+    static var defaultStillsFolder: URL { support.appendingPathComponent("ASCII Animals/Stills", isDirectory: true) }
+    static var sharksStillsFolder: URL { support.appendingPathComponent(Handover.sharksStillsFolder, isDirectory: true) }
+
+    /// The memory and Sharks' saved originals, from the settings (and Sharks' own settings while it is installed).
+    static func restoreData(stillsFolder: URL) -> RestoreData {
+        RestoreData.resolve(settings: UserDefaults.standard.data(forKey: SystemWallpaper.memoryKey),
+                            sharksOwn: UserDefaults(suiteName: Handover.sharksBundleID)?.data(forKey: Handover.sharksWallpaperKey),
+                            sharksCopy: UserDefaults.standard.data(forKey: SystemWallpaper.sharksMemoryCopyKey),
+                            stillsFolder: stillsFolder)
     }
 
     /// Debounced: looks changes come in bursts (sliders, appearance switches).

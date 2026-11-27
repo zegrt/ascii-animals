@@ -424,6 +424,29 @@ func wallpaperKeeperChecks() {
         desk.view(space: 1, on: "S")
         k.reconcile(matching: false)
         try expect(desk.picture(on: "S", space: 1) == a, "Space 2's 3.0 still didn't go back to A")
+        // (Fix round, review-r2-r2 finding 3: the unread-folder uninstall assertion, back in the new model.)
+        // Uninstall while the Stills folder can't be read: the folder stays, and the restore data with it, so a
+        // reinstall still puts A back under Space 2's 3.0 still.
+        try unreadFolderKeepsRestoreData()
+    }
+    func unreadFolderKeepsRestoreData() throws {
+        let fm: FileManager = .default
+        let root: URL = wallpaperScratch("unread")
+        defer { try? fm.removeItem(at: root) }
+        let folder: URL = root.appendingPathComponent("Stills", isDirectory: true)
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        let hidden: URL = folder.appendingPathComponent("still-S-1700000000000.png")
+        try wallpaperTouch(hidden)
+        let settings: Data = try JSONEncoder().encode(try legacy(["S": a]))
+        let data: RestoreData = RestoreData.resolve(settings: settings, sharksOwn: nil, sharksCopy: nil, stillsFolder: folder)
+        try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: folder.path)
+        let kept: RestoreData.Kept = data.keepOnUninstall(stillsFolder: folder, sharksStills: root.appendingPathComponent("Sharks"))
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path)
+        try expect(kept.folder, "uninstall would delete a Stills folder it couldn't read")
+        let left: Data? = kept.keepsSettings ? settings : nil   // the settings are gone unless uninstall kept them
+        let again: RestoreData = RestoreData.resolve(settings: left, sharksOwn: nil, sharksCopy: nil, stillsFolder: folder)
+        let under: WallpaperEntry? = again.memory.under(WallpaperKeeper.stillEntry(hidden), on: "S", stillsFolder: folder)
+        try expect(under == a, "after uninstall with the Stills folder unread, a reinstall can't put A back: \(kept)")
     }
 
     // F3 (finding 3). Under an ASCII Sharks still, Sharks' own original comes back, not an Animals original from
@@ -463,6 +486,40 @@ func wallpaperKeeperChecks() {
         desk2.view(space: 1, on: "S")
         k3.reconcile(matching: false)
         try expect(desk2.picture(on: "S", space: 1) == a, "the hidden Sharks still didn't go back to Sharks' A")
+        // (Fix round, review-r2-r2 finding 3: the sole-copy retention assertion, back in the new model.)
+        // Uninstall with a Sharks still on a Space not in view, no stills of ours and only the hand-over's copy of
+        // Sharks' memory: the copy stays with the Stills folder, and a reinstall puts A back on the visit.
+        try soleSharksCopyKept(try JSONEncoder().encode(copy.memory))
+    }
+    func soleSharksCopyKept(_ copy: Data) throws {
+        let fm: FileManager = .default
+        let root: URL = wallpaperScratch("sole-copy")
+        defer { try? fm.removeItem(at: root) }
+        let ours: URL = root.appendingPathComponent("Animals/Stills", isDirectory: true)
+        let theirs: URL = root.appendingPathComponent("Sharks/Stills", isDirectory: true)
+        try fm.createDirectory(at: ours, withIntermediateDirectories: true)
+        try fm.createDirectory(at: theirs, withIntermediateDirectories: true)
+        let still: URL = theirs.appendingPathComponent("still-S-1690000000000.png")
+        try wallpaperTouch(still)
+        let data: RestoreData = RestoreData.resolve(settings: nil, sharksOwn: nil, sharksCopy: copy, stillsFolder: ours)
+        let kept: RestoreData.Kept = data.keepOnUninstall(stillsFolder: ours, sharksStills: theirs)
+        try expect(kept.folder, "uninstall would discard the only copy of Sharks' original: \(kept)")
+        let desk = FakeDesktop()
+        desk.attach("S", spaces: 2, showing: b)
+        desk.view(space: 1, on: "S")
+        try desk.set(WallpaperKeeper.stillEntry(still), on: "S")
+        let again: RestoreData = RestoreData.resolve(settings: nil, sharksOwn: nil, sharksCopy: kept.keepsSettings ? copy : nil,
+                                                     stillsFolder: ours)   // the reinstall: the settings are gone
+        let k = WallpaperKeeper(memory: again.memory, stillsFolder: ours,
+                                foreign: ForeignStills(folder: theirs, memory: again.sharks ?? WallpaperMemory()), desktop: desk)
+        k.reconcile(matching: false)   // the visit
+        let back: WallpaperEntry = desk.picture(on: "S", space: 1)
+        try expect(back == a, "after uninstall and a reinstall, the hidden Sharks still went to \(back.url.lastPathComponent), not A")
+        // Control: no Sharks still left and no stills of ours: nothing to keep, the folder goes.
+        try fm.removeItem(at: still)
+        let empty: URL = root.appendingPathComponent("Empty/Stills", isDirectory: true)
+        try fm.createDirectory(at: empty, withIntermediateDirectories: true)
+        try expect(!data.keepOnUninstall(stillsFolder: empty, sharksStills: theirs).folder, "kept an empty Stills folder with no Sharks still left")
     }
 
     // F4 (finding 5). A set that throws is read back before anything is deleted.
@@ -729,4 +786,121 @@ func wallpaperKeeperChecks() {
         try expect(desk2.exists(sharksStill), "the Sharks still was deleted")
     }
     check("wallpaperUpgradesRestoreTheirOriginals", upgradesRestoreTheirOriginals)
+
+    // MARK: fix round (review-r2-r2 @ 08884b3)
+
+    // FR1 (findings 1, 3). Restore data stays with the stills it describes: uninstall with a hidden Space on our still
+    // and one on a Sharks still known only from the hand-over's copy, the restore in view failing; reinstall and visit:
+    // each Space gets its own wallpaper back.
+    func reinstallRestoresKeptStills() throws {
+        let fm: FileManager = .default
+        let c = WallpaperEntry(url: URL(fileURLWithPath: "/Users/me/Pictures/C.png"), scaling: 1, allowClipping: false, fillColor: nil)
+        let root: URL = wallpaperScratch("reinstall")
+        defer { try? fm.removeItem(at: root) }
+        let ours: URL = root.appendingPathComponent("Animals/Stills", isDirectory: true)
+        let theirs: URL = root.appendingPathComponent("Sharks/Stills", isDirectory: true)
+        try fm.createDirectory(at: ours, withIntermediateDirectories: true)
+        try fm.createDirectory(at: theirs, withIntermediateDirectories: true)
+        let sharksStill: URL = theirs.appendingPathComponent("still-S-1690000000000.png")
+        try wallpaperTouch(sharksStill)
+        let copy: Data = try JSONEncoder().encode(try legacy(["S": c]))   // the hand-over's copy: Sharks saved C
+        let desk = FakeDesktop()
+        desk.attach("S", spaces: 3, showing: a)
+        desk.view(space: 1, on: "S")
+        try desk.set(b, on: "S")
+        desk.view(space: 2, on: "S")
+        try desk.set(WallpaperKeeper.stillEntry(sharksStill), on: "S")
+        func launch(settings: Data?, sharksCopy: Data?) -> WallpaperKeeper {
+            let data: RestoreData = RestoreData.resolve(settings: settings, sharksOwn: nil, sharksCopy: sharksCopy, stillsFolder: ours)
+            return WallpaperKeeper(memory: data.memory, stillsFolder: ours,
+                                   foreign: ForeignStills(folder: theirs, memory: data.sharks ?? WallpaperMemory()), desktop: desk)
+        }
+        let k: WallpaperKeeper = launch(settings: nil, sharksCopy: copy)   // matching on
+        for space in [0, 1] {
+            desk.view(space: space, on: "S")
+            guard let url = applyStill(k, desk, on: "S") else { throw CheckFailure(detail: "no still on Space \(space + 1)") }
+            try wallpaperTouch(url)
+        }
+        // Uninstall on Space 1, its restore failing.
+        desk.view(space: 0, on: "S")
+        desk.setFails = ["S"]
+        k.beginUninstall()
+        let out: RestoreOutcome = k.restoreAll()
+        try expect(out.failed == ["S"], "control: the restore in view failed: \(out)")
+        let settings: Data = try JSONEncoder().encode(k.memory)
+        let data: RestoreData = RestoreData.resolve(settings: settings, sharksOwn: nil, sharksCopy: copy, stillsFolder: ours)
+        let kept: RestoreData.Kept = data.keepOnUninstall(stillsFolder: ours, sharksStills: theirs)
+        try expect(kept.folder, "uninstall didn't keep the Stills folder: \(kept)")
+        // The reinstall, matching off: the settings are gone unless uninstall had to keep them.
+        desk.setFails = []
+        let k2: WallpaperKeeper = launch(settings: kept.keepsSettings ? settings : nil, sharksCopy: kept.keepsSettings ? copy : nil)
+        var back: [String] = []
+        for space in [0, 1, 2] {
+            desk.view(space: space, on: "S")
+            k2.reconcile(matching: false)
+            back.append(desk.picture(on: "S", space: space).url.lastPathComponent)
+        }
+        try expect(back == ["A.heic", "B.jpg", "C.png"], "after uninstall and a reinstall, the visits show \(back)")
+    }
+    check("wallpaperReinstallRestoresKeptStills", reinstallRestoresKeptStills)
+
+    // FR2 (finding 2). Accepting the offer to trash ASCII Sharks never removes a Sharks still a Space may show: its
+    // uninstaller deletes its whole support folder (here a fake, on a scratch folder), the still is back at its old
+    // path, and the visit restores Sharks' saved original.
+    func sharksRemovalKeepsItsStills() throws {
+        let fm: FileManager = .default
+        let root: URL = wallpaperScratch("handover")
+        defer { try? fm.removeItem(at: root) }
+        let support: URL = root.appendingPathComponent("ASCII Sharks", isDirectory: true)
+        let theirs: URL = support.appendingPathComponent("Stills", isDirectory: true)
+        let ours: URL = root.appendingPathComponent("ASCII Animals/Stills", isDirectory: true)
+        try fm.createDirectory(at: theirs, withIntermediateDirectories: true)
+        try fm.createDirectory(at: ours, withIntermediateDirectories: true)
+        let inView: URL = theirs.appendingPathComponent("still-S-1690000000001.png")
+        let hidden: URL = theirs.appendingPathComponent("still-S-1690000000000.png")
+        let picture: Data = Data("the hidden Space's picture".utf8)
+        try wallpaperTouch(inView)
+        try picture.write(to: hidden)
+        let desk = FakeDesktop()
+        desk.attach("S", spaces: 2, showing: WallpaperKeeper.stillEntry(inView))
+        desk.view(space: 1, on: "S")
+        try desk.set(WallpaperKeeper.stillEntry(hidden), on: "S")
+        desk.view(space: 0, on: "S")
+        let sharksMemory: Data = try JSONEncoder().encode(try legacy(["S": a]))
+        var copied: Data? = nil
+        let aside: URL = ours.appendingPathComponent(".sharks-handover", isDirectory: true)
+        let finished: Bool = SharksRemoval.run(sharksMemory: sharksMemory, sharksStills: theirs, aside: aside,
+                                               keepCopy: { copied = $0 }) {
+            // Sharks' own uninstaller: A back on the Space in view, then its whole support folder goes.
+            try? desk.set(a, on: "S")
+            try? fm.removeItem(at: support)
+            return true
+        }
+        try expect(finished && desk.picture(on: "S", space: 0) == a, "control: the fake uninstaller ran")
+        try expect(fm.fileExists(atPath: hidden.path), "the Sharks still a hidden Space shows is gone with Sharks' folder")
+        try expect((try? Data(contentsOf: hidden)) == picture, "the Sharks still came back changed")
+        try expect(!fm.fileExists(atPath: aside.path), "the copy set aside was left behind")
+        guard let copied else { throw CheckFailure(detail: "Sharks' memory wasn't copied") }
+        let data: RestoreData = RestoreData.resolve(settings: nil, sharksOwn: nil, sharksCopy: copied, stillsFolder: ours)
+        let k = WallpaperKeeper(memory: data.memory, stillsFolder: ours,
+                                foreign: ForeignStills(folder: theirs, memory: data.sharks ?? WallpaperMemory()), desktop: desk)
+        desk.view(space: 1, on: "S")
+        k.reconcile(matching: false)   // the visit, matching off
+        let back: WallpaperEntry = desk.picture(on: "S", space: 1)
+        try expect(back == a, "the hidden Sharks still went to \(back.url.lastPathComponent), not Sharks' A")
+    }
+    check("wallpaperSharksRemovalKeepsItsStills", sharksRemovalKeepsItsStills)
 }
+
+/// A fresh scratch folder for checks that need real files: under the temporary directory, never the person's folders.
+func wallpaperScratch(_ name: String) -> URL {
+    let url: URL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ascii-animals-check-\(getpid())", isDirectory: true)
+        .appendingPathComponent(name, isDirectory: true)
+    try? FileManager.default.removeItem(at: url)
+    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url
+}
+
+/// A real file where a still is.
+func wallpaperTouch(_ url: URL) throws { try Data("still".utf8).write(to: url) }
