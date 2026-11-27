@@ -50,7 +50,7 @@ Last approved state: tag `v3.0.1`.
 | Meadow, card, welcome, energy (t11 stack) | meadow-t11 @ 20cdb3c | approved (review-t11-r3 @ b03d17f); live card look at the join |
 | Pointer input (r1b) | meadow-r1b @ afa861f | approved (review-r1b-r2 @ d158c7c); banner re-test with the director |
 | Updates, settings, diagnostics (r3) | meadow-r3 @ 655e787 | approved 2026-11-27 (privacy re-check review-r3-r3 @ 8ade43f; 314 checks, selftest 0 failed). The log starts fresh on a format change, not every version (the director: "ok go", 2026-11-27) |
-| Wallpaper recovery (r2) | meadow-r2 @ bb6df14 | building: rebuild on the root fix (briefs/r2.md "Rebuild on the root fix", go 2026-11-27); checks it reverses are replaced with same-intent checks, each listed in the report (the director: "ok", 2026-11-27); then one review, a re-check only for data loss |
+| Wallpaper recovery (r2) | meadow-r2 @ 9e3a466 | in review (review-r2-r2): rebuilt on the root fix (proof 62bc678 fails 5 on bb6df14; 297 checks, selftest 0 failed; replaced checks listed in reports/r2.md; pushed). One review, a re-check only for data loss |
 
 Trial join (2026-11-25, scratch only, on t11 20cdb3c + r1b afa861f + r3 633a682 + r2 d9e05a0): one conflict
 (`Sources/OceanChecks/main.swift`, `greetingChecks()` and `pointerChecks()`, keep both); build passes, 334 checks,
@@ -58,7 +58,7 @@ selftest 0 failed.
 
 ## Next, in order
 
-Step 2 started on the director's "ok go" (2026-11-27); r3 approved the same day.
+r3 approved 2026-11-27; r2 rebuilt and in review.
 2. r2 rebuilt on the root fix: two reused files per display, written alternately, never deleted in normal use; the
    covered wallpaper in the file name; a file in our folder is ours, anything else is the person's; restore each
    Space on its next visit; do nothing when a read fails; uninstall restores the Space in view, keeps the small
@@ -68,7 +68,7 @@ Steps 3-5 wait for the director's go.
 3. The join: `meadow-3.1` from meadow-t11 plus r1b, r3, r2; a draft PR for CI; one Codex review of the merge only.
 4. Copy, with the director's OK: briefs/copy-unslop.patch (the director's /unslop, 29 lines in 10 files, made on the
    trial join; re-apply after r2 and r3 change their files) plus three README/CHANGELOG fixes (the card "once": an
-   unanswered card can come back twice; "deletes everything it saved": uninstall can keep the stills folder; the
+   unanswered card can come back twice; "deletes everything it saved": uninstall can keep the stills folder, also the uninstall confirmation's "saved stills" and the menu tooltip "everything it saved" (r2 report, Noticed); the
    battery claim: Meadow's WindowServer 29.7 % vs Web's 26.3 %).
 5. Release notes and the 3.1.1 list.
 
