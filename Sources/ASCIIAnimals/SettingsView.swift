@@ -659,7 +659,7 @@ private struct BehaviourSection: View {
             }
             Toggle(isOn: model.binding(\.matchSystemWallpaper)) {
                 Text("Match the lock screen")
-                Text("Sets a matching still as the system wallpaper. Yours comes back when you quit.")
+                Text("Your own wallpaper comes back when you quit or turn this off.")
             }
         } header: {
             Text("Behaviour")

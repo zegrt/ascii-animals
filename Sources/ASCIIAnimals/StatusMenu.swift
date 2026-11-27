@@ -411,9 +411,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func pickWake(_ i: NSMenuItem) { app.store.update { $0.wakeColor = i.tag == 0 ? .cyan : .accent } }
     @objc private func openSettings() { app.showSettings() }
     @objc private func restoreWallpaper() {
-        // Stop matching too, or the still would come straight back.
-        app.store.update { $0.matchSystemWallpaper = false }
-        app.wallpaper?.restoreAll()
+        // Stop matching too, or the still would come straight back; turning it off restores. Already off: try again.
+        if app.store.settings.matchSystemWallpaper {
+            app.store.update { $0.matchSystemWallpaper = false }
+        } else {
+            app.wallpaper?.restoreAll()
+        }
     }
     @objc private func openAbout() { app.showAbout() }
     @objc private func checkUpdates() { app.updates.checkNow(userInitiated: true) }

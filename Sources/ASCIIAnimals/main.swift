@@ -52,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let d = OceanDirector(renderer: renderer, store: store, signals: signals)
             director = d
             wallpaper = SystemWallpaper(renderer: renderer)   // nil in the energy-test copy
+            reconcileWallpaper()   // a restart after a kill, with matching off: our stills come down
             d.onLooksSettled = { [weak self] in self?.refreshSystemWallpaper(delay: 1) }
             signals.onChange = { [weak d] inputs in
                 d?.apply(PowerPolicy.mode(inputs))
@@ -61,8 +62,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let nc = NotificationCenter.default
             observers.append(nc.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
                 self?.director?.screensChanged()
+                self?.reconcileWallpaper()   // a display that comes back gets its picture back
                 self?.refreshSystemWallpaper()
             })
+            let ws = NSWorkspace.shared.notificationCenter
+            for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didWakeNotification] {
+                observers.append(ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    self?.reconcileWallpaper()
+                })
+            }
             observers.append(nc.addObserver(forName: NSColor.systemColorsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
                 self?.themeChanged()
             })
@@ -152,10 +160,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSPasteboard.general.setString(Diagnostics.body(app: self), forType: .string)
     }
 
-    /// Confirms, restores the wallpaper, removes everything, trashes the app and quits.
+    /// Confirms, restores the wallpaper, removes everything, trashes the app and quits; says what it couldn't do
+    /// (a wallpaper not put back, and what it kept for it).
     func uninstall() {
         guard Launch.plan.offersUninstall, Uninstaller.confirm() else { return }
-        Uninstaller.run(app: self)
+        let problems: [String] = Uninstaller.run(app: self)
+        if !problems.isEmpty {
+            let a = NSAlert()
+            a.messageText = "ASCII Animals is uninstalled"
+            a.informativeText = problems.joined(separator: "\n\n")
+            a.addButton(withTitle: "OK")
+            a.runModal()
+        }
         exit(0)
     }
 
@@ -181,8 +197,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if store.settings.appearance == .system || store.settings.wakeColor == .accent { refreshSystemWallpaper() }
     }
 
+    /// With matching off, our still comes down wherever it still shows (a display back, another Space, a wake).
+    func reconcileWallpaper() {
+        guard !isUninstalling else { return }
+        wallpaper?.reconcile(matching: store.settings.matchSystemWallpaper)
+    }
+
     func refreshSystemWallpaper(delay: TimeInterval = 2) {
-        guard let d = director, store.settings.matchSystemWallpaper else { return }
+        guard !isUninstalling, let d = director, store.settings.matchSystemWallpaper else { return }
         let t = OceanDirector.currentTheme(store.settings)
         wallpaper?.scheduleApply(settings: store.settings, systemIsDark: d.systemIsDark, accent: t.wake == ThemeParams.cyan ? SIMD3(0.2, 0.5, 1) : t.wake, delay: delay)
     }
@@ -191,7 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         guard !isUninstalling else { return }
-        if store.settings.matchSystemWallpaper { wallpaper?.restoreAll() }
+        wallpaper?.restoreAll()   // also with matching off: a display or Space may still show a still
         Log.write("quit")
         CrashMarker.cleanQuit()
     }
@@ -251,8 +273,7 @@ if CommandLine.arguments.contains("--uninstall") {
     if CommandLine.arguments.contains("--yes") || Uninstaller.confirm() {
         let renderer = MTLCreateSystemDefaultDevice().flatMap { try? OceanRenderer(device: $0) }
         let wp = renderer.flatMap { SystemWallpaper(renderer: $0) }
-        wp?.restoreAll()
-        let problems = Uninstaller.run(app: nil)
+        let problems = Uninstaller.run(app: nil, wallpaper: wp)
         print(problems.isEmpty ? "ASCII Animals uninstalled." : "Uninstalled, except: \(problems.joined(separator: "; "))")
     }
     exit(0)
