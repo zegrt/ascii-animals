@@ -890,6 +890,61 @@ func wallpaperKeeperChecks() {
         try expect(back == a, "the hidden Sharks still went to \(back.url.lastPathComponent), not Sharks' A")
     }
     check("wallpaperSharksRemovalKeepsItsStills", sharksRemovalKeepsItsStills)
+
+    // FR2b (re-check of the fix round, finding 2's open path). ASCII Sharks running at the hand-over: its quit (v2.3)
+    // restores the Space in view and forgets that display's original. The hand-over keeps Sharks' saved originals
+    // before asking it to quit, so a hidden Space on a Sharks still gets Sharks' original back on its visit, whether
+    // the person keeps Sharks or moves it to the Trash.
+    func sharksQuitKeepsItsOriginals(trash: Bool) throws {
+        let fm: FileManager = .default
+        let root: URL = wallpaperScratch("handover-quit")
+        defer { try? fm.removeItem(at: root) }
+        let support: URL = root.appendingPathComponent("ASCII Sharks", isDirectory: true)
+        let theirs: URL = support.appendingPathComponent("Stills", isDirectory: true)
+        let ours: URL = root.appendingPathComponent("ASCII Animals/Stills", isDirectory: true)
+        try fm.createDirectory(at: theirs, withIntermediateDirectories: true)
+        try fm.createDirectory(at: ours, withIntermediateDirectories: true)
+        let inView: URL = theirs.appendingPathComponent("still-S-1690000000001.png")
+        let hidden: URL = theirs.appendingPathComponent("still-S-1690000000000.png")
+        try wallpaperTouch(inView)
+        try wallpaperTouch(hidden)
+        let encoder: JSONEncoder = JSONEncoder()
+        let saved: Data = try encoder.encode(try legacy(["S": a]))   // v2.3's memory: Sharks saved A for display S
+        let forgotten: Data = try encoder.encode(try legacy([:]))    // the same after its quit forgot display S
+        let desk = FakeDesktop()
+        desk.attach("S", spaces: 2, showing: WallpaperKeeper.stillEntry(inView))
+        desk.view(space: 1, on: "S")
+        try desk.set(WallpaperKeeper.stillEntry(hidden), on: "S")
+        desk.view(space: 0, on: "S")
+        var sharksOwn: Data? = saved   // Sharks' own settings
+        var copy: Data? = nil          // the hand-over's copy, in our settings
+        SharksQuit.run(memory: { sharksOwn }, copy: copy, keepCopy: { copy = $0 }) {
+            // Sharks, running, is asked to quit: A back on the Space in view, then that display forgotten.
+            try? desk.set(a, on: "S")
+            sharksOwn = forgotten
+        }
+        try expect(desk.picture(on: "S", space: 0) == a, "control: the fake quit restored the Space in view")
+        if trash {
+            let aside: URL = ours.appendingPathComponent(".sharks-handover", isDirectory: true)
+            let finished: Bool = SharksRemoval.run(sharksMemory: sharksOwn, copy: copy, sharksStills: theirs,
+                                                   aside: aside, keepCopy: { copy = $0 }) {
+                try? fm.removeItem(at: support)   // Sharks' uninstaller: its settings and support folder go
+                sharksOwn = nil
+                return true
+            }
+            try expect(finished && fm.fileExists(atPath: hidden.path), "control: the hidden Sharks still is back on disk")
+        }
+        let data: RestoreData = RestoreData.resolve(settings: nil, sharksOwn: sharksOwn, sharksCopy: copy, stillsFolder: ours)
+        let k = WallpaperKeeper(memory: data.memory, stillsFolder: ours,
+                                foreign: ForeignStills(folder: theirs, memory: data.sharks ?? WallpaperMemory()), desktop: desk)
+        desk.view(space: 1, on: "S")
+        k.reconcile(matching: false)   // the visit, matching off
+        let back: WallpaperEntry = desk.picture(on: "S", space: 1)
+        let path: String = trash ? "Sharks moved to the Trash" : "Sharks kept"
+        try expect(back == a, "\(path): the hidden Sharks still went to \(back.url.lastPathComponent), not Sharks' A")
+    }
+    check("wallpaperSharksQuitKeepsItsOriginals") { try sharksQuitKeepsItsOriginals(trash: false) }
+    check("wallpaperSharksQuitThenTrashKeepsItsOriginals") { try sharksQuitKeepsItsOriginals(trash: true) }
 }
 
 /// A fresh scratch folder for checks that need real files: under the temporary directory, never the person's folders.

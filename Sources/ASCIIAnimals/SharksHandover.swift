@@ -38,7 +38,11 @@ enum SharksHandover {
         var imported = false
         for step in steps {
             switch step {
-            case .quitSharks: quitSharks()
+            case .quitSharks:
+                SharksQuit.run(memory: { UserDefaults(suiteName: id)?.data(forKey: Handover.sharksWallpaperKey) },
+                               copy: me.data(forKey: SystemWallpaper.sharksMemoryCopyKey),
+                               keepCopy: { me.set($0, forKey: SystemWallpaper.sharksMemoryCopyKey) },
+                               quit: quitSharks)
             case .importSettings:
                 if let data = facts.sharksSettings { me.set(data, forKey: SettingsStore.key); imported = true }
             case .skipWelcome: me.set(true, forKey: OnboardingController.seenKey)
@@ -146,6 +150,7 @@ enum SharksHandover {
     private static func runSharksUninstaller(_ app: URL) -> Bool {
         // Its wallpaper memory goes with its settings: keep a copy in case its restore didn't happen.
         SharksRemoval.run(sharksMemory: UserDefaults(suiteName: Handover.sharksBundleID)?.data(forKey: Handover.sharksWallpaperKey),
+                          copy: UserDefaults.standard.data(forKey: SystemWallpaper.sharksMemoryCopyKey),
                           sharksStills: SystemWallpaper.sharksStillsFolder,
                           aside: SystemWallpaper.defaultStillsFolder.appendingPathComponent(".sharks-handover", isDirectory: true),
                           keepCopy: { UserDefaults.standard.set($0, forKey: SystemWallpaper.sharksMemoryCopyKey) },

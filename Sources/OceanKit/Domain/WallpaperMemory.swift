@@ -410,6 +410,15 @@ public struct RestoreData: Codable, Equatable, Sendable {
     }
 }
 
+/// Asking a running ASCII Sharks to quit at the hand-over.
+public enum SharksQuit {
+    /// Asks Sharks to quit (`quit`). `memory` reads Sharks' wallpaper memory, `copy` is the hand-over's copy so far
+    /// and `keepCopy` stores a new one.
+    public static func run(memory: () -> Data?, copy: Data?, keepCopy: (Data) -> Void, quit: () -> Void) {
+        quit()
+    }
+}
+
 /// Removing ASCII Sharks once the person accepts the hand-over's offer. Sharks' own uninstaller deletes its whole
 /// support folder, stills included, while a Space not in view may still show one: they are copied aside first and
 /// any that went are put back at their old paths, where the wallpaper keeper restores them to Sharks' saved original
@@ -418,7 +427,7 @@ public enum SharksRemoval {
     /// Keeps a copy of Sharks' wallpaper memory (`keepCopy`), sets its stills aside in `aside`, runs Sharks' own
     /// uninstaller (`uninstall`, true when it finished) and puts back every still it removed. Returns `uninstall`'s
     /// answer.
-    public static func run(sharksMemory: Data?, sharksStills: URL, aside: URL, keepCopy: (Data) -> Void,
+    public static func run(sharksMemory: Data?, copy: Data? = nil, sharksStills: URL, aside: URL, keepCopy: (Data) -> Void,
                            log: (String) -> Void = { _ in }, uninstall: () -> Bool) -> Bool {
         if let sharksMemory { keepCopy(sharksMemory) }
         let fm: FileManager = .default
