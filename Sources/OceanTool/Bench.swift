@@ -30,11 +30,17 @@ enum Bench {
         let views: [(rect: CGRect, vp: ViewportRenderer, target: MTLTexture)]
     }
 
-    private static func scenes(_ s: Settings, desk: [ScreenInfo], separate: Bool, renderer r: OceanRenderer) throws -> [Scene] {
+    /// The scenes as the app lays them out (`HabitatScene.arrange`: the Meadow's share of the 12 on each screen when
+    /// `separate`), seeded 1, 2, … in order. Keep `desk` as long as the scenes.
+    private static func scenes(_ s: Settings, desk: [ScreenInfo], separate: Bool, on sceneDesk: SceneDesk,
+                               renderer r: OceanRenderer) throws -> [Scene] {
         let scale = Dictionary(uniqueKeysWithValues: desk.map { ($0.id, $0.scale) })
-        return try SceneLayout.plan(desk, shared: !separate).enumerated().map { n, plan in
-            let sim = Habitats.make(s, seed: UInt64(1 + n))
-            sim.layout(terrain: plan.terrain, cell: plan.cell, settings: s)
+        var next: UInt64 = 0
+        let hosted = HabitatScene.arrange([], plans: SceneLayout.plan(desk, shared: !separate), settings: s, fresh: true,
+                                          desk: sceneDesk, seeds: { next += 1; return next })
+        return try hosted.map { scene in
+            let plan = scene.plan
+            let sim = scene.sim
             let views = try plan.views.map { v -> (rect: CGRect, vp: ViewportRenderer, target: MTLTexture) in
                 let sc = scale[v.screenID]!
                 let vp = try r.makeViewport(pointSize: v.rect.size, scale: sc, cell: plan.cell)
@@ -54,7 +60,8 @@ enum Bench {
         guard let device = MTLCreateSystemDefaultDevice() else { throw RenderError(description: "no Metal device") }
         let r = try OceanRenderer(device: device)
         let theme = ThemeParams.make(s, systemIsDark: true, accent: .zero)
-        let all = try scenes(s, desk: desk, separate: separate, renderer: r)
+        let sceneDesk = SceneDesk()
+        let all = try scenes(s, desk: desk, separate: separate, on: sceneDesk, renderer: r)
         var last: MTLCommandBuffer?
         func draw(_ sc: Scene, _ v: (rect: CGRect, vp: ViewportRenderer, target: MTLTexture)) {
             guard let cb = r.queue.makeCommandBuffer() else { return }
@@ -71,6 +78,10 @@ enum Bench {
         let label = separate ? "separate" : "shared"
         let viewNames = all.flatMap { $0.views.map { "\(Int($0.rect.width))x\(Int($0.rect.height))" } }.joined(separator: " + ")
         print("\(s.habitat.rawValue)\(s.habitat == .ocean ? String(format: " (fish density %.2f)", s.fishDensity) : "") on the desk (\(label): \(all.count) scene\(all.count == 1 ? "" : "s"), viewports \(viewNames))")
+        if s.habitat == .meadow {
+            let counts: [String] = all.map { (sc: Scene) -> String in String((sc.sim as? MeadowSim)?.world.flies.count ?? 0) }
+            print("  butterflies after the warm-up: \(counts.joined(separator: " + "))")
+        }
         for fps in [30, 15] {
             let frames = Int(seconds * Double(fps))
             let stepsPerFrame = 60 / fps

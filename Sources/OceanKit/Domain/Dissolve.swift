@@ -67,3 +67,26 @@ public struct DissolveRun: Equatable, Sendable {
         swapped = false
     }
 }
+
+/// A screen's display link while the wallpaper isn't animating (`OceanDirector`): whether it owes one settled still
+/// (`stillPending`) and whether it runs.
+public enum HeldFrame {
+    /// The link for `mode` (`OceanDirector.apply`): live runs; a Low Power or Reduce Motion still owes a frame and
+    /// runs; paused runs only to draw a still owed to a user pause (covered, locked or asleep drops it).
+    public static func link(_ mode: RunMode, stillPending: Bool, userPaused: Bool) -> (stillPending: Bool, running: Bool) {
+        switch mode {
+        case .live: return (false, true)
+        case .still: return (true, true)
+        case .paused:
+            let pending: Bool = stillPending && Dissolve.drawsStillNow(mode, userPaused: userPaused)
+            return (pending, pending)
+        }
+    }
+
+    /// After the displays change (attach, detach, resize): whether the screen owes a settled still. Every screen
+    /// does when the held frame must show the change (a user pause, a Low Power or Reduce Motion still), so a paused
+    /// desktop shows the settled scenes instead of stale frames; `link` then runs it.
+    public static func stillPending(afterDisplayChange mode: RunMode, was: Bool, userPaused: Bool) -> Bool {
+        was || Dissolve.drawsStillNow(mode, userPaused: userPaused)
+    }
+}
