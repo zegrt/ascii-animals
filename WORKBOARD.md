@@ -50,7 +50,7 @@ Last approved state: tag `v3.0.1`.
 | Meadow, card, welcome, energy (t11 stack) | meadow-t11 @ 20cdb3c | approved (review-t11-r3 @ b03d17f); live card look at the join |
 | Pointer input (r1b) | meadow-r1b @ afa861f | approved (review-r1b-r2 @ d158c7c); banner re-test with the director |
 | Updates, settings, diagnostics (r3) | meadow-r3 @ 655e787 | approved 2026-11-27 (privacy re-check review-r3-r3 @ 8ade43f; 314 checks, selftest 0 failed). The log starts fresh on a format change, not every version (the director: "ok go", 2026-11-27) |
-| Wallpaper recovery (r2) | meadow-r2 @ bb6df14 | building: rebuild on the root fix (briefs/r2.md "Rebuild on the root fix", go 2026-11-27); then one review, a re-check only for data loss |
+| Wallpaper recovery (r2) | meadow-r2 @ bb6df14 | needs info (builder, 2026-11-27): about 15 checks assert what the rebuild reverses (new name per still, deleting stills, journal records, 3.0's keep-the-first-original). pending: breaks "never edit or remove a check", asked director; recommended: replace only those with checks of the same intent, each listed in the report with the brief line that changes it |
 
 Trial join (2026-11-25, scratch only, on t11 20cdb3c + r1b afa861f + r3 633a682 + r2 d9e05a0): one conflict
 (`Sources/OceanChecks/main.swift`, `greetingChecks()` and `pointerChecks()`, keep both); build passes, 334 checks,
