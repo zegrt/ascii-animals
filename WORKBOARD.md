@@ -50,7 +50,7 @@ Last approved state: tag `v3.0.1`.
 | Meadow, card, welcome, energy (t11 stack) | meadow-t11 @ 20cdb3c | approved (review-t11-r3 @ b03d17f); live card look at the join |
 | Pointer input (r1b) | meadow-r1b @ afa861f | approved (review-r1b-r2 @ d158c7c); banner re-test with the director |
 | Updates, settings, diagnostics (r3) | meadow-r3 @ 655e787 | approved 2026-11-27 (privacy re-check review-r3-r3 @ 8ade43f; 314 checks, selftest 0 failed). The log starts fresh on a format change, not every version (the director: "ok go", 2026-11-27) |
-| Wallpaper recovery (r2) | meadow-r2 @ 7d9c8d8 | fix round 2 done (proof e76b7d8 fails 2 on 59e16bb; fix: Sharks' originals kept before its quit; 301 checks, selftest 0 failed; pushed). In its re-check of that alone (review-r2-r4) |
+| Wallpaper recovery (r2) | meadow-r2 @ 7d9c8d8 | approved 2026-11-27 (re-check review-r2-r4 @ d5340ef; 301 checks, selftest 0 failed) |
 
 Trial join (2026-11-25, scratch only, on t11 20cdb3c + r1b afa861f + r3 633a682 + r2 d9e05a0): one conflict
 (`Sources/OceanChecks/main.swift`, `greetingChecks()` and `pointerChecks()`, keep both); build passes, 334 checks,
@@ -58,13 +58,7 @@ selftest 0 failed.
 
 ## Next, in order
 
-r3 approved 2026-11-27; r2 in the re-check of fix round 2.
-2. r2 rebuilt on the root fix: two reused files per display, written alternately, never deleted in normal use; the
-   covered wallpaper in the file name; a file in our folder is ours, anything else is the person's; restore each
-   Space on its next visit; do nothing when a read fails; uninstall restores the Space in view, keeps the small
-   folder and says so; 3.0 and Sharks stills left on disk, restored to their display's saved original. The brief
-   checks 3.0's limit of 3 stills per display. Then one review.
-Steps 3-5 wait for the director's go.
+All four parts approved 2026-11-27. Steps 3-5 wait for the director's go.
 3. The join: `meadow-3.1` from meadow-t11 plus r1b, r3, r2; a draft PR for CI; one Codex review of the merge only.
 4. Copy, with the director's OK: briefs/copy-unslop.patch (the director's /unslop, 29 lines in 10 files, made on the
    trial join; re-apply after r2 and r3 change their files) plus three README/CHANGELOG fixes (the card "once": an
@@ -97,6 +91,8 @@ Steps 3-5 wait for the director's go.
 - r2 re-check (review-r2-r3 @ 26fbe17), none in normal use: with blocked paths, staging the Sharks stills can fail
   open or a put-back can leave the old file missing, its backup replaceable by a second hand-over and read as a 3.0
   still; a rollback to 3.0 lets old settings mask the newer file table.
+- r2 fix round 2 re-check (review-r2-r4 @ d5340ef): going back to Sharks after the hand-over, letting it cover a
+  newer wallpaper, then quitting it before reopening Animals can put the older copy back on a hidden Space.
 - r2 finding 4 (a force quit between saving the original and setting the still), if the rebuild leaves it.
 - r3 finding 7 (cleanup on the main thread after the split).
 - r3 privacy re-check (review-r3-r3 @ 8ade43f), none in normal use: a rollback to 3.0 and back can admit old-format
