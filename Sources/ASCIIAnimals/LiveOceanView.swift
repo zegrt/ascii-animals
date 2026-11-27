@@ -21,6 +21,16 @@ final class LiveOceanView: NSView {
     let zoom: CGFloat
     var theme: ThemeParams
     var speed = 1.0
+    /// What the previews' power policy allows (`PowerPolicy.preview`, set with `run`): live at its rate, one frame
+    /// held (Reduce Motion, Low Power Mode, heat), or nothing drawn.
+    private(set) var mode: RunMode = .live(fps: 60)
+    /// Draw one frame, then stop: the held frame of `.still`.
+    private var holdAfterFrame = false
+    /// The most frames a second it draws live (0 when it isn't live).
+    var fps: Int {
+        if case .live(let f) = mode { return f }
+        return 0
+    }
     /// Fish flee the pointer and clicks splash, from this view's own mouse events.
     var handlesMouse = true
     private var tracking: NSTrackingArea?
@@ -101,8 +111,11 @@ final class LiveOceanView: NSView {
 
     /// A new line-up: when `Habitats.needsRebuild` says so, a new sim, warmed,
     /// with a soft fade so the swap doesn't pop. Other changes are ignored.
-    func rebuild(_ newSettings: OceanKit.Settings) {
-        guard Habitats.needsRebuild(old: settings, new: newSettings) else { return }
+    /// `reopening` (the About banner shown again): also a new Meadow line-up (`Habitats.needsFreshLook`).
+    func rebuild(_ newSettings: OceanKit.Settings, reopening: Bool = false) {
+        let fresh: Bool = reopening ? Habitats.needsFreshLook(old: settings, new: newSettings)
+                                    : Habitats.needsRebuild(old: settings, new: newSettings)
+        guard fresh else { return }
         settings = newSettings
         sim = Habitats.make(newSettings, seed: seed &+ 1)
         laidOut = false
@@ -116,24 +129,56 @@ final class LiveOceanView: NSView {
         fade.duration = 0.6
         fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
         metalLayer.add(fade, forKey: "rebuild")
+        if mode == .still { resume() }
     }
 
+    /// A new look (the Mac turned light or dark): a held frame is drawn again in it; a live one picks it up next frame.
     func setTheme(_ t: ThemeParams) {
         theme = t
         metalLayer.backgroundColor = CGColor(gray: t.light ? 0.96 : 0.02, alpha: 1)
+        if mode == .still { resume() }
     }
 
     // MARK: Running
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil { stop() } else { start() }
+        if window == nil { stop() } else { resume() }
     }
 
-    func start() {
-        guard link == nil, window != nil else { return }
+    /// Runs as the policy says now (`PowerPolicy.preview`): the card, the welcome and About follow it as the machine's
+    /// state changes.
+    func run(_ m: RunMode) {
+        mode = m
+        resume()
+    }
+
+    /// Draws per `mode`, when in a window: `start` for the callers that stop and start it (About's window).
+    func start() { resume() }
+
+    private func resume() {
+        guard window != nil else { return }
+        switch mode {
+        case .live(let f):
+            holdAfterFrame = false
+            startLink(fps: f)
+        case .still:
+            holdAfterFrame = true
+            startLink(fps: 30)
+        case .paused:
+            stop()
+        }
+    }
+
+    private func startLink(fps f: Int) {
+        let rate: Float = Float(max(1, f))
+        let range = CAFrameRateRange(minimum: min(rate, 30), maximum: rate, preferred: rate)
+        if let link {
+            link.preferredFrameRateRange = range
+            return
+        }
         let l = displayLink(target: self, selector: #selector(tick(_:)))
-        l.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+        l.preferredFrameRateRange = range
         l.add(to: .main, forMode: .common)
         link = l
     }
@@ -152,6 +197,7 @@ final class LiveOceanView: NSView {
         vp.encode(habitat: sim, theme: theme, target: drawable.texture, commandBuffer: cb)
         cb.present(drawable)
         cb.commit()
+        if holdAfterFrame { stop() }
     }
 
     // MARK: Pointer

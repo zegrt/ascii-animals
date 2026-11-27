@@ -9,6 +9,8 @@ final class OceanDirector {
     private let signals: SystemSignals
     private(set) var screens: [OceanScreen] = []
     private(set) var scenes: [HabitatScene] = []
+    /// The desk the scenes sit on (`HabitatScene.arrange`), kept as long as they are.
+    private let desk = SceneDesk()
     private(set) var mode: RunMode = .paused
     /// A habitat switch dissolving on a live desktop; nil when none is.
     private var dissolve: DissolveRun?
@@ -20,6 +22,10 @@ final class OceanDirector {
     /// Called after the first frame on every screen, and after looks change.
     var onLooksSettled: (() -> Void)?
     private(set) var lastError: String?
+    /// Frames committed on all screens since launch.
+    private(set) var framesDrawn: Int = 0
+    /// Frames committed per display since launch (the energy-test copy's frame-rate log reads it, per display).
+    private(set) var framesByDisplay: [CGDirectDisplayID: Int] = [:]
 
     init(renderer: OceanRenderer, store: SettingsStore, signals: SystemSignals) {
         self.renderer = renderer
@@ -36,7 +42,11 @@ final class OceanDirector {
     func start() {
         screensChanged()
         apply(PowerPolicy.mode(signals.inputs))
+        started = true
     }
+
+    /// Set once `start` has laid out the first screens: later layouts are display changes (attach, detach, resize).
+    private var started = false
 
     // MARK: Policy
 
@@ -50,20 +60,18 @@ final class OceanDirector {
         mode = newMode
         // Stopped animating mid-switch: finish it at once (Review Focus 1).
         if dissolve != nil, !Dissolve.shouldAnimate(newMode) { finishSwitch() }
-        switch newMode {
-        case .live(let fps):
-            for s in screens { s.stillPending = false; s.setFrameRate(fps); s.setRunning(true) }
-        case .still:
-            for s in screens { s.stillPending = true; s.setFrameRate(PowerPolicy.economyFPS); s.setRunning(true) }
-        case .paused:
-            // Do no work, except a still owed to a user pause (see showChangeIfHeld),
-            // drawn once its screen is visible. Covered, locked or asleep: drop
-            // any still left over from `.still`; the next visible mode draws.
-            let owed = Dissolve.drawsStillNow(newMode, userPaused: signals.inputs.userPaused)
-            for s in screens {
-                if !owed { s.stillPending = false }
-                s.setRunning(owed && s.stillPending)
+        // Paused: do no work, except a still owed to a user pause (see showChangeIfHeld), drawn once its screen is
+        // visible. Covered, locked or asleep: drop any still left over from `.still`; the next visible mode draws.
+        let userPaused = signals.inputs.userPaused
+        for s in screens {
+            let link = HeldFrame.link(newMode, stillPending: s.stillPending, userPaused: userPaused)
+            s.stillPending = link.stillPending
+            switch newMode {
+            case .live(let fps): s.setFrameRate(fps)
+            case .still: s.setFrameRate(PowerPolicy.economyFPS)
+            case .paused: break
             }
+            s.setRunning(link.running)
         }
         updatePointer()
     }
@@ -118,6 +126,8 @@ final class OceanDirector {
             if first { DispatchQueue.main.async { self?.firstFrame(s) } }
         }
         cb.commit()
+        framesDrawn += 1
+        framesByDisplay[s.displayID, default: 0] += 1
         if s.stillPending {
             s.stillPending = false
             s.setRunning(false)
@@ -136,25 +146,17 @@ final class OceanDirector {
     /// unchanged keeps its sim (laid out to any new geometry); `fresh` forces
     /// new sims, e.g. when switching between shared and separate oceans.
     func screensChanged(fresh: Bool = false) {
-        let current = NSScreen.screens
-        guard let primary = current.first else { return }
+        // Flipped against the menu-bar screen even when the energy-test copy keeps to the built-in display alone.
+        guard let primary = NSScreen.screens.first else { return }
+        let current: [NSScreen] = OceanDirector.drawnScreens(NSScreen.screens, builtInOnly: Launch.plan.builtInDisplayOnly)
+        if current.isEmpty { Log.write("no built-in display to draw on (built-in display only)") }
         let infos = current.map {
             ScreenInfo(id: Int($0.displayID), frame: ScreenGeometry.flip($0.frame, primaryHeight: primary.frame.height),
                        scale: $0.backingScaleFactor)
         }
         let plans = SceneLayout.plan(infos, shared: store.settings.sharedOcean)
 
-        var next: [HabitatScene] = []
-        for plan in plans {
-            let ids = Set(plan.views.map(\.screenID))
-            if !fresh, let keep = scenes.first(where: { $0.screenIDs == ids }) {
-                keep.update(plan, settings: store.settings)
-                next.append(keep)
-            } else {
-                next.append(HabitatScene(plan: plan, settings: store.settings))
-            }
-        }
-        scenes = next
+        scenes = HabitatScene.arrange(scenes, plans: plans, settings: store.settings, fresh: fresh, desk: desk)
 
         let ids = Set(current.map(\.displayID))
         for s in screens where !ids.contains(s.displayID) { s.close() }
@@ -176,7 +178,24 @@ final class OceanDirector {
         if OceanDirector.debug {
             NSLog("scenes: %@", scenes.map { "\($0.screenIDs.sorted()) rects=\($0.plan.terrain.rects.count) \($0.sim.kind)" }.joined(separator: " | "))
         }
-        apply(mode == .paused ? PowerPolicy.mode(signals.inputs) : mode)
+        let next: RunMode = mode == .paused ? PowerPolicy.mode(signals.inputs) : mode
+        // A display change the held frame must show (attach, detach, resize while paused by the user, or a Low Power
+        // or Reduce Motion still): every screen owes a settled still, so the paused desktop shows the settled scenes
+        // (the Meadow's new shares), not stale frames. The first layout at launch is not a change.
+        if started {
+            let userPaused = signals.inputs.userPaused
+            for s in screens {
+                s.stillPending = HeldFrame.stillPending(afterDisplayChange: next, was: s.stillPending, userPaused: userPaused)
+            }
+        }
+        apply(next)
+    }
+
+    /// The screens to draw on: all of them, or (the energy-test copy calibrating the Meadow's count) the built-in
+    /// display alone, so the laptop's density is what is seen. None when the built-in is closed or absent.
+    static func drawnScreens(_ screens: [NSScreen], builtInOnly: Bool) -> [NSScreen] {
+        guard builtInOnly else { return screens }
+        return screens.filter { CGDisplayIsBuiltin($0.displayID) != 0 }
     }
 
     private func report(_ error: Error) {

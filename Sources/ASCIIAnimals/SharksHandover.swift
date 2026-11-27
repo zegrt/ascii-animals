@@ -11,11 +11,9 @@ enum SharksHandover {
     /// How long Sharks' own uninstaller may take (it starts Metal to put the wallpaper back).
     private static let uninstallTimeout: TimeInterval = 30
 
-    /// Only the real app acts on Sharks: never a bare dev binary (no bundle ID, its own defaults),
-    /// and never a test run that opts out with ASCII_ANIMALS_NO_HANDOVER=1.
-    private static var enabled: Bool {
-        Handover.enabled(bundleID: Bundle.main.bundleIdentifier, environment: ProcessInfo.processInfo.environment)
-    }
+    /// Only the real app acts on Sharks: never a bare dev binary (no bundle ID, its own defaults), never the
+    /// energy-test copy, and never a test run that opts out with ASCII_ANIMALS_NO_HANDOVER=1 (`Launch.plan`).
+    static var enabled: Bool { Launch.plan.runsHandover }
 
     /// Synchronous; returns once Sharks has quit (or there was nothing to do).
     /// Must run before `AppDelegate.store` is first touched, so the imported settings are what it loads.
@@ -40,7 +38,12 @@ enum SharksHandover {
         var imported = false
         for step in steps {
             switch step {
-            case .quitSharks: quitSharks()
+            case .quitSharks:
+                // Its quit forgets the original of the display in view: keep its originals first.
+                SharksQuit.run(memory: { UserDefaults(suiteName: id)?.data(forKey: Handover.sharksWallpaperKey) },
+                               copy: me.data(forKey: SystemWallpaper.sharksMemoryCopyKey),
+                               keepCopy: { me.set($0, forKey: SystemWallpaper.sharksMemoryCopyKey) },
+                               quit: quitSharks)
             case .importSettings:
                 if let data = facts.sharksSettings { me.set(data, forKey: SettingsStore.key); imported = true }
             case .skipWelcome: me.set(true, forKey: OnboardingController.seenKey)
@@ -78,6 +81,8 @@ enum SharksHandover {
     // MARK: While running
 
     private static var watcher: NSKeyValueObservation?
+    /// Whether the watcher is on (the identity probe looks).
+    static var isWatching: Bool { watcher != nil }
     private static var quitting = false
 
     /// From launch on: ASCII Sharks opening (its login item, or out of habit) is asked to quit at once,
@@ -144,10 +149,18 @@ enum SharksHandover {
     /// back, removes its login item (which only Sharks itself can), settings, stills and logs, then
     /// trashes itself and exits. True if it exited on its own with success, within the time allowed.
     private static func runSharksUninstaller(_ app: URL) -> Bool {
-        // Its wallpaper memory goes with its settings: keep a copy in case its restore didn't happen.
-        if let memory = UserDefaults(suiteName: Handover.sharksBundleID)?.data(forKey: Handover.sharksWallpaperKey) {
-            UserDefaults.standard.set(memory, forKey: SystemWallpaper.sharksMemoryCopyKey)
-        }
+        // Its wallpaper memory goes with its settings: keep a copy (with the one kept before it quit) in case its
+        // restore didn't happen.
+        SharksRemoval.run(sharksMemory: UserDefaults(suiteName: Handover.sharksBundleID)?.data(forKey: Handover.sharksWallpaperKey),
+                          copy: UserDefaults.standard.data(forKey: SystemWallpaper.sharksMemoryCopyKey),
+                          sharksStills: SystemWallpaper.sharksStillsFolder,
+                          aside: SystemWallpaper.defaultStillsFolder.appendingPathComponent(".sharks-handover", isDirectory: true),
+                          keepCopy: { UserDefaults.standard.set($0, forKey: SystemWallpaper.sharksMemoryCopyKey) },
+                          log: { Log.write("hand-over: \($0)") },
+                          uninstall: { runUninstallProcess(app) })
+    }
+
+    private static func runUninstallProcess(_ app: URL) -> Bool {
         guard let exe = Bundle(url: app)?.executableURL, FileManager.default.isExecutableFile(atPath: exe.path) else {
             Log.write("hand-over: no ASCII Sharks executable in \(app.path)")
             return false

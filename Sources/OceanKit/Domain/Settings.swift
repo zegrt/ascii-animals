@@ -36,11 +36,19 @@ public struct Settings: Codable, Equatable, Sendable {
     public var webSpiders: [SpiderKind] = SpiderKind.defaultCast
     public var webFlies = true
     public var webJumper = true
+    /// The Meadow's species that are on, in `ButterflyKind` order (at least one).
+    public var meadowButterflies: [ButterflyKind] = ButterflyKind.allCases
+    /// How many butterflies on a laptop screen, 1…12; a bigger display gets more by area, up to 12 in all
+    /// (`MeadowTuning.areaCount`, `areaCountLimit`).
+    public var meadowCount = 7
+    /// The Meadow has been picked once: its "New" tag in the menu goes.
+    public var meadowTried = false
 
     public static let defaults = Settings()
     public static let maxSharks = 8
     public static let maxSpiders = 8
     public static let fpsOptions = [15, 30, 60]
+    public static let meadowCountRange = 1...12
 
     public init() {}
 
@@ -48,17 +56,24 @@ public struct Settings: Codable, Equatable, Sendable {
         var s = self
         s.fishDensity = min(2.0, max(0.5, fishDensity.isFinite ? fishDensity : 1))
         s.speed = min(1.5, max(0.5, speed.isFinite ? speed : 1))
-        // Nearest option; ties go up.
-        s.fps = Settings.fpsOptions.min { abs($0 - fps) < abs($1 - fps) || (abs($0 - fps) == abs($1 - fps) && $0 > $1) }!
+        // Nearest option; ties go up. Clamped first, so a stored extreme can't overflow the subtraction.
+        let f: Int = min(1000, max(0, fps))
+        s.fps = Settings.fpsOptions.min { abs($0 - f) < abs($1 - f) || (abs($0 - f) == abs($1 - f) && $0 > $1) }!
         s.sharks = Array(sharks.prefix(Settings.maxSharks))
         if s.sharks.isEmpty { s.sharks = Settings.defaults.sharks }
         s.webSpiders = Array(webSpiders.prefix(Settings.maxSpiders))
         if s.webSpiders.isEmpty { s.webSpiders = SpiderKind.defaultCast }
+        // Each species once, in order; none on is the default line-up (at least one stays on).
+        s.meadowButterflies = ButterflyKind.allCases.filter { meadowButterflies.contains($0) }
+        if s.meadowButterflies.isEmpty { s.meadowButterflies = Settings.defaults.meadowButterflies }
+        s.meadowCount = min(Settings.meadowCountRange.upperBound, max(Settings.meadowCountRange.lowerBound, meadowCount))
+        if s.habitat == .meadow { s.meadowTried = true }
         return s
     }
 
     private enum K: String, CodingKey {
         case sharks, fishDensity, speed, appearance, calm, grid, wakeColor, interaction, sharedOcean, fps, lowPowerAnimates, matchSystemWallpaper, pauseShortcut, showMenuBarIcon, checkForUpdates, autoInstallUpdates, paused, habitat, webSpiders, webFlies, webJumper
+        case meadowButterflies, meadowCount, meadowTried
     }
 
     public init(from decoder: Decoder) throws {
@@ -80,6 +95,13 @@ public struct Settings: Codable, Equatable, Sendable {
         } else {
             habitat = d.habitat
         }
+        if let raw = (try? c.decodeIfPresent([String].self, forKey: .meadowButterflies)) ?? nil {
+            meadowButterflies = raw.compactMap(ButterflyKind.init(key:))
+        } else {
+            meadowButterflies = d.meadowButterflies
+        }
+        meadowCount = get(.meadowCount, d.meadowCount)
+        meadowTried = get(.meadowTried, d.meadowTried)
         webFlies = get(.webFlies, d.webFlies)
         webJumper = get(.webJumper, d.webJumper)
         fishDensity = get(.fishDensity, d.fishDensity)
@@ -99,6 +121,105 @@ public struct Settings: Codable, Equatable, Sendable {
         autoInstallUpdates = get(.autoInstallUpdates, d.autoInstallUpdates)
         paused = get(.paused, d.paused)
     }
+}
+
+/// Saved by name ("monarch", "morpho", "swallowtail", "white"); an unknown name is dropped by `Settings`.
+extension ButterflyKind: Codable {
+    public var key: String {
+        switch self {
+        case .monarch: return "monarch"
+        case .morpho: return "morpho"
+        case .swallowtail: return "swallowtail"
+        case .white: return "white"
+        }
+    }
+
+    public init?(key: String) {
+        guard let k = ButterflyKind.allCases.first(where: { $0.key == key }) else { return nil }
+        self = k
+    }
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        guard let k = ButterflyKind(key: raw) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "unknown butterfly \(raw)"))
+        }
+        self = k
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(key)
+    }
+}
+
+/// A ready-made Meadow line-up: which species, and how many on a laptop screen (the director's three, d1).
+public struct MeadowLineUp: Equatable, Sendable {
+    public let title: String
+    public let butterflies: [ButterflyKind]
+    public let count: Int
+
+    public init(title: String, butterflies: [ButterflyKind], count: Int) {
+        self.title = title
+        self.butterflies = butterflies
+        self.count = count
+    }
+
+    /// "Mixed" is the default (the director's tuned mix); then "Just a Few" and "Blue Morphos".
+    public static let all: [MeadowLineUp] = [
+        MeadowLineUp(title: "Mixed", butterflies: ButterflyKind.allCases, count: 7),
+        MeadowLineUp(title: "Just a Few", butterflies: [.monarch, .morpho, .white], count: 3),
+        MeadowLineUp(title: "Blue Morphos", butterflies: [.morpho], count: 5),
+    ]
+
+    /// The line-up these settings show, or nil (Custom).
+    public static func matching(_ s: Settings) -> MeadowLineUp? {
+        all.first { $0.butterflies == s.meadowButterflies && $0.count == s.meadowCount }
+    }
+
+    /// Puts this line-up's species and count into the settings.
+    public func apply(to s: inout Settings) {
+        s.meadowButterflies = butterflies
+        s.meadowCount = count
+    }
+
+    /// How a fresh meadow shares `count` among the species on (the sketch's `syncFlies` at load, html:1386–1446):
+    /// evenly, the odd ones to the first species in order. Species that get none are left out.
+    public static func shares(_ on: [ButterflyKind], count: Int) -> [(kind: ButterflyKind, count: Int)] {
+        guard !on.isEmpty, count > 0 else { return [] }
+        let base: Int = count / on.count
+        let extra: Int = count - base * on.count
+        var out: [(kind: ButterflyKind, count: Int)] = []
+        for (i, k) in on.enumerated() {
+            let n: Int = base + (i < extra ? 1 : 0)
+            if n > 0 { out.append((kind: k, count: n)) }
+        }
+        return out
+    }
+}
+
+/// How this person came to 3.1: the one rule for what 3.1 shows as new (the menu's "New" badge on Meadow; t9's
+/// what's-new card uses the same). Decided once, at the first launch of 3.1 or later, and kept under `key`, so it
+/// never changes after (settings saved since, or the welcome seen since, don't turn a new install into an upgrade).
+public enum Arrival: String, Sendable {
+    /// An earlier version ran here: an upgrade, who is told what 3.1 adds.
+    case before31 = "before-3.1"
+    /// A fresh install of 3.1 or later, who meets everything in the welcome.
+    case since31 = "3.1"
+
+    /// Where the decision is kept (the app's own defaults).
+    public static let key = "arrival.v1"
+
+    /// `stored` if it was decided already; otherwise an upgrade when an earlier version left a trace: saved settings
+    /// (ASCII Animals' own, or ASCII Sharks' taken over), the welcome seen, or the hand-over from ASCII Sharks done.
+    /// Nothing at all is a fresh install.
+    public static func decide(stored: String?, savedSettings: Bool, onboarded: Bool, handedOver: Bool) -> Arrival {
+        if let stored, let a = Arrival(rawValue: stored) { return a }
+        return savedSettings || onboarded || handedOver ? .before31 : .since31
+    }
+
+    /// The "New" badge on Meadow in the Habitat menu: for an upgrade, until the Meadow has been picked once.
+    public func meadowIsNew(_ s: Settings) -> Bool { self == .before31 && !s.meadowTried }
 }
 
 public enum SettingsCodec {

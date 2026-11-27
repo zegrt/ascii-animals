@@ -6,195 +6,168 @@ import UserNotifications
 /// user asks). Sends nothing about the user: one GET for the latest version,
 /// with an ETag so an unchanged answer costs nothing. With automatic updates
 /// on, a new version installs itself (SelfUpdater) when the user isn't in the
-/// app's windows; otherwise it's one click.
-final class UpdateService: NSObject, UNUserNotificationCenterDelegate {
-    enum State: Equatable {
-        case idle, checking, upToDate
-        case available(LatestRelease)
-        case installing(LatestRelease)
-        case failed(String)
+/// app's windows; otherwise it's one click. The decisions are `UpdateEngine`'s
+/// (OceanKit, checked); this is its host: the network, the disk, the screen.
+final class UpdateService: NSObject, UNUserNotificationCenterDelegate, UpdateHost {
+    typealias State = UpdateState
+
+    var state: State { engine?.state ?? .idle }
+    var available: LatestRelease? { engine?.available }
+    var installing: LatestRelease? { engine?.installing }
+    /// Called on the main thread whenever `state` changes.
+    var onChange: (() -> Void)? {
+        didSet { engine?.onChange = onChange }
     }
 
-    private(set) var state: State = .idle { didSet { if state != oldValue { onChange?() } } }
-    var available: LatestRelease? { if case .available(let r) = state { return r }; return nil }
-    var installing: LatestRelease? { if case .installing(let r) = state { return r }; return nil }
-    /// Called on the main thread whenever `state` changes.
-    var onChange: (() -> Void)?
-
-    private let defaults = UserDefaults.standard
+    private var engine: UpdateEngine?
     private var timer: Timer?
+    private var firstLook: Timer?
+    private var observers: [NSObjectProtocol] = []
+    /// Menus being tracked right now (NSMenu's begin/end notifications).
+    private var menusOpen = 0
     private var enabled: () -> Bool = { false }
-    private var autoInstall: () -> Bool = { false }
-    private var inFlight = false
-    private static let lastCheckKey = "update.lastCheck"
-    private static let etagKey = "update.etag"
-    private static let cachedKey = "update.cachedBody"
-    private static let notifiedKey = "update.notifiedTag"
-    /// An automatic install of this tag failed; don't retry it on our own.
-    private static let autoFailedKey = "update.autoFailedTag"
-    /// Set just before an automatic install restarts the app, to say so after.
-    private static let autoInstalledKey = "update.autoInstalledVersion"
+    private var autoInstallSetting: () -> Bool = { false }
 
-    /// The app bundle can post notifications; a bare debug binary can't.
-    private var canNotify: Bool { Bundle.main.bundleIdentifier != nil }
+    /// False in the energy-test copy (`LaunchPlan.startsUpdates`): every way in (start, Check for Updates, a notice,
+    /// install) does nothing, so it never checks, prompts, writes an update key, replaces itself or restarts.
+    private let allowed: Bool = Launch.plan.startsUpdates
+    /// Whether the hourly check is scheduled (the identity probe looks).
+    var isStarted: Bool { timer != nil }
+    /// Whether a check is under way (the identity probe looks).
+    var isChecking: Bool { engine?.inFlight ?? false }
 
     func start(enabled: @escaping () -> Bool, autoInstall: @escaping () -> Bool) {
+        guard allowed else { return }
         self.enabled = enabled
-        self.autoInstall = autoInstall
+        self.autoInstallSetting = autoInstall
         if canNotify { UNUserNotificationCenter.current().delegate = self }
-        announceAutoInstall()
-        // Remember a release found earlier, so the menu shows it right away.
-        if let data = defaults.data(forKey: UpdateService.cachedKey) { apply(data, userInitiated: false) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in self?.tick() }
-        timer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in self?.tick() }
-    }
-
-    private func tick() {
-        guard enabled() else { return }
-        let last = defaults.object(forKey: UpdateService.lastCheckKey) as? Date
-        if UpdatePolicy.shouldCheck(lastCheck: last, now: Date()) {
-            checkNow(userInitiated: false)
-        } else {
-            // A release found earlier may have waited for the user to be done.
-            autoInstallIfAllowed()
-        }
+        let e = UpdateEngine(store: UserDefaults.standard, host: self)
+        e.onChange = onChange
+        engine = e
+        let nc = NotificationCenter.default
+        observers.append(nc.addObserver(forName: SettingsStore.didChange, object: nil, queue: .main) { [weak self] _ in
+            self?.engine?.settingsChanged()
+        })
+        observers.append(nc.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.menusOpen += 1
+        })
+        observers.append(nc.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+            if let self { self.menusOpen = max(0, self.menusOpen - 1) }
+        })
+        e.start()
     }
 
     func checkNow(userInitiated: Bool) {
-        guard !inFlight, installing == nil else { return }
-        inFlight = true
-        if userInitiated { state = .checking }
+        guard allowed else { return }
+        engine?.check(userInitiated: userInitiated)
+    }
+
+    func install() {
+        guard allowed else { return }
+        engine?.install()
+    }
+
+    // MARK: UpdateHost
+
+    var now: Date { Date() }
+    var checking: Bool { enabled() }
+    var autoInstall: Bool { autoInstallSetting() }
+    /// Read from the app's real state each time it's asked: frontmost; one of its own windows up, focused or not
+    /// (Settings, About, the welcome, the what's-new card, an alert), not the wallpaper windows at the desktop level or
+    /// the menu-bar icon's; a menu open (being tracked).
+    var surfaces: UpdateSurfaces {
+        let menuOpen: Bool = menusOpen > 0 || RunLoop.main.currentMode == .eventTracking
+        return UpdateSurfaces(appActive: NSApp.isActive, windowUp: Self.windowUp(), menuOpen: menuOpen)
+    }
+
+    private static func windowUp() -> Bool {
+        if NSApp.modalWindow != nil || OnboardingController.isShowing { return true }
+        return NSApp.windows.contains { w in
+            w.isVisible && w.level.rawValue >= NSWindow.Level.normal.rawValue && !w.className.hasPrefix("NSStatusBar")
+        }
+    }
+    var runningVersion: String { AppInfo.version }
+    var installBlocker: String? { SelfUpdater.blocker() }
+    /// The app bundle can post notifications; a bare debug binary can't.
+    var canNotify: Bool { Bundle.main.bundleIdentifier != nil }
+
+    func setSchedule(_ on: Bool) {
+        if !on {
+            firstLook?.invalidate(); firstLook = nil
+            timer?.invalidate(); timer = nil
+            return
+        }
+        guard timer == nil else { return }
+        firstLook = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { [weak self] _ in
+            self?.firstLook = nil
+            self?.engine?.tick()
+        }
+        timer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in self?.engine?.tick() }
+    }
+
+    func fetchFeed(etag: String?, done: @escaping (FeedResponse) -> Void) {
         var req = URLRequest(url: AppInfo.latestAPI, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         req.setValue("ASCIIAnimals/\(AppInfo.version)", forHTTPHeaderField: "User-Agent")
-        if let etag = defaults.string(forKey: UpdateService.etagKey), defaults.data(forKey: UpdateService.cachedKey) != nil {
-            req.setValue(etag, forHTTPHeaderField: "If-None-Match")
-        }
-        URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
-            DispatchQueue.main.async { self?.finish(data, response as? HTTPURLResponse, error, userInitiated: userInitiated) }
+        if let etag { req.setValue(etag, forHTTPHeaderField: "If-None-Match") }
+        URLSession.shared.dataTask(with: req) { data, response, error in
+            let http = response as? HTTPURLResponse
+            let answer = FeedResponse(status: http?.statusCode, body: data, etag: http?.value(forHTTPHeaderField: "ETag"),
+                                      error: error?.localizedDescription, errorCode: error.map { UpdateFailure.code(of: $0) })
+            DispatchQueue.main.async { done(answer) }
         }.resume()
     }
 
-    private func finish(_ data: Data?, _ http: HTTPURLResponse?, _ error: Error?, userInitiated: Bool) {
-        inFlight = false
-        defaults.set(Date(), forKey: UpdateService.lastCheckKey)
-        var body = data
-        if http?.statusCode == 304 {
-            body = defaults.data(forKey: UpdateService.cachedKey)
-        } else if http?.statusCode == 200, let data {
-            defaults.set(data, forKey: UpdateService.cachedKey)
-            if let etag = http?.value(forHTTPHeaderField: "ETag") { defaults.set(etag, forKey: UpdateService.etagKey) }
-        } else {
-            let why = error?.localizedDescription ?? "GitHub answered \(http?.statusCode ?? 0)."
-            Log.write("update check failed: \(why)")
-            state = .failed(why)
-            if userInitiated { alert(title: "Couldn't check for updates", text: why) }
-            return
-        }
-        guard let body else { return }
-        apply(body, userInitiated: userInitiated)
+    func stage(_ release: LatestRelease, done: @escaping (Result<StagedUpdate, UpdateFailure>) -> Void) {
+        SelfUpdater.stage(release, done: done)
     }
 
-    private func apply(_ data: Data, userInitiated: Bool) {
-        if installing != nil { return }
-        guard let r = UpdateFeed.parse(data), UpdatePolicy.isNewer(r.version, than: AppInfo.version) else {
-            state = .upToDate
-            if userInitiated { alert(title: "You're up to date", text: "ASCII Animals \(AppInfo.version) is the latest version.") }
-            return
-        }
-        state = .available(r)
-        if userInitiated {
-            NSApp.activate(ignoringOtherApps: true)
-            let a = NSAlert()
-            a.messageText = "ASCII Animals \(r.version) is available"
-            a.informativeText = "You have \(AppInfo.version). It installs in a few seconds, then ASCII Animals restarts."
-            a.addButton(withTitle: "Install and Restart")
-            a.addButton(withTitle: "Later")
-            if a.runModal() == .alertFirstButtonReturn { install() }
-        } else if !autoInstallIfAllowed() {
-            notifyOnce(r)
-        }
-    }
+    func commit(_ staged: StagedUpdate) -> Result<URL, UpdateFailure> { SelfUpdater.commit(staged) }
+    func discard(_ staged: StagedUpdate) { SelfUpdater.discard(staged) }
+    func startNewCopy(_ app: URL) -> Bool { SelfUpdater.scheduleRelaunch(app) }
+    func quit() { NSApp.terminate(nil) }
+    func log(_ line: String) { Log.write(line) }
 
-    /// Installs the available release without asking, when the policy allows.
-    @discardableResult
-    private func autoInstallIfAllowed() -> Bool {
-        guard let r = available else { return false }
-        let go = UpdatePolicy.shouldAutoInstall(
-            checking: enabled(), autoInstall: autoInstall(),
-            installable: r.zipURL != nil && r.zipSHA256 != nil && SelfUpdater.blocker() == nil,
-            tag: r.tag, failedTag: defaults.string(forKey: UpdateService.autoFailedKey),
-            userBusy: NSApp.isActive)   // an accessory app is active only while its own windows are in use
-        if go { install(automatic: true) }
-        return go
-    }
-
-    /// Downloads and installs the available release, then restarts. Asked for
-    /// by the user: when this copy can't replace itself, or the install fails,
-    /// says why and offers the DMG. Automatic: fails quietly to the notice.
-    func install(automatic: Bool = false) {
-        guard let r = available else { return }
-        if !automatic, let why = SelfUpdater.blocker() { return offerDownload(r, why) }
-        state = .installing(r)
-        Log.write("installing \(r.tag)\(automatic ? " (automatic)" : "")")
-        SelfUpdater.install(r) { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .success(let app):
-                Log.write("installed \(r.tag), restarting")
-                if automatic { self.defaults.set(r.version.description, forKey: UpdateService.autoInstalledKey) }
-                SelfUpdater.relaunch(app)
-            case .failure(let why):
-                Log.write("update install failed: \(why)")
-                self.state = .available(r)
-                if automatic {
-                    self.defaults.set(r.tag, forKey: UpdateService.autoFailedKey)
-                    self.notifyOnce(r)
-                } else {
-                    self.offerDownload(r, why.description)
-                }
-            }
-        }
-    }
-
-    /// After an automatic update restarts the app: a quiet "now on 2.4".
-    private func announceAutoInstall() {
-        guard let v = defaults.string(forKey: UpdateService.autoInstalledKey) else { return }
-        defaults.removeObject(forKey: UpdateService.autoInstalledKey)
-        guard canNotify, AppVersion(v) == AppVersion(AppInfo.version) else { return }
+    func notify(id: String, title: String, body: String, kind: String, done: @escaping (Bool) -> Void) {
         let content = UNMutableNotificationContent()
-        content.title = "ASCII Animals updated to \(v)"
-        content.body = "What's new is on GitHub."
-        content.userInfo = ["kind": "updated"]
-        post(content, id: "updated-\(v)") { _ in }
-    }
-
-    private func offerDownload(_ r: LatestRelease, _ why: String) {
-        NSApp.activate(ignoringOtherApps: true)
-        let a = NSAlert()
-        a.messageText = "Couldn't install ASCII Animals \(r.version)"
-        a.informativeText = "\(why)\n\nYour current version is untouched. You can download the update and install it by hand."
-        a.addButton(withTitle: "Download")
-        a.addButton(withTitle: "Cancel")
-        if a.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(r.dmgURL ?? r.pageURL) }
-    }
-
-    private func notifyOnce(_ r: LatestRelease) {
-        guard canNotify, defaults.string(forKey: UpdateService.notifiedKey) != r.tag else { return }
-        let content = UNMutableNotificationContent()
-        content.title = "ASCII Animals \(r.version) is available"
-        content.body = "Click to install it. ASCII Animals restarts in a few seconds."
-        post(content, id: "update-\(r.tag)") { [weak self] in
-            if $0 { self?.defaults.set(r.tag, forKey: UpdateService.notifiedKey) }
-        }
-    }
-
-    /// Asks permission (once; macOS remembers) and posts. `done` gets whether it went, on main.
-    private func post(_ content: UNNotificationContent, id: String, done: @escaping (Bool) -> Void) {
+        content.title = title
+        content.body = body
+        content.userInfo = ["kind": kind]
         let center = UNUserNotificationCenter.current()
+        // Asks permission (once; macOS remembers) and posts.
         center.requestAuthorization(options: [.alert]) { granted, _ in
             if granted { center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil)) }
             DispatchQueue.main.async { done(granted) }
+        }
+    }
+
+    func offerInstall(_ r: LatestRelease) -> Bool {
+        NSApp.activate(ignoringOtherApps: true)
+        let a = NSAlert()
+        a.messageText = "ASCII Animals \(r.version) is available"
+        a.informativeText = "You have \(AppInfo.version). It installs in a few seconds, then ASCII Animals restarts."
+        a.addButton(withTitle: "Install and Restart")
+        a.addButton(withTitle: "Later")
+        return a.runModal() == .alertFirstButtonReturn
+    }
+
+    func tell(_ message: UpdateMessage) {
+        switch message {
+        case .upToDate(let v):
+            alert(title: "You're up to date", text: "ASCII Animals \(v) is the latest version.")
+        case .couldNotCheck(let why):
+            alert(title: "Couldn't check for updates", text: why)
+        case .couldNotInstall(let r, let why):
+            NSApp.activate(ignoringOtherApps: true)
+            let a = NSAlert()
+            a.messageText = "Couldn't install ASCII Animals \(r.version)"
+            a.informativeText = "\(why)\n\nYour current version is untouched. You can download the update and install it by hand."
+            a.addButton(withTitle: "Download")
+            a.addButton(withTitle: "Cancel")
+            if a.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(r.dmgURL ?? r.pageURL) }
+        case .restartFailed(let r):
+            alert(title: "ASCII Animals \(r.version) is installed",
+                  text: "It couldn't restart by itself, so this copy keeps running. Quit ASCII Animals and open it again to finish.")
         }
     }
 
@@ -221,3 +194,6 @@ final class UpdateService: NSObject, UNUserNotificationCenterDelegate {
         a.runModal()
     }
 }
+
+/// UserDefaults is the updater's store.
+extension UserDefaults: UpdateStore {}

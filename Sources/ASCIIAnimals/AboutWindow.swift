@@ -3,7 +3,7 @@ import Metal
 import OceanKit
 import SwiftUI
 
-/// The About window: a strip of live ocean, the icon, the name and version,
+/// The About window: a strip of the live habitat, the icon, the name and version,
 /// who made it, and credit to the originals and the font.
 enum AboutWindow {
     private static var controller: AboutController?
@@ -13,17 +13,23 @@ enum AboutWindow {
         controller?.show()
     }
 
+    /// The machine's state changed: the strip follows the previews' policy while the window is up.
+    static func powerChanged(_ i: PowerInputs) { controller?.powerChanged(i) }
+
     /// Debug: render to a PNG (no Screen Recording needed). `--snapshot-about <png>`
-    /// `ASCII_ANIMALS_SNAPSHOT_LIGHT=1` snapshots the light appearance.
+    /// `ASCII_ANIMALS_SNAPSHOT_LIGHT=1` snapshots the light appearance, `ASCII_ANIMALS_SNAPSHOT_HABITAT=web|meadow`
+    /// the Web or the Meadow (default the Ocean). Prints the strip's accessibility label.
     static func snapshot(to url: URL) {
-        let light = ProcessInfo.processInfo.environment["ASCII_ANIMALS_SNAPSHOT_LIGHT"] != nil
+        let env = ProcessInfo.processInfo.environment
+        let light = env["ASCII_ANIMALS_SNAPSHOT_LIGHT"] != nil
         NSApp.appearance = NSAppearance(named: light ? .aqua : .darkAqua)
+        var s = OceanKit.Settings.defaults
+        if let h = env["ASCII_ANIMALS_SNAPSHOT_HABITAT"].flatMap(HabitatKind.init(rawValue:)) { s.habitat = h }
+        s.appearance = light ? .light : .dark
         let model = AboutModel()
-        model.habitat = OceanKit.Settings.defaults.habitat
+        model.habitat = s.habitat
         do {
             guard let device = MTLCreateSystemDefaultDevice() else { throw RenderError(description: "no Metal device") }
-            var s = OceanKit.Settings.defaults
-            s.appearance = light ? .light : .dark
             model.still = try StillRenderer.render(settings: s, size: AboutView.bannerWorld, scale: 2 / AboutView.bannerZoom,
                                                    warmup: 6, systemIsDark: !light, accent: SIMD3(0.2, 0.5, 1), seed: 5,
                                                    renderer: try OceanRenderer(device: device))
@@ -41,6 +47,7 @@ enum AboutWindow {
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: url)
+        print("strip label: \(AboutView.stripLabel(model.habitat))")
         print("wrote \(url.path)")
     }
 }
@@ -59,6 +66,7 @@ final class AboutController: NSObject, NSWindowDelegate {
     private let model = AboutModel()
     private var window: NSWindow?
     private var ocean: LiveOceanView?
+    private var appearance: NSKeyValueObservation?
 
     init(app: AppDelegate) {
         self.app = app
@@ -91,20 +99,35 @@ final class AboutController: NSObject, NSWindowDelegate {
             w.contentView = host
             w.center()
             window = w
+            // The Mac turning light or dark: the strip follows (effectiveAppearance settles a pass later).
+            appearance = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+                DispatchQueue.main.async { self?.themeChanged() }
+            }
         }
         model.habitat = s.habitat
         if let ocean {
             // The habitat or line-up may have changed since the window was made.
             ocean.setTheme(OceanDirector.currentTheme(s))
-            ocean.rebuild(s)
-            ocean.start()
+            ocean.rebuild(s, reopening: true)
+            // Reduce Motion and Low Power Mode hold a still, as on the desktop.
+            ocean.run(PowerPolicy.preview(app.signals.inputs))
         }
         model.checking = app.updates.state == .checking
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
     }
 
-    func windowWillClose(_ notification: Notification) { ocean?.stop() }
+    func windowWillClose(_ notification: Notification) { ocean?.run(.paused) }
+
+    func powerChanged(_ i: PowerInputs) {
+        guard window?.isVisible == true else { return }
+        ocean?.run(PowerPolicy.preview(i))
+    }
+
+    private func themeChanged() {
+        guard window?.isVisible == true else { return }
+        ocean?.setTheme(OceanDirector.currentTheme(app.store.settings))
+    }
 }
 
 // MARK: - View
@@ -160,6 +183,7 @@ struct AboutView: View {
                     VStack(spacing: 1) {
                         Text(.init("The Ocean comes from [ascii-sharks](\(AppInfo.sharksURL.absoluteString)),"))
                         Text(.init("the Web from [ascii-spiders](\(AppInfo.spidersURL.absoluteString)), both by [@stackedlol](https://github.com/stackedlol)."))
+                        Text("The Meadow is XERO WORKS' own.")
                     }
                     Text("Set in Geist Mono, under the SIL Open Font License.")
                 }
@@ -213,9 +237,16 @@ struct AboutView: View {
         }
         .frame(width: Self.width, height: Self.bannerHeight)
         .clipped()
-        .accessibilityLabel(model.habitat == .web
-            ? "A live web: move the pointer over it, or click to drop a fly"
-            : "A live ocean: move the pointer over it, or click for a splash")
+        .accessibilityLabel(Self.stripLabel(model.habitat))
+    }
+
+    /// The live strip's accessibility label: what it shows, and what the pointer does there.
+    static func stripLabel(_ habitat: HabitatKind) -> String {
+        switch habitat {
+        case .ocean: return "A live ocean. Move the pointer over it, or click for a splash"
+        case .web: return "A live web. Move the pointer over it, or click to drop a fly"
+        case .meadow: return "A live meadow. Move the pointer over it, or click to bloom a flower"
+        }
     }
 }
 

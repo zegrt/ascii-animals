@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.1
+- **The Meadow, a new habitat.** Butterflies drift over a field of flowers: monarchs, blue morphos, swallowtails and cabbage whites. Move the pointer and the air stirs, so the flowers sway and the butterflies veer. Hold it still and one may land on it. Click bare desktop and a flower blooms.
+- **Choose your butterflies.** Pick a line-up (Mixed, Just a Few, Blue Morphos) or turn species on and off, and set how many. Bigger displays get more, up to 12 in all.
+- **Already here? Meet the Meadow.** A small card under the menu bar icon tells you about it: **Try the Meadow** switches to it, **Keep the Ocean** (or the Web) leaves everything as it was. Until you try it, Meadow wears a **New** tag in the 🐟 menu.
+- **The Meadow is our own.** The Ocean and the Web are ports of @stackedlol's [ascii-sharks](https://github.com/stackedlol/ascii-sharks) and [ascii-spiders](https://github.com/stackedlol/ascii-spiders). The Meadow is original work by XERO WORKS, MIT licensed like the rest.
+
 ## 3.0.1
 - **The welcome starts with the habitat.** It now opens by asking: the Ocean or the Web? The rest of the tour plays in the one you pick, so the Web gets its own tour (ringing silk, dropping a fly) too.
 - **Came from ASCII Sharks? Meet the Web.** The hand-over skipped the welcome, so nothing told you about the Web. Now a single card does, once, with the Web live behind it: **Try the Web** switches to it, **Keep the Ocean** leaves everything as it was.

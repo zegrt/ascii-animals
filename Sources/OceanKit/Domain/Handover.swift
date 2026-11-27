@@ -38,6 +38,8 @@ public enum LaunchWelcome: Equatable {
     case tour
     /// The one "There's a new habitat: the Web." card, for someone who came from ASCII Sharks.
     case webCard
+    /// The small "There's a new habitat: the Meadow." card under the menu bar icon, for someone upgrading to 3.1.
+    case meadowCard
     case nothing
 }
 
@@ -59,9 +61,10 @@ public enum Handover {
     public static let sharksUninstallArguments = ["--uninstall", "--yes"]
 
     /// Whether ASCII Animals acts on ASCII Sharks at all: only the real app, never a bare dev binary
-    /// (no bundle ID, its own defaults) nor a run with ASCII_ANIMALS_NO_HANDOVER set.
+    /// (no bundle ID, its own defaults), the energy-test copy (`AppIdentity`) nor a run with
+    /// ASCII_ANIMALS_NO_HANDOVER set (`LaunchPlan.runsHandover`).
     public static func enabled(bundleID: String?, environment: [String: String]) -> Bool {
-        bundleID == animalsBundleID && environment["ASCII_ANIMALS_NO_HANDOVER"] == nil
+        LaunchPlan(bundleID: bundleID, environment: environment).runsHandover
     }
 
     /// Apps that appeared in the running list while ASCII Animals runs (KVO on `runningApplications`:
@@ -85,8 +88,33 @@ public enum Handover {
     /// so they get the Web card instead: once (this launch or a later one, so 3.0 hand-overs get it
     /// too), and not if they found the Web already.
     public static func launchWelcome(onboarded: Bool, handedOver: Bool, webCardShown: Bool, habitat: HabitatKind) -> LaunchWelcome {
-        if !onboarded { return .tour }
-        return handedOver && !webCardShown && habitat == .ocean ? .webCard : .nothing
+        launchWelcome(onboarded: onboarded, handedOver: handedOver, webCardShown: webCardShown, habitat: habitat,
+                      arrival: .since31, meadowCardShown: true, meadowTried: false)
+    }
+
+    /// Marks the Meadow card as done with for good (the tour sets it too: its habitat choice offers the Meadow).
+    public static let meadowCardKey = "whatsNew.meadow.v1"
+    /// The Meadow card's showings (`WhatsNew.Showings`, JSON): how often it came up, whether it was answered, and the
+    /// awake time since it last went unanswered.
+    public static let meadowShowingsKey = "whatsNew.meadow.v2"
+
+    /// The same, with 3.1's Meadow card: someone who used an earlier version (`Arrival.before31`) gets it once, on
+    /// this launch or a later one, unless they found the Meadow already. The Web card for someone just come from ASCII
+    /// Sharks goes first, as it always has; the Meadow card waits for the next launch, so only one card shows at a time.
+    /// A new user meets the Meadow in the tour and never gets the card. Someone upgrading whose 3.0 tour was never
+    /// marked seen (it was left early, or never reached the screen) has used the app already: the card, not the tour.
+    public static func launchWelcome(onboarded: Bool, handedOver: Bool, webCardShown: Bool, habitat: HabitatKind,
+                                     arrival: Arrival, meadowCardShown: Bool, meadowTried: Bool) -> LaunchWelcome {
+        if !onboarded && arrival != .before31 { return .tour }
+        if handedOver && !webCardShown && habitat == .ocean { return .webCard }
+        let due: Bool = whatsNewDue(.meadow, arrival: arrival, shown: meadowCardShown, tried: meadowTried, habitat: habitat)
+        return due ? .meadowCard : .nothing
+    }
+
+    /// A habitat's what's-new card is due for someone it is new to (an upgrade), not shown yet, who isn't on it and
+    /// hasn't picked it before.
+    public static func whatsNewDue(_ new: HabitatKind, arrival: Arrival, shown: Bool, tried: Bool, habitat: HabitatKind) -> Bool {
+        arrival == .before31 && !shown && !tried && habitat != new
     }
 
     public static func plan(_ f: HandoverFacts) -> [HandoverStep] {

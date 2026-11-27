@@ -57,6 +57,16 @@ public enum PowerPolicy {
         return .live(fps: fps)
     }
 
+    /// The live previews (the what's-new card, the welcome, About): the desktop's own rule (Reduce Motion, Low Power
+    /// Mode, heat, the rate on battery), except that a paused desktop or covered desktop windows don't stop a preview
+    /// someone is looking at.
+    public static func preview(_ i: PowerInputs) -> RunMode {
+        var c = i
+        c.anyWindowVisible = true
+        c.userPaused = false
+        return mode(c)
+    }
+
     /// Replace the lock / session / screensaver flags with what the OS says now,
     /// so a missed "unlocked" or "screensaver stopped" notification can't leave
     /// the wallpaper paused forever.
@@ -66,5 +76,38 @@ public enum PowerPolicy {
         r.sessionActive = session.onConsole
         r.screensaverRunning = session.screensaverEngineRunning
         return r
+    }
+}
+
+/// The welcome's tour (the full-screen first-launch welcome): how the habitat behind it runs, and which of its steps
+/// it shows. Its steps ask for effects only where the habitat can show them.
+public enum Tour {
+    /// The tour's steps in order (the app's `OnboardingBeat`, the same raw values).
+    public enum Step: Int, CaseIterable, Sendable {
+        case habitat, hello, pointer, splash, menu, choose, dive
+
+        /// Asks the person to make the habitat react: "Move your pointer", "Click for a splash".
+        public var asksForEffect: Bool { self == .pointer || self == .splash }
+    }
+
+    /// The habitat behind the tour: the previews' rule, except that Low Power Mode alone keeps it live (at the
+    /// economy rate) while the tour is up: it is short, comes once, and asks for movement. Reduce Motion (the person
+    /// asked for none) and heat still hold a still.
+    public static func mode(_ i: PowerInputs) -> RunMode {
+        var c = i
+        c.lowPowerAnimates = true
+        return PowerPolicy.preview(c)
+    }
+
+    /// The steps shown: a step that asks for an effect only while the habitat behind can show one (not a still).
+    public static func steps(_ i: PowerInputs) -> [Step] {
+        let moves: Bool = mode(i) != .still
+        return Step.allCases.filter { (s: Step) -> Bool in moves || !s.asksForEffect }
+    }
+
+    /// The step after `s` for the machine's state now; nil after the last.
+    public static func next(after s: Step, _ i: PowerInputs) -> Step? {
+        let shown: [Step] = steps(i)
+        return shown.first { (t: Step) -> Bool in t.rawValue > s.rawValue }
     }
 }

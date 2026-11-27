@@ -11,10 +11,10 @@ struct OceanStatus: Equatable {
     var detail: String
     var tone: Tone
 
-    /// "Swimming · 30 fps", "Paused — Low Power Mode".
+    /// "Swimming · 30 fps", "Paused · Low Power Mode".
     var line: String {
         guard !detail.isEmpty else { return title }
-        return tone == .live ? "\(title) · \(detail)" : "\(title) — \(detail)"
+        return "\(title) · \(detail)"
     }
 
     var color: NSColor {
@@ -62,6 +62,7 @@ struct OceanStatus: Equatable {
         switch h {
         case .ocean: return "Swimming"
         case .web: return "Weaving"
+        case .meadow: return "Fluttering"
         }
     }
 

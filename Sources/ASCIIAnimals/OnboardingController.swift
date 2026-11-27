@@ -10,18 +10,58 @@ import SwiftUI
 enum OnboardingController {
     static let seenKey = "onboarded.v1"
     private static var current: OnboardingSession?
+    /// The launch's welcome, waiting for a screen that can be seen.
+    private static var looker: GreetingLooker?
 
-    /// First launch: the tour. After the hand-over from ASCII Sharks (which skips it): the Web card, once.
+    /// First launch: the tour. After the hand-over from ASCII Sharks (which skips it): the Web card, once. Upgrading
+    /// to 3.1: the small Meadow card under the menu bar icon, once (`WhatsNewCard`).
     static func showIfNeeded(app: AppDelegate) {
         let d = UserDefaults.standard
+        let s = app.store.settings
         let welcome = Handover.launchWelcome(onboarded: d.bool(forKey: seenKey), handedOver: SharksHandover.happened,
-                                             webCardShown: d.bool(forKey: Handover.webCardKey), habitat: app.store.settings.habitat)
-        guard welcome != .nothing else { return }
-        // A moment for the desktop habitat to come up first, so the dissolve has something to reveal.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { present(app: app, card: welcome == .webCard) }
+                                             webCardShown: d.bool(forKey: Handover.webCardKey), habitat: s.habitat,
+                                             arrival: app.arrival,
+                                             meadowCardShown: WhatsNewCard.showings(preview: false).finished,
+                                             meadowTried: s.meadowTried)
+        switch welcome {
+        case .nothing:
+            return
+        case .meadowCard:
+            WhatsNewCard.showWhenSeen(app: app)
+        case .tour, .webCard:
+            // A moment for the desktop habitat to come up first, so the dissolve has something to reveal; and, like
+            // the card, only on a screen that can be seen (not locked, asleep or under the screensaver): it looks again
+            // when that changes.
+            let card: Bool = welcome == .webCard
+            let p = WhatsNew.Presenter(moment: { moment(app) }, open: {
+                present(app: app, card: card)
+                return isShowing
+            }, mark: {})
+            looker = GreetingLooker(p, firstLookAfter: 0.8) { looker = nil }
+        }
     }
 
-    static func show(app: AppDelegate) { present(app: app, card: false) }
+    private static func moment(_ app: AppDelegate) -> WhatsNew.Moment {
+        let seen: Bool = WhatsNewCard.target(app).map { WhatsNewCard.seeable(app, NSScreen.screens[$0.screen]) } ?? false
+        return .welcome(seeable: seen, screens: NSScreen.screens.count, canDraw: app.director?.renderer != nil,
+                        welcomeUp: isShowing)
+    }
+
+    /// The machine's state changed: a waiting welcome looks again; one up follows the previews' policy.
+    static func powerChanged(_ i: PowerInputs) {
+        looker?.look()
+        current?.powerChanged(i)
+    }
+
+    /// The welcome from Help. The Meadow card goes first, at once, and stops waiting; if the welcome couldn't open,
+    /// a card that was still waiting waits again (it reads the saved flag at every look).
+    static func show(app: AppDelegate) {
+        looker?.cancel()
+        looker = nil
+        let cardWaiting: Bool = WhatsNewCard.dismiss()
+        present(app: app, card: false)
+        if cardWaiting && !isShowing { WhatsNewCard.showWhenSeen(app: app) }
+    }
 
     private static func present(app: AppDelegate, card: Bool) {
         if let current { current.focus(); return }
@@ -34,7 +74,11 @@ enum OnboardingController {
             let d = UserDefaults.standard
             // The tour opens with the habitat choice, so whoever sees it knows about the Web too.
             d.set(true, forKey: Handover.webCardKey)
-            if !card { d.set(true, forKey: seenKey) }
+            if !card {
+                d.set(true, forKey: seenKey)
+                // And about the Meadow.
+                d.set(true, forKey: Handover.meadowCardKey)
+            }
         }
         session.onFinish = { current = nil }
         session.start()
@@ -49,7 +93,8 @@ enum OnboardingController {
     /// `ASCII_ANIMALS_ONBOARDING_STEP=0…6` picks the step (default 0: 0 habitat, 1 hello, 2 pointer, 3 splash,
     /// 4 menu, 5 make it yours, 6 dive), or `card` the Web card for people from ASCII Sharks;
     /// `ASCII_ANIMALS_SNAPSHOT_LIGHT=1` the light look;
-    /// `ASCII_ANIMALS_SNAPSHOT_HABITAT=web` the Web (default Ocean, as a new user has it; the card always shows the Web).
+    /// `ASCII_ANIMALS_SNAPSHOT_HABITAT=web|meadow` the Web or the Meadow (default Ocean, as a new user has it; the card
+    /// always shows the Web). The Meadow card under the menu bar icon has its own flag (`--snapshot-whatsnew`).
     static func snapshot(to url: URL) {
         let env = ProcessInfo.processInfo.environment
         let step = env["ASCII_ANIMALS_ONBOARDING_STEP"] ?? ""
@@ -119,7 +164,8 @@ enum OnboardingController {
             if let overlay = rep.cgImage { ctx.draw(overlay, in: full) }
             guard let image = ctx.makeImage() else { throw RenderError(description: "no image") }
             try StillRenderer.writePNG(image, to: url)
-            print("wrote \(url.path) (\(card ? "card" : "step \(beat.rawValue)"))")
+            print("wrote \(url.path) (\(card ? "card" : "step \(beat.rawValue)"), \(s.habitat.rawValue)): \(model.title) / \(model.subtitle)"
+                  + (model.doneLine.isEmpty ? "" : " / \(model.doneLine)"))
         } catch {
             FileHandle.standardError.write(Data("onboarding snapshot failed: \(error)\n".utf8))
         }
@@ -133,11 +179,16 @@ enum OnboardingBeat: Int, CaseIterable {
 
     func title(iconHidden: Bool, habitat: HabitatKind) -> String {
         let web = habitat == .web
+        let meadow = habitat == .meadow
         switch self {
         case .habitat: return "Meet ASCII Animals."
-        case .hello: return web ? "Your desktop is now covered in webs." : "Your desktop is now an ocean."
+        case .hello:
+            if meadow { return "Your desktop is now a meadow." }
+            return web ? "Your desktop is now covered in webs." : "Your desktop is now an ocean."
         case .pointer: return "Move your pointer."
-        case .splash: return web ? "Click to drop a fly." : "Click for a splash."
+        case .splash:
+            if meadow { return "Click to bloom a flower." }
+            return web ? "Click to drop a fly." : "Click for a splash."
         case .menu: return iconHidden ? "Settings are one launch away." : "Settings live up here."
         case .choose: return "Make it yours."
         case .dive: return "Dive in."
@@ -146,30 +197,50 @@ enum OnboardingBeat: Int, CaseIterable {
 
     func subtitle(iconHidden: Bool, habitat: HabitatKind) -> String {
         let web = habitat == .web
+        let meadow = habitat == .meadow
         switch self {
         case .habitat: return "Pick a habitat. You can change it any time."
         case .hello:
+            if meadow { return "Butterflies drift between the flowers, and all of it is drawn in text." }
             return web ? "Orb weavers spin, flies wander, and all of it is drawn in text."
                        : "Sharks hunt, fish school, and all of it is drawn in text."
-        case .pointer: return web ? "The silk rings, and the spiders turn toward it." : "The fish scatter out of its way."
-        case .splash: return web ? "Anywhere near a web." : "Anywhere in the water."
+        case .pointer:
+            if meadow { return "The air stirs. The flowers sway and the butterflies veer." }
+            return web ? "The silk rings, and the spiders turn toward it." : "The fish scatter out of its way."
+        case .splash:
+            if meadow { return "Anywhere on the meadow." }
+            return web ? "Anywhere near a web." : "Anywhere in the water."
         case .menu:
             return iconHidden
                 ? "The menu bar icon is hidden. Open ASCII Animals again any time to get Settings."
                 : "Click the fish in the menu bar for habitats, looks and pause."
         case .choose: return "Pick a look and a line-up. Both can change in Settings."
-        case .dive: return web ? "It lives behind your windows from now on." : "It swims behind your windows from now on."
+        case .dive:
+            if meadow { return "It flutters behind your windows from now on." }
+            return web ? "It lives behind your windows from now on." : "It swims behind your windows from now on."
         }
     }
 
     /// The steps with chips: their clicks pick, they don't move on.
     var hasChoices: Bool { self == .habitat || self == .choose }
 
+    /// The step after this one for the machine's state now (`Tour.steps`: no step asks for an effect the habitat
+    /// can't show); nil after the last.
+    func next(_ i: PowerInputs) -> OnboardingBeat? {
+        guard let step = Tour.Step(rawValue: rawValue), let n = Tour.next(after: step, i) else { return nil }
+        return OnboardingBeat(rawValue: n.rawValue)
+    }
+
     /// Shown once the step's little task is done.
     func doneLine(habitat: HabitatKind) -> String {
         switch self {
         case .pointer: return "They noticed."
-        case .splash: return habitat == .web ? "Dinner." : "Splash."
+        case .splash:
+            switch habitat {
+            case .ocean: return "Splash."
+            case .web: return "Dinner."
+            case .meadow: return "Bloom."
+            }
         case .menu: return "That's the one."
         default: return ""
         }
@@ -287,10 +358,15 @@ final class OnboardingSession: NSObject {
     private var travelled: CGFloat = 0
     private var lastPointer: NSPoint?
     private var finishing = false
+    /// It counted as seen (`markSeen`): its 3 s mark in front, or an answer.
+    private var acknowledged = false
     private var tornDown = false
     private var typingPause = 0
     private let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     private let card: Bool
+    /// The screen it is on: seeable at its 3 s mark, or it isn't acknowledged.
+    private let screen: NSScreen
+    private var appearance: NSKeyValueObservation?
     var onFinish: (() -> Void)?
     /// Once, when the user has had the welcome in front of them: in front and key after 3 s, or
     /// they ended it themselves sooner. Not when it was closed because it never got the focus.
@@ -306,10 +382,14 @@ final class OnboardingSession: NSObject {
         model = OnboardingModel(settings: s, light: theme.light)
         model.card = card
 
-        // The display with the menu-bar icon (it follows the active display), else the main one.
-        let iconFrame = app.menu?.iconScreenFrame
-        let screen = NSScreen.screens.first { s in iconFrame.map { s.frame.intersects($0) } ?? false }
-            ?? NSScreen.screens[0]
+        // The screen in focus (the active menu bar's display), and the icon only where it really shows on it: on that
+        // menu bar and not behind a notch (`MenuBarIcon.place`); else the hidden-icon words.
+        let (bars, focused) = WhatsNewCard.menuBarScreens()
+        let icon: CGRect? = app.store.settings.showMenuBarIcon ? app.menu?.iconScreenFrame : nil
+        let placed = MenuBarIcon.place(icon: icon, screens: bars, focused: focused)
+        let screen: NSScreen = NSScreen.screens[placed?.screen ?? 0]
+        self.screen = screen
+        let iconFrame: CGRect? = placed?.icon
         let frame = screen.frame
 
         window = OnboardingWindow(contentRect: frame, styleMask: .borderless, backing: .buffered, defer: false)
@@ -354,7 +434,7 @@ final class OnboardingSession: NSObject {
         }
         super.init()
 
-        if let f = iconFrame, app.store.settings.showMenuBarIcon, frame.intersects(f) {
+        if let f = iconFrame {
             model.iconRect = CGRect(x: f.minX - frame.minX, y: frame.maxY - f.maxY, width: f.width, height: f.height)
         }
         model.iconHidden = model.iconRect == nil
@@ -370,6 +450,9 @@ final class OnboardingSession: NSObject {
     // MARK: Lifecycle
 
     func start() {
+        // Its live habitat as the previews' policy says (Reduce Motion and Low Power Mode hold a still; the tour's own
+        // rule: `Tour.mode`).
+        ocean.run(habitatMode(app.signals.inputs))
         for d in dims { d.orderFrontRegardless() }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -380,27 +463,93 @@ final class OnboardingSession: NSObject {
             window.animator().alphaValue = 1
             for d in dims { d.animator().alphaValue = 0.55 }
         }
+        // The Mac turning light or dark: the welcome follows (effectiveAppearance settles a pass later).
+        appearance = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.themeChanged() }
+        }
         let nc = NotificationCenter.default
-        // Never trap: leaving the app, opening another of its windows or changing displays ends the welcome.
+        // Never trap: leaving the app, opening another of its windows or changing displays ends the welcome. Cut short
+        // before it was seen (`markSeen`), it is still owed and comes back next launch.
         observers.append(nc.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.finish(fast: false)
+            self?.interrupted(.leftApp)
         })
         observers.append(nc.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self] n in
             // Settings or About opened from the menu would sit behind the welcome; make way.
             guard let self, let w = n.object as? NSWindow, w !== self.window, w.styleMask.contains(.titled) else { return }
-            self.finish(fast: true)
+            self.interrupted(.otherWindow)
         })
         observers.append(nc.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.finish(fast: true)
+            self?.interrupted(.screens)
         })
         // If macOS didn't let the app come forward, keys can't reach the welcome: don't sit on top of everything.
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            guard let self, !self.finishing else { return }
-            if NSApp.isActive, self.window.isKeyWindow { self.markSeen() } else { self.finish(fast: false, seen: false) }
+            guard let self else { return }
+            self.deadlineReached(active: NSApp.isActive, key: self.window.isKeyWindow,
+                                 seeable: WhatsNewCard.seeable(self.app, self.screen))
         }
         blinker = Timer.scheduledTimer(withTimeInterval: 0.53, repeats: true) { [weak self] _ in self?.model.cursorOn.toggle() }
         after(reduceMotion ? 0.2 : 0.9) { [weak self] in self?.enter(.habitat) }
     }
+
+    /// What took the welcome away without an answer.
+    enum Interruption {
+        /// Another app became active.
+        case leftApp
+        /// Settings or About became key.
+        case otherWindow
+        /// The displays changed.
+        case screens
+        /// Nobody can see the screen (asleep, locked, the screensaver) before it counted as seen.
+        case hidden
+    }
+
+    /// Its 3 s mark: in front, key and on a screen that can be seen, it counts as seen; otherwise it goes, still owed.
+    func deadlineReached(active: Bool, key: Bool, seeable: Bool) {
+        guard !finishing else { return }
+        if active, key, seeable { markSeen() } else { finish(fast: false, seen: false) }
+    }
+
+    func interrupted(_ by: Interruption) {
+        switch by {
+        case .leftApp: finish(fast: false, seen: false)
+        case .otherWindow, .screens, .hidden: finish(fast: true, seen: false)
+        }
+    }
+
+    /// The overlay lets clicks through to what is under it.
+    var ignoresClicks: Bool { window.ignoresMouseEvents }
+
+    /// The Mac's light or dark look changed: the habitat behind and the words follow (`pickLook` too).
+    func themeChanged() {
+        guard !finishing else { return }
+        let theme = OceanDirector.currentTheme(model.settings)
+        ocean.setTheme(theme)
+        window.backgroundColor = theme.light ? NSColor(white: 0.96, alpha: 1) : .black
+        if model.light != theme.light {
+            withAnimation(.easeInOut(duration: 0.35)) { model.light = theme.light }
+        }
+    }
+
+    /// The machine's state changed: the habitat behind follows the previews' policy.
+    func powerChanged(_ i: PowerInputs) {
+        guard !finishing else { return }
+        // Before its 3 s mark, a screen nobody can see cuts it short, still owed (as a display change does).
+        if !acknowledged, PowerPolicy.preview(i) == .paused {
+            interrupted(.hidden)
+            return
+        }
+        ocean.run(habitatMode(i))
+    }
+
+    /// The habitat behind: the Web card as the previews' policy says; the tour by its own rule (`Tour.mode`).
+    private func habitatMode(_ i: PowerInputs) -> RunMode {
+        card ? PowerPolicy.preview(i) : Tour.mode(i)
+    }
+
+    /// The habitat behind's live rate (0 when it holds a still or draws nothing).
+    var habitatFPS: Int { ocean.fps }
+
+    var isLight: Bool { model.light }
 
     func focus() {
         NSApp.activate(ignoringOtherApps: true)
@@ -456,7 +605,7 @@ final class OnboardingSession: NSObject {
             return
         }
         if card { finish(fast: false); return }
-        guard let next = OnboardingBeat(rawValue: model.beat.rawValue + 1) else {
+        guard let next = model.beat.next(app.signals.inputs) else {
             finish(fast: false)
             return
         }
@@ -484,10 +633,7 @@ final class OnboardingSession: NSObject {
     private func pickLook(_ look: OnboardingLook) {
         app.store.update { look.apply(&$0) }
         model.settings = app.store.settings
-        let theme = OceanDirector.currentTheme(model.settings)
-        ocean.setTheme(theme)
-        window.backgroundColor = theme.light ? NSColor(white: 0.96, alpha: 1) : .black
-        withAnimation(.easeInOut(duration: 0.35)) { model.light = theme.light }
+        themeChanged()
     }
 
     /// The desktop behind dissolves to it too; the welcome's own scene follows here.
@@ -513,6 +659,13 @@ final class OnboardingSession: NSObject {
         case .web:
             guard Presets.spiderPresets.indices.contains(i) else { return }
             app.store.update { $0.webSpiders = Presets.spiderPresets[i].spiders }
+        case .meadow:
+            guard Presets.meadowPresets.indices.contains(i) else { return }
+            app.store.update { Presets.meadowPresets[i].apply(to: &$0) }
+            model.settings = app.store.settings
+            // The Meadow takes a new line-up in place, as on the desktop: spares fly off, newcomers fly in.
+            ocean.sim.update(settings: model.settings)
+            return
         }
         model.settings = app.store.settings
         ocean.rebuild(model.settings)
@@ -562,14 +715,20 @@ final class OnboardingSession: NSObject {
 
     /// The dissolve: the words go first, then the ocean melts into the desktop's own.
     private func markSeen() {
+        acknowledged = true
         onSeen?()
         onSeen = nil
     }
 
-    /// `seen: false` only when the welcome never reached the user, so it comes back next launch.
+    /// `seen: false` when the welcome never reached the user (cut short before the 3 s mark, or never given the
+    /// focus), so it comes back next launch. An answer (Esc, ⌘W, the last step, "Try the Web") is `seen`.
     func finish(fast: Bool, seen: Bool = true) {
         guard !finishing else { return }
         finishing = true
+        // Fading out, it lets clicks through to what is under it.
+        window.ignoresMouseEvents = true
+        appearance?.invalidate()
+        appearance = nil
         if seen { markSeen() }
         typer?.invalidate()
         blinker?.invalidate()
@@ -611,7 +770,7 @@ final class OnboardingSession: NSObject {
 
 // MARK: - View
 
-private enum Ink {
+enum Ink {
     static func text(_ light: Bool) -> Color { light ? Color(white: 0.07) : Color(white: 0.96) }
     static func plate(_ light: Bool) -> Color { light ? Color(white: 0.965) : Color(white: 0.01) }
     static func accent(_ light: Bool) -> Color {
@@ -727,7 +886,7 @@ private struct StepContent: View {
 
 /// The whole line is laid out from the start (the untyped rest is clear), so
 /// typing never reflows it.
-private struct Typed: View {
+struct Typed: View {
     let full: String
     let count: Int
     let cursor: Bool
@@ -788,10 +947,15 @@ private struct Choices: View {
                         Chip(title: p.title, selected: preset?.title == p.title, light: model.light, unit: unit, model: model) { model.onPreset(i) }
                     }
                 }
+            case .meadow:
+                let lineUp: MeadowLineUp? = MeadowLineUp.matching(model.settings)
+                row("BUTTERFLIES") {
+                    ForEach(Array(Presets.meadowPresets.enumerated()), id: \.offset) { i, p in
+                        Chip(title: p.title, selected: lineUp == p, light: model.light, unit: unit, model: model) { model.onPreset(i) }
+                    }
+                }
             }
-            Text(habitat == .web
-                 ? Presets.summary(model.settings.webSpiders, separator: " · ")
-                 : model.settings.sharks.map(Presets.title).joined(separator: " · "))
+            Text(summary)
                 .font(UIFonts.swiftUI(13 * unit))
                 .foregroundStyle(ink.opacity(0.5))
                 .padding(.top, 2 * unit)
@@ -800,6 +964,16 @@ private struct Choices: View {
         }
         .opacity(model.isTyping ? 0 : 1)
         .animation(.easeOut(duration: 0.5), value: model.isTyping)
+    }
+
+    /// The line-up under the rows: "Classic · Great Hammerhead", "2 Garden Spiders · …", "2 Monarchs · …".
+    private var summary: String {
+        let s = model.settings
+        switch s.habitat {
+        case .ocean: return s.sharks.map(Presets.title).joined(separator: " · ")
+        case .web: return Presets.summary(s.webSpiders, separator: " · ")
+        case .meadow: return Presets.summary(butterflies: s.meadowButterflies, count: s.meadowCount, separator: " · ")
+        }
     }
 
     private func row<C: View>(_ label: String, @ViewBuilder _ content: () -> C) -> some View {
@@ -822,7 +996,7 @@ private struct HabitatChoices: View {
         let habitat = model.settings.habitat
         VStack(spacing: 22 * unit) {
             HStack(spacing: 12 * unit) {
-                ForEach(HabitatKind.allCases, id: \.self) { h in
+                ForEach(HabitatKind.offered, id: \.self) { h in
                     Chip(title: h.title, selected: h == habitat, light: model.light, unit: unit, prominent: true, model: model) {
                         model.onHabitat(h)
                     }
@@ -889,7 +1063,7 @@ private struct Chip: View {
     }
 }
 
-private struct PressStyle: ButtonStyle {
+struct PressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
@@ -923,7 +1097,7 @@ private struct HintBar: View {
     }
 }
 
-private struct Keycap: View {
+struct Keycap: View {
     let text: String
     let light: Bool
     let unit: CGFloat
