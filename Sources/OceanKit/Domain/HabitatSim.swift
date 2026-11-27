@@ -23,6 +23,7 @@ public enum Habitats {
         switch s.habitat {
         case .ocean: return OceanSim(settings: s, seed: seed)
         case .web: return WebSim(settings: s, seed: seed)
+        case .meadow: return MeadowSim(settings: s, seed: seed)
         }
     }
 
@@ -31,6 +32,7 @@ public enum Habitats {
         switch new.habitat {
         case .ocean: return old.sharks != new.sharks
         case .web: return old.webSpiders != new.webSpiders || old.webFlies != new.webFlies || old.webJumper != new.webJumper
+        case .meadow: return false
         }
     }
 }

@@ -513,6 +513,8 @@ final class OnboardingSession: NSObject {
         case .web:
             guard Presets.spiderPresets.indices.contains(i) else { return }
             app.store.update { $0.webSpiders = Presets.spiderPresets[i].spiders }
+        case .meadow:
+            return   // Not offered yet (HabitatKind.offered).
         }
         model.settings = app.store.settings
         ocean.rebuild(model.settings)
@@ -788,6 +790,8 @@ private struct Choices: View {
                         Chip(title: p.title, selected: preset?.title == p.title, light: model.light, unit: unit, model: model) { model.onPreset(i) }
                     }
                 }
+            case .meadow:
+                EmptyView()   // Not offered yet (HabitatKind.offered).
             }
             Text(habitat == .web
                  ? Presets.summary(model.settings.webSpiders, separator: " · ")
@@ -822,7 +826,7 @@ private struct HabitatChoices: View {
         let habitat = model.settings.habitat
         VStack(spacing: 22 * unit) {
             HStack(spacing: 12 * unit) {
-                ForEach(HabitatKind.allCases, id: \.self) { h in
+                ForEach(HabitatKind.offered, id: \.self) { h in
                     Chip(title: h.title, selected: h == habitat, light: model.light, unit: unit, prominent: true, model: model) {
                         model.onHabitat(h)
                     }
