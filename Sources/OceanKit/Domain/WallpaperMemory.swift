@@ -345,7 +345,8 @@ public final class WallpaperKeeper {
 // MARK: restore data on disk (briefs/r2.md, "Fix round")
 
 /// What puts the person's wallpaper back under the stills: our memory, and ASCII Sharks' saved originals (its own
-/// memory, or the hand-over's copy once Sharks is gone).
+/// memory, or the hand-over's copy once Sharks is gone). It lives in the settings; uninstall leaves it in the Stills
+/// folder (`restore.json`) beside the stills it describes, so a reinstall can still put back what a Space shows.
 public struct RestoreData: Codable, Equatable, Sendable {
     public var memory: WallpaperMemory
     public var sharks: WallpaperMemory?
@@ -354,11 +355,28 @@ public struct RestoreData: Codable, Equatable, Sendable {
         self.sharks = sharks
     }
 
-    /// What the app starts from: the settings' memory, and Sharks' own memory or the hand-over's copy.
-    /// (Proof seam: 9e3a466's behaviour; the Stills folder is not read.)
+    /// The file in the Stills folder.
+    public static let fileName = "restore.json"
+
+    /// The restore data uninstall left in the Stills folder; nil when there is none or it can't be read.
+    public static func read(in stillsFolder: URL) -> RestoreData? {
+        guard let data = try? Data(contentsOf: stillsFolder.appendingPathComponent(fileName)) else { return nil }
+        return try? JSONDecoder().decode(RestoreData.self, from: data)
+    }
+
+    /// Writes it into the Stills folder (made if missing), whole or not at all.
+    public func write(in stillsFolder: URL) throws {
+        try FileManager.default.createDirectory(at: stillsFolder, withIntermediateDirectories: true)
+        try JSONEncoder().encode(self).write(to: stillsFolder.appendingPathComponent(RestoreData.fileName), options: .atomic)
+    }
+
+    /// What the app starts from: the settings' memory, else what uninstall left in the Stills folder; Sharks' own
+    /// memory, else the hand-over's copy, else the folder's.
     public static func resolve(settings: Data?, sharksOwn: Data?, sharksCopy: Data?, stillsFolder: URL) -> RestoreData {
-        let memory: WallpaperMemory = settings.flatMap { try? JSONDecoder().decode(WallpaperMemory.self, from: $0) } ?? WallpaperMemory()
-        let sharks: WallpaperMemory? = (sharksOwn ?? sharksCopy).flatMap { try? JSONDecoder().decode(WallpaperMemory.self, from: $0) }
+        func decode(_ data: Data?) -> WallpaperMemory? { data.flatMap { try? JSONDecoder().decode(WallpaperMemory.self, from: $0) } }
+        let file: RestoreData? = (decode(settings) == nil || decode(sharksOwn ?? sharksCopy) == nil) ? read(in: stillsFolder) : nil
+        let memory: WallpaperMemory = decode(settings) ?? file?.memory ?? WallpaperMemory()
+        let sharks: WallpaperMemory? = decode(sharksOwn) ?? decode(sharksCopy) ?? file?.sharks
         return RestoreData(memory: memory, sharks: sharks)
     }
 
@@ -377,23 +395,60 @@ public struct RestoreData: Codable, Equatable, Sendable {
         }
     }
 
-    /// Uninstall: whether the Stills folder stays, and the restore data with it.
-    /// (Proof seam: 9e3a466's behaviour; the folder stays when it holds a file or can't be read, nothing is written.)
+    /// Uninstall: the Stills folder stays while a Space may show a still it can put back (one in our folder, or one
+    /// can't tell because the folder can't be read; or an ASCII Sharks still with Sharks' originals known), and the
+    /// restore data goes into it, also when the restore failed. If it can't be written there, the settings keep it.
     public func keepOnUninstall(stillsFolder: URL, sharksStills: URL) -> Kept {
         let fm: FileManager = .default
-        let files: [String]? = try? fm.contentsOfDirectory(atPath: stillsFolder.path)
-        let keep: Bool = files.map { !$0.isEmpty } ?? fm.fileExists(atPath: stillsFolder.path)
-        return Kept(folder: keep, written: false, keepsSettings: false)
+        let ours: [String]? = try? fm.contentsOfDirectory(atPath: stillsFolder.path)
+        let oursShown: Bool = ours.map { $0.contains { $0 != RestoreData.fileName } } ?? fm.fileExists(atPath: stillsFolder.path)
+        let theirs: [String]? = try? fm.contentsOfDirectory(atPath: sharksStills.path)
+        let theirsShown: Bool = sharks != nil && (theirs.map { !$0.isEmpty } ?? fm.fileExists(atPath: sharksStills.path))
+        guard oursShown || theirsShown else { return Kept(folder: false, written: false, keepsSettings: false) }
+        let written: Bool = (try? write(in: stillsFolder)) != nil
+        return Kept(folder: true, written: written, keepsSettings: !written)
     }
 }
 
-/// Removing ASCII Sharks once the person accepts the hand-over's offer.
+/// Removing ASCII Sharks once the person accepts the hand-over's offer. Sharks' own uninstaller deletes its whole
+/// support folder, stills included, while a Space not in view may still show one: they are copied aside first and
+/// any that went are put back at their old paths, where the wallpaper keeper restores them to Sharks' saved original
+/// on a visit.
 public enum SharksRemoval {
-    /// Keeps a copy of Sharks' wallpaper memory (`keepCopy`), then runs Sharks' own uninstaller (`uninstall`, true
-    /// when it finished). (Proof seam: 9e3a466's behaviour; its stills go with its support folder.)
+    /// Keeps a copy of Sharks' wallpaper memory (`keepCopy`), sets its stills aside in `aside`, runs Sharks' own
+    /// uninstaller (`uninstall`, true when it finished) and puts back every still it removed. Returns `uninstall`'s
+    /// answer.
     public static func run(sharksMemory: Data?, sharksStills: URL, aside: URL, keepCopy: (Data) -> Void,
                            log: (String) -> Void = { _ in }, uninstall: () -> Bool) -> Bool {
         if let sharksMemory { keepCopy(sharksMemory) }
-        return uninstall()
+        let fm: FileManager = .default
+        let names: [String] = (try? fm.contentsOfDirectory(atPath: sharksStills.path)) ?? []
+        var setAside: [String] = []
+        if !names.isEmpty {
+            try? fm.removeItem(at: aside)
+            do {
+                try fm.createDirectory(at: aside, withIntermediateDirectories: true)
+                for name in names {
+                    do {
+                        try fm.copyItem(at: sharksStills.appendingPathComponent(name), to: aside.appendingPathComponent(name))
+                        setAside.append(name)
+                    } catch { log("could not set aside an ASCII Sharks still: \(error.localizedDescription)") }
+                }
+            } catch { log("could not set ASCII Sharks' stills aside: \(error.localizedDescription)") }
+        }
+        let finished: Bool = uninstall()
+        guard !setAside.isEmpty else { return finished }
+        var notBack: Int = 0
+        for name in setAside where !fm.fileExists(atPath: sharksStills.appendingPathComponent(name).path) {
+            do {
+                try fm.createDirectory(at: sharksStills, withIntermediateDirectories: true)
+                try fm.moveItem(at: aside.appendingPathComponent(name), to: sharksStills.appendingPathComponent(name))
+            } catch {
+                notBack += 1
+                log("could not put an ASCII Sharks still back: \(error.localizedDescription)")
+            }
+        }
+        if notBack == 0 { try? fm.removeItem(at: aside) }   // else the copies stay in the Stills folder, which uninstall keeps
+        return finished
     }
 }
